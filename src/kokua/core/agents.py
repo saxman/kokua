@@ -15,8 +15,8 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
+from kokua.core.messaging import EVERYONE, USER, WORKER_SOURCE
 from kokua.core.metrics import record_event
-from kokua.core.steering import STEERING_SOURCE
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
@@ -143,6 +143,16 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     return register(sources)
 
 
+#: Agent names the message bus has already spent. An agent's declared name becomes the address a
+#: mid-turn message is sent to (``core/messaging.py``'s ``_register``), so these two collide rather
+#: than merely confuse: an entry agent named ``user`` mints the user's own address, and ``close``
+#: would re-run that agent's messages as the user's own words; one named ``everyone`` can never be
+#: addressed alone, since ``matches`` answers the broadcast before it looks at an address. Refused at
+#: startup rather than at reader-open time, because the collision is in the config and is silent
+#: everywhere else.
+RESERVED_AGENT_NAMES = frozenset({USER, EVERYONE})
+
+
 def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) -> None:
     """Reject a config whose agents cannot be built, before anything is built.
 
@@ -164,6 +174,12 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
             f"table. Configured agents: {known}."
         )
     for name, agent in config.agents.items():
+        if name in RESERVED_AGENT_NAMES:
+            raise ConfigError(
+                f"[agents.{name}] uses a name reserved by the message bus. An agent's declared name is "
+                f"the address a message is sent to, and {name!r} already means something there: "
+                f"{USER!r} is the user's own address and {EVERYONE!r} reaches every run. Rename the agent."
+            )
         try:
             select(agent.tools, registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:
@@ -542,10 +558,14 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # the one process-wide source that reads whichever turn is running when AIMU opens a reader
         # over it. A worker with no turn around it gets a drain that returns nothing, so there is no
         # tier for a missing key to fall back to and nothing a declaration could say differently.
-        # `STEERING_SOURCE`, never `ENTRY_STEERING_SOURCE`: a worker opens an independent cursor, so a
+        # `WORKER_SOURCE`, never `ENTRY_SOURCE`: a worker opens an independent cursor, so a
         # message only a worker consumed still comes back from `close` and runs as a follow-up turn
-        # rather than counting as the conversation having seen it.
-        specs[name]["steering"] = STEERING_SOURCE
+        # rather than counting as the conversation having seen it. Receiving and sending are coupled
+        # through this one key: AIMU accepts a spec's own `"inbox": None` to turn a specialist's
+        # reading off, and nothing here does that today, but it would also silently take away that
+        # worker's ability to call `send_message` (`toolsets/messaging.py` refuses a run with no
+        # `current_address`, which only an opened reader ever sets).
+        specs[name]["inbox"] = WORKER_SOURCE
     return specs
 
 

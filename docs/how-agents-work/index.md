@@ -24,10 +24,15 @@ the choices it did about them.
 - [Context and memory](context-and-memory.md): the model remembers nothing, so everything it appears to
   remember was sent again.
 - [Delegation](delegation.md): spending context on a subtask without spending the caller's.
+- [Agent messaging](agent-messaging.md): one agent addressing another mid-turn, and why the execution
+  model decides which directions can carry anything.
 
 The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
-thirteen planned pages exist today. Six of them, all listed above. The remaining seven, in the order a
-newcomer would want them, under the titles they will land with:
+fourteen planned pages exist today. Seven of them, all listed above. *Agent messaging* is the one the
+original plan did not name, added alongside the mechanism itself: what it teaches is that the execution
+model, not the message bus, decides which agents can reach which, and that is a fact about multi-agent
+systems rather than about Kokua. The remaining seven, in the order a newcomer would want
+them, under the titles they will land with:
 
 1. Agents and workflows
 2. Humans in the loop
@@ -42,7 +47,7 @@ prose, and a page that arrives under a different name leaves those mentions poin
 
 ## Writing a page for this catalogue
 
-Three conventions hold thirteen pages together, and two of them are checked by `tests/test_docs.py`
+Three conventions hold fourteen pages together, and two of them are checked by `tests/test_docs.py`
 rather than left to each author's memory.
 
 - **A page that exists is a link; a page that does not is italics.** Write

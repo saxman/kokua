@@ -92,14 +92,18 @@ def test_a_bare_channel_streams_reasoning_and_tool_calls():
     assert channel.stream_tools is True
 
 
-async def test_a_steering_chunk_prints_its_own_marker(capsys):
-    """Kokua's `CLIChannel` defines no `send` of its own, so a steering message reaches the terminal
-    only because AIMU's base channel already prints one. This pins that inherited behaviour: Kokua
-    overriding `send` later (for `/attach`-style markers, say) without carrying this arm forward would
-    make a redirect typed mid-turn vanish on the one channel with no bubble to confirm it landed."""
+async def test_a_mid_turn_chunk_prints_its_own_marker(capsys):
+    """Kokua's `CLIChannel` defines no `send` of its own, so a message typed mid-turn reaches the
+    terminal only because AIMU's base channel already prints one. This pins that inherited behaviour:
+    Kokua overriding `send` later (for `/attach`-style markers, say) without carrying this arm forward
+    would make a redirect typed mid-turn vanish on the one channel with no bubble to confirm it landed.
+
+    The marker text is AIMU's own choice, not Kokua's: AIMU renamed the chunk from `STEERING` to
+    `INBOX` and relabelled the line it prints from `[steering]` to `[message]` in the same release.
+    """
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     await CLIChannel().send(gen())
-    assert "[steering] use the cache" in capsys.readouterr().out
+    assert "[message] use the cache" in capsys.readouterr().out

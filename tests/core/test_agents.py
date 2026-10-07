@@ -129,6 +129,23 @@ def test_no_agents_at_all_is_rejected():
     assert "kokua config init --force" in message
 
 
+def test_an_agent_named_for_a_bus_address_is_rejected():
+    """An agent's declared name is the address a mid-turn message is sent to, and these two are
+    already spoken for. ``user`` is the sharper one: an entry agent declared under it mints the user's
+    own address, and ``MessageBus.close`` would then re-run that agent's messages as the user's words,
+    which is impersonation by configuration. ``everyone`` can never be addressed alone, because
+    ``matches`` answers the broadcast before it looks at an address. Both fail at startup rather than
+    silently at reader-open, since the collision is in the config and invisible everywhere else.
+    """
+    for reserved in ("user", "everyone"):
+        agents = _valid()
+        agents[reserved] = AgentConfig(tools=["time"])
+        config = _config(agents)
+        with pytest.raises(ConfigError, match="reserved") as excinfo:
+            validate_agents(config, build_registry(config))
+        assert reserved in str(excinfo.value)
+
+
 def test_a_missing_entry_agent_is_rejected():
     config = _config(_valid(), entry="supervisor")
     with pytest.raises(ConfigError) as excinfo:

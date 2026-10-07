@@ -11,8 +11,10 @@ from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
-from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, SteeringMessage, current_steering
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, is_user_turn
+from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
 from kokua.core.turn_registry import TurnInfo
+from kokua.core.turns import UNDELIVERED_TEXT_CHARS
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
@@ -32,7 +34,7 @@ from tests.helpers import MockAsyncModelClient
 async def assistant(tmp_path):
     """A ready assistant with one conversation, its agent built but no turn run yet.
 
-    Built with a plain ``FakeChannel``/``MockAsyncModelClient`` pair because the mailbox tests below
+    Built with a plain ``FakeChannel``/``MockAsyncModelClient`` pair because the bus tests below
     replace ``agent.run`` directly and never reach the client; what they need from this fixture is an
     ``Assistant`` whose ``_turns.reactive`` can be called the way the serve loop calls it.
     """
@@ -91,8 +93,8 @@ def test_every_stated_invariant_count_matches_the_module_docstring():
     assert not stale, f"core/turns.py has {len(rules)} invariants: " + "; ".join(stale)
 
 
-class _SteeringEchoChannel(FakeChannel):
-    """Delivers one message carrying a front end's bubble token, and records the steering frame.
+class _MidTurnEchoChannel(FakeChannel):
+    """Delivers one message carrying a front end's bubble token, and records the message frame.
 
     `FakeChannel` yields bare text, and the token rides the message's metadata, which is the whole
     thing under test here.
@@ -101,13 +103,13 @@ class _SteeringEchoChannel(FakeChannel):
     def __init__(self, text: str, token: str):
         super().__init__()
         self._message = ChannelMessage(text=text, channel="fake", metadata={"token": token})
-        self.steering: list[tuple[str, str | None]] = []
+        self.taken: list[tuple[str, str | None]] = []
 
     async def receive(self):
         yield self._message
 
-    async def send_steering(self, text: str, *, token: str | None = None) -> None:
-        self.steering.append((text, token))
+    async def send_message_frame(self, text: str, *, token: str | None = None) -> None:
+        self.taken.append((text, token))
 
 
 @pytest.fixture
@@ -119,12 +121,12 @@ async def track_running_turn():
     """
     handles: list[RunHandle] = []
 
-    def track(assistant, mailbox, conversation_id=None):
+    def track(assistant, bus, conversation_id=None):
         handle = RunHandle.start(asyncio.Event().wait())
         handles.append(handle)
         assistant._tracker.add(
             conversation_id or assistant._active_id,
-            TurnInfo(handle=handle, started=0.0, preview="", steering=mailbox),
+            TurnInfo(handle=handle, started=0.0, preview="", bus=bus),
         )
         return handle
 
@@ -1996,32 +1998,32 @@ async def test_proactive_report_links_the_conversation_it_ran_in(tmp_path):
     assert group == "report"
 
 
-async def test_a_reactive_turn_publishes_a_mailbox_and_closes_it(assistant):
+async def test_a_reactive_turn_publishes_a_bus_and_closes_it(assistant):
     seen = []
 
     async def capture(*args, **kwargs):
-        seen.append(current_steering.get())
+        seen.append(current_bus.get())
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = capture
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert seen and seen[0] is not None
-    assert current_steering.get() is None
+    assert current_bus.get() is None
 
 
-async def test_a_failed_turn_still_closes_its_mailbox(assistant):
-    mailboxes = []
+async def test_a_failed_turn_still_closes_its_bus(assistant):
+    buses = []
 
     async def explode(*args, **kwargs):
-        mailboxes.append(current_steering.get())
+        buses.append(current_bus.get())
         raise RuntimeError("the model server fell over")
 
     assistant._book.agent_for(assistant._active_id).run = explode
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
-    assert current_steering.get() is None
-    assert mailboxes[0].offer("too late") is False
+    assert current_bus.get() is None
+    assert buses[0].send("too late", sender=USER, to=EVERYONE) is False
 
 
 async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(assistant):
@@ -2030,22 +2032,24 @@ async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(ass
     async def capture_resubmit(conversation_id, texts, *, like=None):
         submitted.append((conversation_id, texts, like))
 
-    assistant._turns._resubmit_steering = capture_resubmit
+    assistant._turns._resubmit_messages = capture_resubmit
 
-    async def ignore_steering(*args, **kwargs):
-        current_steering.get().offer("just missed it")
+    async def ignore_message(*args, **kwargs):
+        current_bus.get().send("just missed it", sender=USER, to=EVERYONE)
         return "done"
 
-    assistant._book.agent_for(assistant._active_id).run = ignore_steering
+    assistant._book.agent_for(assistant._active_id).run = ignore_message
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     # `like` is the finishing turn's own message, carried so the follow-up keeps its `sender` and
-    # `channel`: the mailbox holds text and a token alone, so those have no other route back.
-    assert submitted == [(assistant._active_id, [SteeringMessage("just missed it")], message("hello"))]
+    # `channel`: a bus message carries no channel identity, so those two have no other route back.
+    assert submitted == [
+        (assistant._active_id, [Message("just missed it", sender=USER, to=EVERYONE)], message("hello"))
+    ]
 
 
 async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came_from(assistant):
-    """The mailbox carries text and a token alone, so a follow-up built from scratch would reach
+    """A bus message carries no channel identity, so a follow-up built from scratch would reach
     ``reactive`` with no ``sender`` and no ``channel``: the two fields a channel routes a reply by
     (``send(reply_to=...)``). Inert on every channel in this repository and not inert by definition,
     which is why the finishing turn's own message is the template this one is derived from. ``images``
@@ -2062,8 +2066,8 @@ async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came
         text="hello", sender="chat-7", channel="fake", images=["an image"], metadata={"thinking": "high"}
     )
 
-    await assistant._turns._resubmit_steering(
-        assistant._active_id, [SteeringMessage("just missed it", token="b2")], like=original
+    await assistant._turns._resubmit_messages(
+        assistant._active_id, [Message("just missed it", sender=USER, to=EVERYONE, token="b2")], like=original
     )
 
     assert submitted == [
@@ -2072,7 +2076,7 @@ async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came
 
 
 async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant):
-    """``ENTRY_STEERING_SOURCE``, not ``STEERING_SOURCE``, which belongs to a spawned worker.
+    """``ENTRY_SOURCE``, not ``WORKER_SOURCE``, which belongs to a spawned worker.
 
     ``close`` measures what to re-submit from the entry cursor's position, so a run opening an
     independent cursor would leave that position at zero and re-run every *delivered* message as its
@@ -2081,17 +2085,17 @@ async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant
     sources = []
 
     async def capture_source(*args, **kwargs):
-        sources.append(kwargs.get("steering"))
+        sources.append(kwargs.get("inbox"))
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = capture_source
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
-    assert sources == [ENTRY_STEERING_SOURCE]
+    assert sources == [ENTRY_SOURCE]
 
 
 async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assistant):
-    """The follow-up turn itself, with ``_resubmit_steering`` left in place rather than observed.
+    """The follow-up turn itself, with ``_resubmit_messages`` left in place rather than observed.
 
     Worth its own case because the re-submit happens after ``reactive``'s ``finally`` has released the
     gate: taking a second hold from inside the first would deadlock against a concurrent exclusive()
@@ -2099,16 +2103,364 @@ async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assist
     """
     asked = []
 
-    async def offer_once(text, *args, **kwargs):
+    async def send_once(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:
-            current_steering.get().offer("and one more thing")
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE)
         return "done"
 
-    assistant._book.agent_for(assistant._active_id).run = offer_once
+    assistant._book.agent_for(assistant._active_id).run = send_once
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert asked == ["hello", "and one more thing"]
+
+
+async def test_an_undelivered_agent_message_is_reported_and_not_rerun(assistant):
+    """Invariant 10: an agent's note to a run that never read it is said rather than run.
+
+    Re-running it as a user turn would put words in the user's mouth, so the two lists ``close``
+    hands back go to different places, and this is the one that goes to the channel. The stub for
+    ``_resubmit_messages`` takes the keyword the real one is called with, so a run that wrongly
+    re-submitted this message fails the assertion below rather than raising from the stub.
+    """
+    submitted = []
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        submitted.append(messages)
+
+    assistant._turns._resubmit_messages = resubmit
+    sent = []
+
+    async def send(text, **kwargs):
+        sent.append(text)
+
+    assistant._ui.send = send
+
+    async def leave_one_undelivered(*args, **kwargs):
+        # Addressed to a researcher nothing is running, so no reader can match it and every cursor
+        # passes over it: the case a cursor position alone reports as read.
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = leave_one_undelivered
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == []
+    assert any("not delivered" in text for text in sent)
+    assert any("researcher#1" in text and "look at the index" in text for text in sent)
+
+
+async def test_an_undelivered_agent_message_survives_a_reload(assistant):
+    """The live report above is sent, not stored: nothing in it ever reaches ``session.messages``,
+    so without a record of its own a reload shows no trace of a message that reached nobody. The
+    spec's own closing line for this ("undelivered-at-close goes into the turn record") is what this
+    pins, against the real stored metadata rather than a hand-built item.
+
+    The stub appends the turn's own user message itself, unlike the bare stand-ins above: this test
+    needs a real ``user_index`` to key the record under, which ``resolve_user_index`` finds by
+    scanning ``agent.model_client.messages`` for one -- the thing a stub replacing ``agent.run``
+    outright never writes there on its own.
+    """
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_long_undelivered_message_is_capped_in_the_record_and_the_notice(assistant):
+    """The text in this record is a model's own, behind nothing but a non-blank check, and the record
+    is durable, so it is the one new stored thing on this feature that has to carry a cap.
+
+    Both surfaces are asserted, and the store is the half that matters: a notice scrolls away, while
+    this metadata is read back on every reload of the conversation. The cut carries the note
+    ``core/transcripts.py`` writes for the same reason, so a reader can tell an abridged message from
+    a short one.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    sent = []
+
+    async def capture(text, **kwargs):
+        sent.append(text)
+
+    assistant._ui.send = capture
+    long_text = "x" * (UNDELIVERED_TEXT_CHARS + 500)
+
+    async def send_a_long_one(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send(long_text, sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = send_a_long_one
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id).metadata["undelivered"]
+    recorded = next(iter(stored.values()))[0]["text"]
+    assert len(recorded) < len(long_text)
+    assert recorded.endswith(f"... [message truncated, {len(long_text)} chars total]")
+    notice = next(text for text in sent if "not delivered" in text)
+    assert long_text not in notice
+    assert f"[message truncated, {len(long_text)} chars total]" in notice
+
+
+async def test_a_stopped_turn_still_records_an_undelivered_agent_message(assistant):
+    """The one thing a stopped turn can still be given about an agent's message, where before it was
+    given nothing at all: no sentence, no record, and no log.
+
+    The report is correctly out of reach on this path (an await inside a cancellation, which is
+    invariant 9's own argument), and the cancelled branch returns before it. The record is a
+    synchronous write, so the only thing keeping it from a stop was its position, one line above the
+    report rather than inside the ``finally`` that runs on every ending. Asserted on the store,
+    because what a record is worth is what survives the process.
+
+    The sibling test above covers the same write on a turn that finished, which is why that one is no
+    control for this one: it passes with the call on either side of that ``finally``.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    async def send_then_stop(text, *args, **kwargs):
+        # Appends the turn's own user message, for the reason the sibling's stub does: the record is
+        # keyed under an index `resolve_user_index` has to find a real message at.
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        # Raised from inside the run rather than delivered to the task, which is indistinguishable to
+        # `reactive`'s own `except asyncio.CancelledError`.
+        raise asyncio.CancelledError()
+
+    agent.run = send_then_stop
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation(assistant):
+    """`record_undelivered`'s write takes no hold of its own, so a delete that reaches the store first
+    has to be refused by that method's own guard rather than excluded by a lock.
+
+    Where the window is, now that the write sits in ``reactive``'s ``finally`` rather than after it:
+    ``TurnGate.turn``'s exit releases this conversation's lock and *then* re-acquires the gate's
+    shared condition, and that re-acquire suspends whenever another conversation's turn is finishing
+    in the same instant, which is a yield point a waiting ``delete_conversation`` can run on before
+    this ``finally`` executes at all. No test can land a delete inside an asyncio lock acquisition, so
+    this one lands it immediately ahead of the write instead, which leaves the write meeting the
+    identical state: a session that is gone. Without the guard, ``self._store.get(conversation_id)``
+    hands back a fresh empty ``Session`` (:meth:`ConversationBook.exists`'s own docstring names the
+    consequence) and ``save`` writes it straight back, a ghost "New conversation" where the deleted
+    one used to be.
+
+    The store's own ``delete`` rather than ``Assistant.delete_conversation``: this call site is
+    synchronous, so there is no awaiting the whole delete path from inside it, and what the guard
+    answers to is the session being gone, which is the half of that path this reproduces.
+
+    The sibling resubmit path below this block does not share the exposure: it calls
+    ``self.reactive(...)`` again, which takes this conversation's gate (invariant 1) and so serializes
+    against ``delete``'s own hold of the identical lock, where this write takes none at all.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+    record = assistant._turns._record_undelivered
+
+    def delete_then_record(*args, **kwargs):
+        assistant._store.delete(conversation_id)
+        record(*args, **kwargs)
+
+    assistant._turns._record_undelivered = delete_then_record
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    assert conversation_id not in assistant._store.list_keys()
+
+
+class _MutingAlertChannel(AlertCapturingChannel):
+    """The web front end's shape: a card surface, and a viewed conversation to mute against.
+
+    ``active_conversation_id`` is what ``ChannelUI.mutes_background_turns`` reads and what
+    ``WebChannel._foreground`` compares a turn against, so a channel carrying it is one where an
+    in-conversation send from a backgrounded turn would have been dropped rather than shown.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.active_conversation_id = None
+
+
+async def _background_turn_leaving_one_undelivered(tmp_path, channel) -> None:
+    """Run a turn on a conversation the user has switched away from, whose agent writes to nobody."""
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["placeholder"]))
+    background = assistant._active_id
+    await assistant.new_conversation()
+    assert assistant._active_id != background
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        raise AssertionError("nothing here is the user's to re-run")
+
+    assistant._turns._resubmit_messages = resubmit
+
+    async def leave_one_undelivered(*args, **kwargs):
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(background).run = leave_one_undelivered
+    await assistant._turns.reactive(message("hello"), conversation_id=background)
+
+
+async def test_a_backgrounded_turns_report_is_raised_as_an_alert_not_into_the_viewed_conversation(tmp_path):
+    """The report runs after the ``finally`` has reset ``streaming_conversation``, so the channel can
+    no longer mute it: sent, it would appear in whatever conversation the user has moved to.
+
+    That is a loss rather than a misplacement, because the notice is display-only and ``_persist`` has
+    already run, so it is gone from the conversation it belongs to. ``_report_undeliverable`` makes the
+    comparison itself and raises an alert, which on this channel shape becomes a card outside any
+    conversation. The alert has to be self-contained (see ``ChannelUI.alert``), so the conversation,
+    the sender and the selector are all asserted: "undelivered" with none of them tells a reader
+    nothing they can act on. The foregrounded counterpart is
+    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``, which asserts the send.
+    """
+    channel = _MutingAlertChannel()
+    await _background_turn_leaving_one_undelivered(tmp_path, channel)
+
+    assert not any("not delivered" in text for text in channel.sent)
+    raised = [text for text, *_ in channel.alerts if "not delivered" in text]
+    assert len(raised) == 1
+    assert "researcher#1" in raised[0] and "assistant" in raised[0] and "look at the index" in raised[0]
+    assert "'" in raised[0], "the alert must name the conversation in words, since its fallback prints"
+
+
+async def test_a_backgrounded_turns_report_still_reaches_a_channel_with_nowhere_else_to_put_it(tmp_path):
+    """The case a log would have lost, and the reason this is an alert rather than a log.
+
+    ``CLIChannel`` has no notification frame and does not mute, so its user is reading the terminal the
+    backgrounded turn is still printing to. ``ChannelUI.alert`` falls back to a plain send there, so
+    the sentence arrives; a log would have made this the one shipped front end where it vanished.
+    """
+    channel = FakeChannel()
+    await _background_turn_leaving_one_undelivered(tmp_path, channel)
+
+    assert any("not delivered" in text and "researcher#1" in text for text in channel.sent)
+
+
+async def test_a_firings_undeliverable_report_reaches_a_channel_with_no_conversation_list(tmp_path):
+    """The consolidation's payoff: a firing reports through the same helper a reactive turn does.
+
+    A scheduled run on a channel with no conversation list shares the viewed conversation, which is
+    what ``echo_reply`` is about, so its undeliverable message is the user's to see. The log-only
+    block this replaced reached nobody here.
+    """
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+
+    async def leave_one_undelivered(*args, **kwargs):
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = leave_one_undelivered
+    await assistant._turns.proactive("check the feeds")
+
+    assert any("not delivered" in text and "researcher#1" in text for text in channel.sent)
+
+
+async def test_a_firings_undelivered_message_survives_a_reload(tmp_path):
+    """The same gap `test_an_undelivered_agent_message_survives_a_reload` closes on the reactive
+    path, on the path that discovers the turn's own index a different way: ``_unattended_body``
+    has to hand it across the child task boundary (see ``_PublishedIndex``), since the caller that
+    closes the bus never sees ``agent.model_client`` to resolve it itself. This is the ending where a
+    return value would have done; the stopped sibling below is why one does not."""
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        # Appends the turn's own user message itself, for the reason the reactive test's stub does:
+        # `resolve_user_index` needs a real one in `agent.model_client.messages` to find.
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+    await assistant._turns.proactive("check the feeds")
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_stopped_firing_still_records_an_undelivered_agent_message(tmp_path):
+    """The stopped reactive turn's gap, on the path that cannot carry its index back in a return.
+
+    A firing's body ends three ways and two of them raise, so ``_run_unattended`` learns where the
+    turn landed only on the ending that returns. The stop is not that ending: it raises out of the
+    child task, the caller turns that into an ordinary return from inside its own gate hold, and the
+    record keyed under that index would have been written against ``-1`` and silently dropped. So the
+    index is published as the body commits (``_PublishedIndex``) rather than returned, and this is the
+    ending that says so: the sibling above passes either way.
+    """
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def send_then_stop(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        raise asyncio.CancelledError()
+
+    agent.run = send_then_stop
+    await assistant._turns.proactive("check the feeds")
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run(assistant):
+    """The safety condition the ordering rests on, which prose alone cannot hold.
+
+    The report is sent before the re-submit so its notice reads ahead of the follow-up turn's output.
+    That ordering is only safe because the report swallows what it can: a channel raising there must
+    not be what loses the user's own words, which are the next thing to run.
+    """
+    submitted = []
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        submitted.append([m.text for m in messages])
+
+    assistant._turns._resubmit_messages = resubmit
+
+    async def send(content, **kwargs):
+        # Only the report fails. A channel refusing everything would send the turn down the generic
+        # error branch, whose own send would raise past the report and prove nothing about ordering.
+        if isinstance(content, str) and "not delivered" in content:
+            raise RuntimeError("the socket is gone")
+
+    assistant._ui.send = send
+
+    async def send_both(*args, **kwargs):
+        bus = current_bus.get()
+        bus.send("look at the index", sender="assistant", to="researcher#1")
+        bus.send("and use the cache", sender=USER, to=EVERYONE)
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = send_both
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == [["and use the cache"]]
 
 
 async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):
@@ -2119,21 +2471,21 @@ async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assista
     undelivered.
     """
     submitted = []
-    assistant._turns._resubmit_steering = lambda conversation_id, texts: submitted.append(texts)
+    assistant._turns._resubmit_messages = lambda conversation_id, texts: submitted.append(texts)
     sent = []
     assistant._ui.send = lambda text, **kwargs: sent.append(text)
 
-    async def offer_then_stop(*args, **kwargs):
+    async def send_then_stop(*args, **kwargs):
         # Raised from inside the run rather than delivered to the task, which is indistinguishable to
         # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
-        current_steering.get().offer("never mind, do the other thing")
+        current_bus.get().send("never mind, do the other thing", sender=USER, to=EVERYONE)
         raise asyncio.CancelledError()
 
-    assistant._book.agent_for(assistant._active_id).run = offer_then_stop
+    assistant._book.agent_for(assistant._active_id).run = send_then_stop
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert submitted == []
-    # Asserted on the sent text rather than on the offer landing directly: a mailbox that never saw
+    # Asserted on the sent text rather than on the send landing directly: a bus that never saw
     # the offer (an `AttributeError` the generic error branch would swallow) sends the plain
     # "(stopped)" notice instead, which does not contain "not delivered", so this also covers the
     # case the old assertion on `offer`'s return value existed to rule out.
@@ -2144,86 +2496,86 @@ async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assista
 
 
 async def test_a_message_typed_during_a_turn_steers_it_rather_than_starting_one(assistant, track_running_turn):
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
 
-    assert assistant._offer_steering(message("actually, use the cache"), assistant._active_id) is True
-    assert [message.text for message in mailbox.close()] == ["actually, use the cache"]
+    assert assistant._offer_message(message("actually, use the cache"), assistant._active_id) is True
+    assert [message.text for message in bus.close()[0]] == ["actually, use the cache"]
 
 
 async def test_a_message_with_no_turn_running_starts_one(assistant):
-    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
+    assert assistant._offer_message(message("hello"), assistant._active_id) is False
 
 
 async def test_a_message_never_steers_another_conversations_turn(assistant, track_running_turn):
-    other = SteeringMailbox()
+    other = MessageBus()
     track_running_turn(assistant, other, conversation_id="other-conversation")
 
-    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
-    assert other.close() == []
+    assert assistant._offer_message(message("hello"), assistant._active_id) is False
+    assert other.close() == ([], [])
 
 
-async def test_a_message_with_an_image_starts_a_turn_rather_than_steering(assistant, track_running_turn):
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
+async def test_a_message_with_an_image_starts_a_turn_rather_than_joining_one(assistant, track_running_turn):
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
 
-    assert assistant._offer_steering(message("look", images=["/tmp/a.png"]), assistant._active_id) is False
-    assert mailbox.close() == []
+    assert assistant._offer_message(message("look", images=["/tmp/a.png"]), assistant._active_id) is False
+    assert bus.close() == ([], [])
 
 
-async def test_a_blank_message_starts_a_turn_rather_than_steering(assistant, track_running_turn):
+async def test_a_blank_message_starts_a_turn_rather_than_joining_one(assistant, track_running_turn):
     # Accepted it would be delivered to nothing (AIMU discards whitespace at the drain), handed back
     # by `close`, and then run as an empty follow-up turn.
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
 
-    assert assistant._offer_steering(message("   "), assistant._active_id) is False
-    assert mailbox.close() == []
+    assert assistant._offer_message(message("   "), assistant._active_id) is False
+    assert bus.close() == ([], [])
 
 
-async def test_a_message_arriving_after_the_mailbox_closed_starts_a_turn(assistant, track_running_turn):
-    """The follow-up-turn window: a turn whose `finally` has shut its mailbox is still tracked.
+async def test_a_message_arriving_after_the_bus_closed_starts_a_turn(assistant, track_running_turn):
+    """The follow-up-turn window: a turn whose `finally` has shut its bus is still tracked.
 
     Nothing is lost there, which is the whole point of the refusal: the message runs as an ordinary
     turn, exactly as it did before routing existed.
     """
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
-    mailbox.close()
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
+    bus.close()
 
-    assert assistant._offer_steering(message("too late"), assistant._active_id) is False
+    assert assistant._offer_message(message("too late"), assistant._active_id) is False
 
 
 async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_one(tmp_path, track_running_turn):
     channel = FakeChannel(["actually, use the cache"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
-    mailbox = SteeringMailbox()
-    handle = track_running_turn(assistant, mailbox)
+    bus = MessageBus()
+    handle = track_running_turn(assistant, bus)
 
     await assistant._serve_channel()
 
-    assert [message.text for message in mailbox.close()] == ["actually, use the cache"]
+    assert [message.text for message in bus.close()[0]] == ["actually, use the cache"]
     assert assistant._tracker.get(assistant._active_id).handle is handle  # no second turn submitted
 
 
-async def test_a_steered_messages_token_rides_back_so_the_page_can_mark_its_bubble(tmp_path, track_running_turn):
-    """A steered message normally produces no turn of its own, so nothing else would name it again:
-    this is the frame that tells a front end which fate the message it drew has met. The one case where
-    a later frame names it too is the message a turn accepts and never reads, which runs as a follow-up
-    turn carrying this same token."""
-    channel = _SteeringEchoChannel("actually, use the cache", token="b4")
+async def test_a_mid_turn_messages_token_rides_back_so_the_page_can_mark_its_bubble(tmp_path, track_running_turn):
+    """A message that joins a running turn normally produces no turn of its own, so nothing else
+    would name it again: this is the frame that tells a front end which fate the message it drew has
+    met. The one case where a later frame names it too is the message a turn accepts and never reads,
+    which runs as a follow-up turn carrying this same token."""
+    channel = _MidTurnEchoChannel("actually, use the cache", token="b4")
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
-    track_running_turn(assistant, SteeringMailbox())
+    track_running_turn(assistant, MessageBus())
 
     await assistant._serve_channel()
 
-    assert channel.steering == [("actually, use the cache", "b4")]
+    assert channel.taken == [("actually, use the cache", "b4")]
 
 
-async def test_a_message_that_starts_a_turn_reports_no_steering(tmp_path):
+async def test_a_message_that_starts_a_turn_is_not_reported_as_joining_one(tmp_path):
     """The other half: a message with no turn to join is not reported as having joined one, which is
     what leaves its bubble waiting for the save that will stamp it."""
-    channel = _SteeringEchoChannel("hello", token="b5")
+    channel = _MidTurnEchoChannel("hello", token="b5")
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
 
     await assistant._serve_channel()  # submits the turn as a background task
@@ -2231,10 +2583,10 @@ async def test_a_message_that_starts_a_turn_reports_no_steering(tmp_path):
     if info is not None:  # let it finish, so a report from the turn itself would be seen too
         await asyncio.gather(info.handle.task, return_exceptions=True)
 
-    assert channel.steering == []
+    assert channel.taken == []
 
 
-async def test_a_pending_approval_still_takes_the_message_rather_than_steering(tmp_path, track_running_turn):
+async def test_a_pending_approval_still_takes_the_message_rather_than_the_running_turn(tmp_path, track_running_turn):
     """Priority: `HumanGate.resolve_reply` consumes the next message and always has."""
 
     async def noop_prompt() -> None:
@@ -2242,29 +2594,29 @@ async def test_a_pending_approval_still_takes_the_message_rather_than_steering(t
 
     channel = FakeChannel(["y"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
     asking = asyncio.create_task(assistant._human.approval.ask(noop_prompt))
     await asyncio.sleep(0)  # let it register as pending before the loop reads the "y"
 
     await assistant._serve_channel()
 
     # Bounded rather than a bare await: were the offer above the pending-answer check, the "y" would
-    # land in the mailbox and nothing would ever resolve this, wedging the suite instead of failing.
+    # land in the bus and nothing would ever resolve this, wedging the suite instead of failing.
     assert await asyncio.wait_for(asking, timeout=5) is True
-    assert mailbox.close() == []
+    assert bus.close() == ([], [])
 
 
 async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tmp_path, track_running_turn):
     """A workflow turn queues on the gate as it always has: only a plain message may steer."""
     channel = FakeChannel(["/plan do the thing"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
-    mailbox = SteeringMailbox()
-    handle = track_running_turn(assistant, mailbox)
+    bus = MessageBus()
+    handle = track_running_turn(assistant, bus)
 
     await assistant._serve_channel()
 
-    assert mailbox.close() == []
+    assert bus.close() == ([], [])
     submitted = assistant._tracker.get(assistant._active_id)
     assert submitted is not None and submitted.handle is not handle
     submitted.handle.cancel()  # cancelled rather than run: what matters is that it was submitted
@@ -2274,21 +2626,22 @@ async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tm
 async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assistant, track_running_turn):
     """One level of nesting is reachable, and what bounds it is user action rather than a rule.
 
-    ``_resubmit_steering`` runs the follow-up turn from inside the finishing turn's own task, so no
-    second tracker entry is created for it; the follow-up's ``attach_steering`` lands on the original
-    entry instead (last write wins), which is what makes its mailbox reachable from the serve loop at
+    ``_resubmit_messages`` runs the follow-up turn from inside the finishing turn's own task, so no
+    second tracker entry is created for it; the follow-up's ``attach_bus`` lands on the original
+    entry instead (last write wins), which is what makes its bus reachable from the serve loop at
     all. Each further level costs the user another message typed inside another missed drain window.
     """
     asked = []
     offered = []
-    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, bus later
 
     async def run(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:
-            current_steering.get().offer("and one more thing")  # never drained, so it runs as a turn
+            # Never drained, so it runs as a turn.
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE)
         elif len(asked) == 2:
-            offered.append(assistant._offer_steering(message("and a third"), assistant._active_id))
+            offered.append(assistant._offer_message(message("and a third"), assistant._active_id))
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = run
@@ -2298,33 +2651,34 @@ async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assista
     assert asked == ["hello", "and one more thing", "and a third"]
 
 
-async def test_the_mailbox_a_reactive_turn_builds_carries_that_turns_review_context(assistant, track_running_turn):
+async def test_the_bus_a_reactive_turn_builds_carries_that_turns_review_context(assistant, track_running_turn):
     """The join between the two halves of the amendment, which each half's own test leaves open.
 
     ``test_reactive_turn_opens_a_review_context_carrying_the_request`` proves ``reactive`` opens a
-    context and ``test_an_offer_amends_the_running_turns_review_context`` proves a mailbox amends the
-    context it was handed, and both stay green if ``reactive`` builds its mailbox with no context at
+    context and ``test_a_send_amends_the_running_turns_review_context`` (in ``test_messaging.py``) proves a bus
+    amends the
+    context it was handed, and both stay green if ``reactive`` builds its bus with no context at
     all. That mutation makes a security-relevant amendment a silent no-op in production, so what is
-    asserted here is the wiring: steer the turn from inside its own run and read back the request a
+    asserted here is the wiring: offer a message from inside the turn's own run and read back the request a
     gated call in that turn would be judged against.
     """
     from kokua.core.auto_approval import current_review_context
 
-    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, bus later
     calls = []
     seen = {}
 
-    async def steer_from_inside(*args, **kwargs):
+    async def offer_from_inside(*args, **kwargs):
         calls.append(args)
         # Offered once only, so a drain that stopped working would cost one extra turn rather than
         # recurse through the follow-up path without end.
         if len(calls) == 1:
-            assert assistant._offer_steering(message("actually, read the log"), assistant._active_id) is True
+            assert assistant._offer_message(message("actually, read the log"), assistant._active_id) is True
             seen["request"] = current_review_context.get().request
-            ENTRY_STEERING_SOURCE.reader()()  # delivered, so this message needs no follow-up turn
+            ENTRY_SOURCE.reader()()  # delivered, so this message needs no follow-up turn
         return "done"
 
-    assistant._book.agent_for(assistant._active_id).run = steer_from_inside
+    assistant._book.agent_for(assistant._active_id).run = offer_from_inside
     await assistant._turns.reactive(message("find the bug"), conversation_id=assistant._active_id)
 
     assert calls and len(calls) == 1
@@ -2332,28 +2686,28 @@ async def test_the_mailbox_a_reactive_turn_builds_carries_that_turns_review_cont
     assert "actually, read the log" in seen["request"]
 
 
-async def test_an_unattended_turn_publishes_a_mailbox_too(assistant):
-    """A scheduled firing is steerable, and that takes nothing away from the auto-deny that keeps its
-    gated calls from reaching a reviewer: a message binds to the conversation the user is *viewing*, so
-    the only person who can steer a firing is one who switched into it and is watching it run, which is
-    the same condition auto-deny tests.
+async def test_an_unattended_turn_publishes_a_bus_too(assistant):
+    """A scheduled firing can receive a message mid-turn too, and that takes nothing away from the
+    auto-deny that keeps its gated calls from reaching a reviewer: a message binds to the conversation
+    the user is *viewing*, so the only person who can redirect a firing is one who switched into it and
+    is watching it run, which is the same condition auto-deny tests.
     """
     seen = []
 
     async def capture(*args, **kwargs):
         entry = assistant._tracker.get(assistant._active_id)
-        seen.append((current_steering.get(), entry.steering if entry else None, kwargs.get("steering")))
+        seen.append((current_bus.get(), entry.bus if entry else None, kwargs.get("inbox")))
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = capture
     await assistant._turns.proactive("the scheduled prompt")
 
     assert seen
-    mailbox, routed, source = seen[0]
-    assert mailbox is not None
-    assert routed is mailbox  # the entry routing reads carries this firing's own mailbox
-    assert source is ENTRY_STEERING_SOURCE
-    assert mailbox.offer("too late") is False  # shut when the firing ended
+    bus, routed, source = seen[0]
+    assert bus is not None
+    assert routed is bus  # the entry routing reads carries this firing's own bus
+    assert source is ENTRY_SOURCE
+    assert bus.send("too late", sender=USER, to=EVERYONE) is False  # shut when the firing ended
 
 
 async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn(assistant):
@@ -2368,7 +2722,7 @@ async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_tur
     async def run(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:  # offered once, so a drain that stopped working costs one turn, not a loop
-            current_steering.get().offer("while you are at it, check the log")
+            current_bus.get().send("while you are at it, check the log", sender=USER, to=EVERYONE)
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = run
@@ -2377,16 +2731,16 @@ async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_tur
     assert asked == ["the scheduled prompt", "while you are at it, check the log"]
 
 
-async def test_a_firings_mailbox_is_shut_even_when_the_channel_raises_during_teardown(assistant, monkeypatch):
+async def test_a_firings_bus_is_shut_even_when_the_channel_raises_during_teardown(assistant, monkeypatch):
     """The reset and the close lead the teardown, ahead of anything fallible, as they do in
     ``reactive``. ``end_catch_up`` calls back into the channel, so a front end raising there would
-    otherwise leave an open mailbox behind for the life of the process, and every later message typed
+    otherwise leave an open bus behind for the life of the process, and every later message typed
     on that conversation would be accepted by a turn that had already ended.
     """
     seen = []
 
     async def capture(*args, **kwargs):
-        seen.append(current_steering.get())
+        seen.append(current_bus.get())
         return "done"
 
     def explode(conversation_id):
@@ -2397,7 +2751,7 @@ async def test_a_firings_mailbox_is_shut_even_when_the_channel_raises_during_tea
 
     await assistant._turns.proactive("the scheduled prompt")  # the failure is reported, not raised
 
-    assert seen and seen[0].offer("too late") is False
+    assert seen and seen[0].send("too late", sender=USER, to=EVERYONE) is False
 
 
 async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing(assistant):
@@ -2409,7 +2763,7 @@ async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing
 
     async def run(text, *args, **kwargs):
         asked.append(text)
-        current_steering.get().offer("while you are at it, check the log")
+        current_bus.get().send("while you are at it, check the log", sender=USER, to=EVERYONE)
         return "done"
 
     async def explode(*args, **kwargs):
@@ -2427,8 +2781,8 @@ async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing
 # --- what a turn records about the messages sent into it ------------------------------------------
 
 
-def _steered_run(agent, steering_text="use the cache"):
-    """An ``agent.run`` that leaves behind the transcript a steered round produces.
+def _mid_turn_run(agent, mid_turn_text="use the cache"):
+    """An ``agent.run`` that leaves behind the transcript a turn carrying a mid-turn message produces.
 
     The turn's own user message, a tool exchange, the user's mid-run message, then the answer. The
     mock client fakes tool rounds rather than running AIMU's dispatch (see the testing notes), so the
@@ -2441,7 +2795,7 @@ def _steered_run(agent, steering_text="use the cache"):
                 {"role": "user", "content": text},
                 {"role": "assistant", "tool_calls": [{"id": "id0"}]},
                 {"role": "tool", "content": "result", "tool_call_id": "id0"},
-                {"role": "user", "content": steering_text},
+                {"role": "user", "content": mid_turn_text},
                 {"role": "assistant", "content": "done"},
             ]
         )
@@ -2450,38 +2804,241 @@ def _steered_run(agent, steering_text="use the cache"):
     return run
 
 
-async def test_a_turn_records_where_its_steering_messages_landed(assistant):
-    """Replay cannot tell a steering message from one that started a turn by position alone, and
-    guessing it from position attaches a turn's controls to a message that has no turn."""
+def _delivering_run(agent, *rounds):
+    """An ``agent.run`` that drains this turn's inbox the way AIMU's loop does, once per round.
+
+    Each callable in ``rounds`` sends onto the bus just before that round's drain, which is how a
+    message arrives while the model is working, and what comes back is appended as the *one* ``user``
+    message AIMU joins a drain's list into. The drain is opened through the ``inbox`` source the turn
+    passed, so the cursor this advances is the turn's own entry cursor and the deliveries it records
+    are the ones the turn tags from. The mock client fakes tool rounds rather than running AIMU's
+    dispatch (see the testing notes), so the shape is written out here rather than driven.
+    """
+
+    async def run(text, **kwargs):
+        messages = agent.model_client.messages
+        drain = kwargs["inbox"].reader("assistant")
+        messages.append({"role": "user", "content": text})
+        for round_number, send in enumerate(rounds):
+            send()
+            messages.append({"role": "assistant", "tool_calls": [{"id": f"id{round_number}"}]})
+            messages.append({"role": "tool", "content": "result", "tool_call_id": f"id{round_number}"})
+            taken = drain()
+            if taken:
+                messages.append({"role": "user", "content": "\n\n".join(taken)})
+        messages.append({"role": "assistant", "content": "done"})
+        return "done"
+
+    return run
+
+
+async def test_an_agent_message_reaches_the_stored_transcript_tagged(assistant):
+    """The security property, end to end through the store: a worker cannot reach the transcript
+    wearing the user's role.
+
+    Asserted on the stored session rather than on the agent's live messages, because the tag is
+    written for a reader who comes back later: it has to be in place before ``_persist`` snapshots
+    the turn, which is why it is applied where the indices are resolved and not in the outer
+    ``finally`` that closes the bus. The stored content itself carries the ``[message from ...]``
+    prefix too, because the drain rendered it before AIMU joined and appended it: the tag protects a
+    transcript reader, and the prefix in the words is what protected the model that read them live.
+    """
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)
-    agent.run = _steered_run(agent)
+    agent.run = _delivering_run(
+        agent, lambda: current_bus.get().send("look at the index", sender="researcher#1", to="assistant")
+    )
 
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
-    assert assistant._store.get(conversation_id).metadata["steering"]["0"] == [3]
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "[message from researcher#1] look at the index"
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
+    # And it is still recorded as a mid-turn message, which is what keeps it from replaying as a turn
+    # of its own whichever of the two a reader asks.
+    assert stored.metadata["messages"]["0"] == [3]
 
 
-async def test_an_unsteered_turn_records_no_steering_at_all(assistant):
+async def test_the_users_own_mid_turn_message_reaches_the_store_untagged(assistant):
+    """The control for the test above, and a rule of its own: untagged means the principal spoke.
+    An implementation that tagged every delivery would pass that test and fail this one."""
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(agent, lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE))
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "use the cache"
+    assert PROVENANCE_KEY not in stored.messages[3]
+
+
+async def test_a_round_that_carried_both_the_user_and_an_agent_is_marked_mixed_not_agent(assistant):
+    """A mixed delivery is tagged ``PROVENANCE_MIXED``, never ``PROVENANCE_AGENT``.
+
+    One drain becomes one appended message, so this message is both, and
+    ``PROVENANCE_AGENT`` is all-or-nothing per message: tagging it ``PROVENANCE_AGENT`` would hide the
+    user's own words from ``is_user_turn``, which is the worse of the two errors, and the recorded
+    index covers that either way. But leaving the message with no tag at all would let a transcript
+    export or a search attribute the agent's half to the user, so it carries the narrower
+    ``PROVENANCE_MIXED`` instead: one ``is_user_turn`` reads exactly like an absent tag (see the
+    control below), and one a transcript reader can still tell apart from a plain user message.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    def both():
+        bus = current_bus.get()
+        bus.send("use the cache", sender=USER, to=EVERYONE)
+        bus.send("and the index", sender="researcher#1", to="assistant")
+
+    agent.run = _delivering_run(agent, both)
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "use the cache\n\n[message from researcher#1] and the index"
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_MIXED
+    assert is_user_turn(stored.messages[3]) is True  # the tag that would say otherwise is PROVENANCE_AGENT
+    assert stored.metadata["messages"]["0"] == [3]
+
+
+async def test_two_deliveries_in_one_turn_are_tagged_one_at_a_time(assistant):
+    """Why the bus keeps every delivery rather than the latest one.
+
+    The user speaks in the first round and a worker in the second, so the turn holds one message of
+    each kind. A single answer taken over the whole turn tags both or neither: tagging both would put
+    the agent tag on what the user said, which is the failure the mixed case refuses
+    ``PROVENANCE_AGENT`` to avoid, arriving by a different route.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent,
+        lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE),
+        lambda: current_bus.get().send("and the index", sender="researcher#1", to="assistant"),
+    )
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert [stored.messages[index]["content"] for index in (3, 6)] == [
+        "use the cache",
+        "[message from researcher#1] and the index",
+    ]
+    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.messages[6][PROVENANCE_KEY] == PROVENANCE_AGENT
+    assert stored.metadata["messages"]["0"] == [3, 6]
+
+
+def test_fewer_deliveries_than_indices_leaves_every_index_untagged(assistant):
+    """The review's own shape, called directly against ``_tag_agent_messages`` rather than driven
+    through a turn: one agent-only delivery against two message indices.
+
+    Broadcasting that single delivery's answer across both indices, which is what the fallback did
+    before this fix, would tag the second index ``PROVENANCE_AGENT`` even though no delivery produced
+    it at all: a mis-pairing a count mismatch alone does not rule out, since the old guard only asked
+    whether the counts *differed*, not which direction. With fewer deliveries than indices the fix
+    refuses to broadcast and leaves both untagged, which is the direction "can only under-tag, never
+    mis-attribute" is supposed to hold unconditionally.
+    """
+    bus = MessageBus()
+    entry = bus.entry_reader("assistant")
+    bus.send("look at the index", sender="researcher#1", to="assistant")
+    entry()
+    assert len(bus.entry_deliveries()) == 1
+
+    class _FakeModelClient:
+        messages = [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}]
+
+    class _FakeAgent:
+        model_client = _FakeModelClient()
+
+    assistant._turns._tag_agent_messages(_FakeAgent(), bus, [0, 1])
+
+    assert PROVENANCE_KEY not in _FakeModelClient.messages[0]
+    assert PROVENANCE_KEY not in _FakeModelClient.messages[1]
+
+
+async def test_a_silent_round_in_between_does_not_throw_off_the_pairing(assistant):
+    """The invariant the whole by-position pairing rests on, end to end rather than as a pure unit
+    test alone: a round with nothing to drain leaves no entry in ``entry_deliveries()`` (the drain
+    returned nothing, so ``entry_reader``'s own ``if taken:`` guard never appends it) and no appended
+    ``user`` message either (``_delivering_run``'s matching guard), so the two lists this pairs by
+    position stay the same length and the direct pairing is taken, never the fallback. If either
+    guard were missing, this turn would mis-pair: three rounds sent or appended something in only two
+    of them, so an off-by-one would tag the user's own word with the agent's answer or the reverse.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent,
+        lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE),
+        lambda: None,  # the silent round: nothing sent, nothing drained, nothing appended
+        lambda: current_bus.get().send("and the index", sender="researcher#1", to="assistant"),
+    )
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.metadata["messages"]["0"] == [3, 8]
+    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.messages[8][PROVENANCE_KEY] == PROVENANCE_AGENT
+
+
+async def test_an_agent_message_in_an_unattended_turn_is_tagged_rather_than_read_as_proactive(assistant):
+    """A firing carries a bus too, so an agent can message one, and the firing's own provenance pass
+    would otherwise claim that message: it tags everything the run appended as proactive, which
+    ``is_user_turn`` reads as a turn somebody took, where the agent tag is what says nobody did. What
+    is asserted is which tag survives both passes, not the order they run in, because either order
+    leaves this one on top (the agent tag is assigned, the proactive tag defaults).
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent, lambda: current_bus.get().send("look at the index", sender="researcher#1", to="assistant")
+    )
+
+    await assistant._turns.proactive("summarize the log")
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "[message from researcher#1] look at the index"
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
+    assert stored.messages[0][PROVENANCE_KEY] == PROVENANCE_PROACTIVE  # the firing's own prompt still is
+
+
+async def test_a_turn_records_where_its_mid_turn_messages_landed(assistant):
+    """Replay cannot tell a mid-turn message from one that started a turn by position alone, and
+    guessing it from position attaches a turn's controls to a message that has no turn."""
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _mid_turn_run(agent)
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    assert assistant._store.get(conversation_id).metadata["messages"]["0"] == [3]
+
+
+async def test_a_turn_with_no_mid_turn_messages_records_none_at_all(assistant):
     """The same "stays out of the file when there is nothing to say" rule the effort record follows."""
     conversation_id = assistant._active_id
 
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
-    assert "steering" not in assistant._store.get(conversation_id).metadata
+    assert "messages" not in assistant._store.get(conversation_id).metadata
 
 
-async def test_an_unattended_turn_records_where_its_steering_messages_landed(tmp_path):
-    """A firing carries the same mailbox a reactive turn does, so it leaves the same transcript and
+async def test_an_unattended_turn_records_where_its_mid_turn_messages_landed(tmp_path):
+    """A firing carries the same bus a reactive turn does, so it leaves the same transcript and
     needs the same record: its own messages are tagged proactive, which is not a loop injection."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["done"]))
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)
-    agent.run = _steered_run(agent)
+    agent.run = _mid_turn_run(agent)
 
     await assistant._proactive("summarize the log")
 
-    assert assistant._store.get(conversation_id).metadata["steering"]["0"] == [3]
+    assert assistant._store.get(conversation_id).metadata["messages"]["0"] == [3]
 
 
 async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(tmp_path):
@@ -2495,32 +3052,53 @@ async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(
     agent = assistant._book.agent_for(assistant._active_id)
     asked = []
 
-    async def offer_once(text, *args, **kwargs):
+    async def send_once(text, *args, **kwargs):
         asked.append(text)
         agent.model_client.messages.extend(
             [{"role": "user", "content": text}, {"role": "assistant", "content": "done"}]
         )
         if len(asked) == 1:
-            current_steering.get().offer("and one more thing", token="b2")
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE, token="b2")
         return "done"
 
-    agent.run = offer_once
+    agent.run = send_once
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert asked == ["hello", "and one more thing"]
     assert [token for _conversation_id, _index, token in channel.turns_saved] == [None, "b2"]
 
 
-async def test_a_steered_message_hands_the_mailbox_the_id_its_front_end_drew_it_under(assistant, track_running_turn):
+async def test_a_mid_turn_message_hands_the_bus_the_id_its_front_end_drew_it_under(assistant, track_running_turn):
     """The accept side of the same round trip: the token rides the message's metadata, and the
-    mailbox is what carries it as far as the follow-up turn if the run never reads the message."""
-    mailbox = SteeringMailbox()
-    track_running_turn(assistant, mailbox)
+    bus is what carries it as far as the follow-up turn if the run never reads the message."""
+    bus = MessageBus()
+    track_running_turn(assistant, bus)
 
-    accepted = assistant._offer_steering(
+    accepted = assistant._offer_message(
         ChannelMessage(text="use the cache", channel="fake", metadata={"token": "b2"}),
         assistant._active_id,
     )
 
     assert accepted is True
-    assert mailbox.close() == [SteeringMessage("use the cache", "b2")]
+    assert bus.close() == ([Message("use the cache", sender=USER, to=EVERYONE, token="b2")], [])
+
+
+def test_the_undelivered_cap_is_the_same_number_a_read_caps_one_message_at():
+    """``UNDELIVERED_TEXT_CHARS``'s comment claims it is the number ``core/transcripts.py`` caps a
+    single message at, and the two are separate literals with a hand-copied cut string between them.
+    Nothing made that claim load-bearing, so changing one would leave the other asserting an equality
+    that had stopped holding, which is the kind of quiet falsehood a comment cannot catch.
+
+    Pinned rather than aliased, because the two sites are justified separately where they are declared:
+    one bounds what a read spends on a pasted document, the other bounds one line of context inside a
+    sentence about something that did not happen. They agree today on purpose, and a future change that
+    wants them to differ should have to come here and say so.
+    """
+    from kokua.core.transcripts import MAX_MESSAGE_CHARS
+    from kokua.core.turns import UNDELIVERED_TEXT_CHARS, _capped_message_text
+
+    assert UNDELIVERED_TEXT_CHARS == MAX_MESSAGE_CHARS
+
+    # And the cut string, which is copied rather than shared, says the same thing in the same shape.
+    long_text = "x" * (UNDELIVERED_TEXT_CHARS + 1)
+    assert _capped_message_text(long_text).endswith(f"... [message truncated, {len(long_text)} chars total]")

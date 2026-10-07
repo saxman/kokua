@@ -20,11 +20,53 @@ TITLE_MAX = 40
 
 # The user-role messages the agent loop injects between tool-calling iterations. They are not
 # something a user sent, so a transcript leaves them out and a turn does not end at one.
-INJECTED_USER_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
+LOOP_INJECTED_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
+
+# Kokua's own provenance, written onto a message one of a turn's agents sent to another run on the
+# same turn (``core/messaging.py``), which the recipient's loop appends in the same ``user`` shape the
+# user's own words arrive in. Machine-authored, so it is not a turn the user took: it joins the set
+# below, and every reader of :func:`is_user_turn` gets that exclusion without being told, which is
+# what keeps a worker's note from ending a turn at a branch or a truncation.
+#
+# The tag means "nothing in this message came from the user", not "some of it came from an agent".
+# One appended message can carry a whole round's delivery, so a round that carried both the user's
+# words and an agent's stays untagged and relies on the per-turn index instead; the decision and its
+# reason live in ``MessageBus.tag_for_delivery``.
+PROVENANCE_AGENT = "agent_message"
+
+# Every ``user``-role message the user did not type: the loop's own nudges, and an agent's message to
+# another agent. Both are excluded from what was said and from where a turn ends, which is what this
+# set answers. It is deliberately wider than LOOP_INJECTED_PROVENANCE, because one question still has
+# to be asked of that narrower set alone: ``core/transcripts.py``'s replay renders a *loop injection*
+# as a loop marker naming which injection it was, and an agent's message is not one of them.
+INJECTED_USER_PROVENANCE = LOOP_INJECTED_PROVENANCE | {PROVENANCE_AGENT}
+
+# Written onto a mid-turn message whose one appended text joined the user's own words with an agent's,
+# the delivery ``MessageBus.tag_for_delivery`` leaves untagged on purpose: that function's other tag,
+# ``PROVENANCE_AGENT``, means "nothing in this message came from the user", which would be false here,
+# so reusing it would misreport what the message actually is. This tag makes the honest claim instead
+# -- some of it is the user's and some is not -- for the one reader that needs to know that rather than
+# just "is this a turn the user took": a transcript export or a cross-conversation search must not sign
+# or count an agent's contributed words as the user's, which it would if it read this message the way
+# it reads an ordinary untagged one.
+#
+# Deliberately **not** added to :data:`INJECTED_USER_PROVENANCE`. That set is what :func:`is_user_turn`
+# and :func:`resolve_message_indices` exclude from, and both must keep answering for this message
+# exactly as they do for any other mid-turn message: it is not a turn boundary (the per-turn mid-turn
+# index already answers that, independently of any tag -- see ``core/conversations.py``'s
+# ``turn_end``), and it is not the user's own turn-starting message either way. Widening that set would
+# make ``is_user_turn`` claim the user said nothing here, which is exactly as false as ``PROVENANCE_AGENT``
+# would be, for the reason the mixed case has always stayed untagged there.
+PROVENANCE_MIXED = "agent_mixed_message"
 
 
 def is_user_turn(message: dict) -> bool:
-    """Whether *message* is one the user actually sent, rather than a nudge the loop injected.
+    """Whether *message* is one the user actually sent, rather than one a machine put in their place.
+
+    Two kinds are not, and they arrive in the identical ``user`` shape: a nudge the agent loop injects
+    between tool-calling iterations, and a message one of the turn's own agents sent to another run
+    (``core/messaging.py``). Both carry a provenance tag; a message the user typed mid-turn carries
+    none, deliberately, because it genuinely is the user speaking.
 
     Lives here rather than in either caller because two of them need the same answer for opposite
     reasons: a transcript drops an injected turn from what was said, and a branch must not treat one
@@ -88,24 +130,36 @@ def resolve_user_index(messages: list[dict], base_len: int) -> int:
     return -1
 
 
-def resolve_steering_indices(messages: list[dict], user_index: int) -> list[int]:
-    """Where a turn's steering messages sit, given where its own user message sits.
+def resolve_message_indices(messages: list[dict], user_index: int) -> list[int]:
+    """Where a turn's mid-turn messages sit, given where its own user message sits.
 
-    Every later entry the user actually sent is a message that reached the turn while it was running:
-    the loop appends nothing else with that role, and the nudges it injects itself are exactly what
-    :func:`is_user_turn` excludes. That test is shared rather than rewritten as an absent-key check,
-    because the question is the same one a branch asks and the answer has the same stake: a message
-    sent into a turn is not a turn boundary, and a reader that treats one as a boundary cuts a turn
-    off in the middle of its own tool loop.
+    Every later ``user`` entry that is not a loop nudge is a message that reached the turn while it
+    was running, from the user or from one of the turn's own agents: the loop appends nothing else
+    with that role.
 
-    Resolved after the run rather than recorded as the mailbox delivers, because only the message list
+    **Both kinds belong here, which is why this cannot share :func:`is_user_turn`.** That predicate
+    answers "did the user take this turn", and an agent's message is excluded from it deliberately;
+    this answers "did this message arrive into a turn already running", which an agent's message did.
+    Asking the narrower question here would drop an agent's message out of a record whose whole claim
+    is where this turn's mid-turn messages landed, leaving it silently untrue about the turn, and it
+    would couple the index to the tag: a turn resolves the index and then writes the tag from it
+    (``TurnRunner._tag_agent_messages``), so a predicate that read the tag would make the two steps
+    order-dependent, where this one leaves them in either order. The stake on this side is the one
+    :func:`kokua.core.conversations.turn_end` names: a message sent into a turn is not a turn
+    boundary, and a reader that treats one as a boundary cuts a turn off mid tool loop.
+
+    Resolved after the run rather than recorded as the bus delivers, because only the message list
     says where a message ended up, and a compaction between rounds can move it. ``user_index`` is
     ``resolve_user_index``'s answer, so ``-1`` means the turn committed no user message and there is no
     turn here to attribute anything to.
     """
     if user_index < 0:
         return []
-    return [index for index in range(user_index + 1, len(messages)) if is_user_turn(messages[index])]
+    return [
+        index
+        for index in range(user_index + 1, len(messages))
+        if messages[index].get("role") == "user" and messages[index].get(PROVENANCE_KEY) not in LOOP_INJECTED_PROVENANCE
+    ]
 
 
 def _map_image_block_urls(messages: list[dict], transform) -> list[dict]:

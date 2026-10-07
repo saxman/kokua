@@ -2193,24 +2193,25 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     # #send is hidden (not disabled) while a turn is processing, so submit the way the composer's own
     # keydown listener does rather than clicking a control Playwright would refuse to act on.
     page.locator("#msg").press("Enter")
-    # The mark is the token round trip made visible: the server reported this message steered, naming
-    # the bubble by the token the page sent with it, and nothing else on the page carries that name.
-    expect(page.locator(".bubble.user.steered", has_text="second")).to_have_count(1, timeout=10_000)
+    # The mark is the token round trip made visible: the server reported this message as having
+    # joined the running turn, naming the bubble by the token the page sent with it, and nothing else
+    # on the page carries that name.
+    expect(page.locator(".bubble.user.mid-turn", has_text="second")).to_have_count(1, timeout=10_000)
 
-    # One turn, two replies: the steered message IS delivered here, by AIMU's `TERMINAL_HEALTHY`
-    # branch, which drains steering and takes one more round, and that round is the second REPLY. So
+    # One turn, two replies: the mid-turn message IS delivered here, by AIMU's `TERMINAL_HEALTHY`
+    # branch, which drains the inbox and takes one more round, and that round is the second REPLY. So
     # waiting for it is waiting for the one turn to finish, which is what its save (and the control
-    # below) depends on. The *other* steering outcome, a message accepted and never drained, which
-    # `TurnRunner._resubmit_steering` then re-runs as a follow-up turn, is exercised by no test here:
+    # below) depends on. The *other* outcome for a mid-turn message, accepted and never drained, which
+    # `TurnRunner._resubmit_messages` then re-runs as a follow-up turn, is exercised by no test here:
     # that path ends with this same bubble stamped and its mark withdrawn, by the follow-up turn's own
-    # save carrying the token the mailbox kept, so a reader must not take this line for coverage of it.
+    # save carrying the token the bus kept, so a reader must not take this line for coverage of it.
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
 
     # Exactly one bubble was stamped, and it is the one whose turn the save was about.
     stamped = page.locator(".bubble.user[data-truncate-index]")
     expect(stamped).to_have_count(1, timeout=10_000)
     expect(stamped).to_contain_text("first")
-    expect(page.locator(".bubble.user.steered .bubble-truncate")).to_have_count(0)
+    expect(page.locator(".bubble.user.mid-turn .bubble-truncate")).to_have_count(0)
     # The delivered message's entry is still in the map, and deliberately: an acceptance is not a
     # final fate (the turn could have ended without reading it, which runs it as a turn carrying this
     # same token), so the page cannot drop the entry when it marks the bubble. Inert either way, since
@@ -2224,11 +2225,11 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(0)
 
 
-def test_a_steered_messages_absent_truncate_control_survives_a_reload(page, live_server):
-    """`replay_items` gives a steering message no `message_index`, so a page that reads controls from
+def test_a_mid_turn_messages_absent_truncate_control_survives_a_reload(page, live_server):
+    """`replay_items` gives a mid-turn message no `message_index`, so a page that reads controls from
     that field has nothing to stamp it with; this is the one test that reloads and checks the page
     actually behaves that way, rather than checking the index alone (see
-    `test_replay_items_gives_a_steering_message_no_index_to_truncate_at`, which does the latter)."""
+    `test_replay_items_gives_a_mid_turn_message_no_index_to_truncate_at`, which does the latter)."""
     page.on("dialog", lambda dialog: dialog.accept())
     _open(page, live_server(delay=2.0))
     page.fill("#msg", "first")
@@ -2242,6 +2243,122 @@ def test_a_steered_messages_absent_truncate_control_survives_a_reload(page, live
     page.wait_for_selector("#conv-list li")
     expect(page.locator(".bubble.user .bubble-meta .bubble-truncate")).to_have_count(1, timeout=10_000)
     expect(page.locator("#log")).to_contain_text("second")
+
+
+def test_the_three_senders_of_a_mid_turn_message_are_told_apart_on_the_page(page, live_server):
+    """One seeded turn carrying all three mid-turn senders, plus a worker's own received note, and the
+    claim is that a reader can tell them apart rather than that any one of them appears.
+
+    `replay_items` decides which of the three a stored message was (`from` absent for the user's own
+    words, `"agent"`, `"mixed"`) and the default suite pins that decision, so the question left here is
+    the one only a browser answers: whether the page turns those three values into three *different*
+    rows. Three dimensions, deliberately, because each fails on its own. The kind word is the only
+    thing separating `mixed` from the plain case, since a mixed delivery keeps the undimmed colour on
+    purpose. The class list is what `app.css` selects on. And the computed colour is what a reader
+    actually sees: collapse `renderMidTurn`'s class ternary to a bare `"inbox"`, or delete
+    `.inbox.agent`'s one CSS rule, and a worker's note renders in the user's own foreground with every
+    Python test still green.
+
+    The fourth row is the recipient's side, which is where this feature is watched rather than read
+    back: a card entry for a message that reached a worker mid-run. It carries no `from` field at all
+    (addressing stays out of the channel), so `cardMessageFrom` recovers "agent" from the leading
+    `[message from ...]` marker in the text, and the row has to land on the same labelled, dimmed
+    treatment the main log's own agent row gets. The undelivered notice below it is the third
+    observation point reaching a reader: a send nobody drained, reported at the turn's end.
+    """
+    from aimu.models import PROVENANCE_KEY
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[
+                    {"role": "user", "content": "compare the vendors"},
+                    {"role": "user", "content": "actually, use the cache"},
+                    {
+                        "role": "user",
+                        "content": "[message from researcher#1] vendor B is cheaper",
+                        PROVENANCE_KEY: PROVENANCE_AGENT,
+                    },
+                    {
+                        "role": "user",
+                        "content": "and check shipping\n[message from researcher#2] shipping is free",
+                        PROVENANCE_KEY: PROVENANCE_MIXED,
+                    },
+                    {"role": "assistant", "content": "Vendor B, with free shipping."},
+                ],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-10-05T00:00:00",
+                    "updated_at": "2026-10-05T00:00:00",
+                    # The user's own mid-turn message is untagged, deliberately, so the per-turn index
+                    # is the only thing that keeps it out of a plain user bubble.
+                    "messages": {"0": [1]},
+                    "subagent": {
+                        "0": [
+                            {"id": "c-1", "role": "coder", "task": "price the options", "status": "running"},
+                            {
+                                "id": "c-1",
+                                "append": {
+                                    "kind": "message",
+                                    "text": "[message from researcher#1] vendor B is cheaper",
+                                },
+                            },
+                            {"id": "c-1", "status": "done"},
+                        ]
+                    },
+                    "undelivered": {"0": [{"sender": "researcher#2", "to": "coder#9", "text": "check the warranty"}]},
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+
+    rows = page.locator("#log > .bubble.inbox")
+    expect(rows).to_have_count(3)
+    typed, from_agent, mixed = (rows.nth(i) for i in range(3))
+
+    # The kind word: three different ones, which is the whole of what separates `mixed` from the
+    # user's own words, since that row keeps the undimmed colour on purpose.
+    expect(typed.locator(".fold-kind")).to_have_text("inbox")
+    expect(from_agent.locator(".fold-kind")).to_have_text("agent")
+    expect(mixed.locator(".fold-kind")).to_have_text("mixed")
+
+    # The class list: what app.css selects on, and what a collapsed ternary would flatten.
+    expect(typed).not_to_have_class(re.compile(r"\b(agent|mixed)\b"))
+    expect(from_agent).to_have_class(re.compile(r"\bagent\b"))
+    expect(mixed).to_have_class(re.compile(r"\bmixed\b"))
+
+    # The rendered colour, which is the one a reader sees and no Python test can: a worker's note is
+    # dimmed to the machine-event colour, and both of the rows carrying the user's own words are not.
+    colour = "el => getComputedStyle(el).color"
+    typed_colour = typed.evaluate(colour)
+    assert from_agent.evaluate(colour) != typed_colour
+    assert mixed.evaluate(colour) == typed_colour
+
+    # Each row holds its own words, so the three are not merely three differently-labelled copies.
+    from_agent.locator(".fold-header").click()
+    expect(from_agent.locator(".fold-body")).to_contain_text("vendor B is cheaper")
+
+    # The recipient's side: a card entry for a message delivered to a running worker, labelled and
+    # dimmed off the text's own leading marker rather than a field the channel does not send.
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    card.locator("> .fold-header").click()
+    card_row = card.locator("> .fold-body > .bubble.inbox")
+    expect(card_row).to_have_count(1)
+    expect(card_row).to_have_class(re.compile(r"\bagent\b"))
+    expect(card_row.locator(".fold-kind")).to_have_text("agent")
+
+    # And the send nobody drained, reported at the end of the turn it was sent in.
+    notice = page.locator("#log > .bubble.notice")
+    expect(notice).to_have_count(1)
+    expect(notice).to_contain_text("researcher#2 -> coder#9")
+    expect(notice).to_contain_text("check the warranty")
 
 
 def test_alert_cards_group_and_guard_their_controls(page, live_server):

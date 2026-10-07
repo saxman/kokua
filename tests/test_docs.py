@@ -25,8 +25,8 @@ repository link or a site link inside either one reaches the site too and is hel
 resolves-or-fails standard. Neither file is held to the escaping-link check: both legitimately use
 plain repository-relative links today (`docs/how-to/...`, not `../../docs/how-to/...`).
 
-A fourth check holds the "How agents work" catalogue to its own template. Thirteen pages, written by
-different hands across three passes, are a catalogue rather than thirteen unrelated essays only if a
+A fourth check holds the "How agents work" catalogue to its own template. Fourteen pages, written by
+different hands across three passes, are a catalogue rather than fourteen unrelated essays only if a
 reader can predict a page's shape before opening it: where the transcript is, where the cost section
 is, where to read next. That promise is cheap to keep while a page is being drafted and easy to lose
 without anyone noticing, because a page missing or reordering a section still reads fine standing on
@@ -35,7 +35,7 @@ its own; only a sweep across every page catches the drift, which is why
 to have matched the last page they read.
 
 A fifth check holds that catalogue's index to the directory it indexes, in both directions. The index
-is the one file every one of the thirteen pages has to touch, so it is the file most likely to go
+is the one file every one of the fourteen pages has to touch, so it is the file most likely to go
 stale, and an unlisted page is invisible: `mkdocs.yml`'s nav would still surface it in the sidebar, so
 nothing else notices, while the section's own table of contents quietly stops being a table of
 contents. The reverse, an index entry naming a page that was renamed away, is caught by

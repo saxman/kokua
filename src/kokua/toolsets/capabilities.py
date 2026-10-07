@@ -76,6 +76,13 @@ def _compose_spec(
     recursion; keeping it out of here means these two functions are not mutually recursive and this
     one stays a pure translation from names to a spec.
     """
+    # Function-scope like its neighbours below, and load-bearing for the same reason: importing this
+    # module alone (which is all `discover_toolsets` does to find `TOOLSET`) leaves `kokua.core` out
+    # of `sys.modules` entirely, since nothing at this module's own top level reaches for it. A
+    # module-scope import here would pull in `kokua.core.__init__`, which imports `assistant.py`, which
+    # (through `core/build.py`) reaches back into `toolsets/` -- the same cycle `compaction_for_window`'s
+    # import below is deferred to dodge.
+    from kokua.core.messaging import WORKER_SOURCE
     from kokua.registry.context import ToolsetContext
 
     if any(requested.strip().lower() == TOOLSET_NAME for requested in tools):
@@ -98,6 +105,13 @@ def _compose_spec(
         "system_message": "".join([opener] + [toolset.guidance for toolset in selected if toolset.guidance]),
         "tools": built,
     }
+    # Written unconditionally, the same way `build_agent_specs` writes it for a declared worker (see
+    # `core/agents.py`): a composed worker is a worker, and without a reader of its own it never mints
+    # an address, so `core/messaging.py`'s `current_address` is left holding whatever this call's own
+    # caller set, and `send_message` would attribute a composed worker's message to the agent that
+    # composed it. `WORKER_SOURCE`, never `ENTRY_SOURCE`, for the same reason it is a worker's choice
+    # there: this is an independent run, not the conversation's own cursor.
+    spec["inbox"] = WORKER_SOURCE
     if model:
         spec["model"] = model
     # Resolved rather than declared, for the reason `build_agent_specs` resolves them: AIMU reads a
@@ -229,6 +243,7 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         # Function-scope for a second reason: core/build.py reaches toolsets/, so a module-scope import
         # of core.agents here would close that cycle.
         from kokua.core.agents import compaction_for_window
+        from kokua.core.metrics import record_event
 
         # The global default, not a per-agent cap: a composed worker is built per call and discarded
         # with the call, so it is not an agent the config describes and [assistant].max_iterations is
@@ -242,6 +257,11 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             max_depth=1,
             tool_approval=state.tool_approval,
             observer=state.observer,
+            # Missing until now, the same way `inbox` was: `_spawn_tool`/`make_delegation_tool` (the
+            # declared-worker factories) pass this too, and without it a composed worker's model calls
+            # never reach `current_metrics`, so the turn's own cost accounting silently excludes
+            # whatever it spent.
+            events=record_event,
             max_iterations=state.config.max_iterations,
             compaction=compaction_for_window(state.config.generation),
         )

@@ -114,6 +114,7 @@ nav:
       - Capability is declared: how-agents-work/capability-is-declared.md
       - Context and memory: how-agents-work/context-and-memory.md
       - Delegation: how-agents-work/delegation.md
+      - Agent messaging: how-agents-work/agent-messaging.md
   - How-to:
       - how-to/index.md
       - Set up a toolset: how-to/set-up-toolsets.md

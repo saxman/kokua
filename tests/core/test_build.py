@@ -265,6 +265,7 @@ ENTRY_AGENT_TOOLS = {
     "aimu builtin.time": {"get_current_date_and_time", "convert_time"},
     "aimu make_async_subagent_tool": {"spawn_subagent"},
     "kokua toolsets/benchmark.py": {"benchmark_model"},
+    "kokua toolsets/messaging.py": {"send_message", "list_agents"},
 }
 # Present because the shipped entry agent declares the `memory` and `documents` toolsets, so they are
 # asserted separately from the rest below.

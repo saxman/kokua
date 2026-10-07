@@ -295,7 +295,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    it belongs inside the turn above it. That is also why it carries none of a turn's controls: there is
    no turn of its own to branch, and the index that would truncate "here" points into the middle of
    one. */
-.bubble.user.steered { margin-top: 10px; }
+.bubble.user.mid-turn { margin-top: 10px; }
 .row-marker { flex: none; color: var(--fg-faint); user-select: none; }
 .assistant { margin-top: 10px; }
 /* On the body, not the block: as a flex item of the block it would sit beside the content instead of
@@ -341,10 +341,16 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .thinking, .loop { font-size: 0.85em; }
 .tool { font-family: ui-monospace, monospace; font-size: 0.82em; }
 .subagent, .plan { font-size: 0.9em; }
-/* Same indent and width cap as the machine-event rows above, so a steering entry lines up with the
-   card's other rows, but deliberately left out of that group's dimmed colour: this text is the
-   user's own words, not an event the machine produced, and dimming it would read as the opposite. */
-.steering { margin: 1px 0 1px 14px; max-width: var(--row-measure); font-size: 0.85em; }
+/* Same indent and width cap as the machine-event rows above, so a mid-turn message entry lines up
+   with the card's other rows, but deliberately left out of that group's dimmed colour: this text is
+   the user's own words, not an event the machine produced, and dimming it would read as the
+   opposite. */
+.inbox { margin: 1px 0 1px 14px; max-width: var(--row-measure); font-size: 0.85em; }
+/* A worker's own note into a turn already running (replayed `inbox` item, `from: "agent"`), unlike
+   the plain case above: nobody typed this, so it folds into the dimmed machine-event group after
+   all. A mixed delivery (`from: "mixed"`) keeps the undimmed default instead, since part of that one
+   message really is the user's own words and dimming the whole line would misrepresent that part. */
+.inbox.agent { color: var(--fg-dim); }
 .tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; }
 .tool-output .output-text { display: block; max-height: 24em; overflow: auto; }
 .tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit;

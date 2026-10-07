@@ -2,8 +2,10 @@
 
 import re
 
+from aimu.models import PROVENANCE_KEY
 from aimu.sessions import Session
 
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
 from kokua.transcript_export import _render_item, _render_subagent, render_markdown
 
 
@@ -428,6 +430,32 @@ def test_a_cards_loop_entry_falls_back_and_caps_like_its_siblings():
     assert "_[some_new_kind: short]_" in out
 
 
+def test_a_cards_message_entry_is_not_dropped():
+    """A `message` card entry matched none of the branches here before this test existed, so the
+    loop fell through to appending nothing: the blank line ahead of the `if`/`elif` chain stayed,
+    and the text itself vanished. Total loss for an agent-to-worker message specifically, since a
+    message delivered into a running worker never becomes a message in `session.messages` at all
+    (`core/subagents.py`'s own docstring says so) -- this card entry is the only place its words
+    exist anywhere in the stored record, live or exported."""
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "message", "text": "[message from assistant] use the index"}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, None))
+    assert "**Message (mid-turn):** [message from assistant] use the index" in out
+
+
+def test_a_cards_message_entry_is_capped_like_its_siblings():
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "message", "text": "x" * 40}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, 10))
+    assert "xxxxxxxxxx\n... [truncated, 40 chars total]" in out
+
+
 def test_a_phase_with_detail_shows_both_the_label_and_the_detail():
     session = _session(
         [{"role": "user", "content": "plan it"}],
@@ -802,12 +830,38 @@ def test_a_very_long_failure_reason_is_capped_like_any_other_payload():
     assert "truncated" in out
 
 
+def test_an_undelivered_report_is_rendered_as_a_blockquote_naming_sender_and_selector():
+    """Like ``failure``'s notice, this is the turn reporting on itself rather than more of what it
+    produced, which is why it is a blockquote too. Unlike ``inbox``, this message never reached a
+    stored transcript message at all, so there is no provenance tag to read it off: the sender and
+    the selector come straight from the item, and both are named because neither alone tells a
+    reader anything to act on."""
+    item = {"type": "undelivered", "sender": "researcher#1", "to": "assistant", "text": "look at the index"}
+    lines = _render_item(item, None)
+    assert len(lines) == 1
+    assert lines[0].startswith("> ")
+    assert "researcher#1" in lines[0]
+    assert "assistant" in lines[0]
+    assert "look at the index" in lines[0]
+
+
+def test_an_undelivered_report_is_exported_end_to_end():
+    """Through ``replay_items`` and ``record_turn_provenance``'s own metadata shape, not a hand-built
+    item, so the export is pinned against the same ``undelivered`` map the turn actually writes."""
+    session = _session(
+        [{"role": "user", "content": "summarize the log"}, {"role": "assistant", "content": "done"}],
+        {"undelivered": {"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}},
+    )
+    out = render_markdown(session)
+    assert "researcher#1" in out and "look at the index" in out
+
+
 def test_a_scheduled_runs_task_is_named_in_the_header():
     session = _session([{"role": "user", "content": "run"}], {"task_id": "nightly-digest"})
     assert "nightly-digest" in render_markdown(session).split("## Turn")[0]
 
 
-def test_a_steering_message_is_exported_inside_the_turn_it_was_sent_into():
+def test_a_mid_turn_message_is_exported_inside_the_turn_it_was_sent_into():
     """One turn, not two: a message sent into a running turn has no turn of its own, and a heading
     for it would claim the answer below it was a reply to it."""
     session = _session(
@@ -816,14 +870,72 @@ def test_a_steering_message_is_exported_inside_the_turn_it_was_sent_into():
             {"role": "user", "content": "use the cache"},
             {"role": "assistant", "content": "done"},
         ],
-        {"steering": {"0": [1]}},
+        {"messages": {"0": [1]}},
     )
     out = render_markdown(session)
     assert out.count("## Turn ") == 1
     assert "**User (mid-turn):** use the cache" in out
 
 
-def test_a_steering_item_is_attributed_to_the_user_who_sent_it():
+def test_an_inbox_item_is_attributed_to_the_user_who_sent_it():
     """Its own label rather than ``loop``'s italic machine note: these are a person's words, and the
-    export says so for the reason the page gives a steering row the foreground colour."""
-    assert _render_item({"type": "steering", "text": "use the cache"}, None) == ["**User (mid-turn):** use the cache"]
+    export says so for the reason the page gives this row the foreground colour."""
+    assert _render_item({"type": "inbox", "text": "use the cache"}, None) == ["**User (mid-turn):** use the cache"]
+
+
+def test_an_agent_sent_inbox_item_is_not_signed_by_the_user():
+    """The label is the one place this export states who spoke, so it has to read the item rather
+    than assume: one of the turn's own agents can send a mid-turn message too, and signing a
+    worker's note "User" is the impersonation the provenance tag exists to stop."""
+    item = {"type": "inbox", "text": "look at the index", "from": "agent"}
+    assert _render_item(item, None) == ["**Agent (mid-turn):** look at the index"]
+
+
+def test_an_agent_message_is_exported_as_agent_sent_end_to_end():
+    """Through ``replay_items`` rather than from a hand-written item, because the flag the renderer
+    reads has to be the one the tagged message produces."""
+    session = _session(
+        [
+            {"role": "user", "content": "summarize the log"},
+            {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+            {"role": "assistant", "content": "done"},
+        ],
+        {"messages": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert out.count("## Turn ") == 1
+    assert "**Agent (mid-turn):** look at the index" in out
+    assert "User (mid-turn)" not in out
+
+
+def test_a_mixed_sent_inbox_item_is_not_signed_by_the_user_either():
+    """A delivery that joined the user's own words with an agent's is not one the tag can call
+    ``PROVENANCE_AGENT`` (that would claim none of it is the user's, which is false), but it is not
+    the user's words alone either, and signing the whole of it "User" would credit an agent's half to
+    the user: the same impersonation the ``agent``-only case exists to stop, by a different route."""
+    item = {"type": "inbox", "text": "use the cache\n\n[message from researcher#1] and the index", "from": "mixed"}
+    assert _render_item(item, None) == [
+        "**Mixed (mid-turn):** use the cache\n\n[message from researcher#1] and the index"
+    ]
+
+
+def test_a_mixed_message_is_exported_as_mixed_not_user_end_to_end():
+    """Through ``replay_items`` rather than from a hand-written item, the same way the agent-only
+    case is pinned end to end, so the flag asserted here is the one ``PROVENANCE_MIXED`` actually
+    produces rather than one this test assumes."""
+    session = _session(
+        [
+            {"role": "user", "content": "summarize the log"},
+            {
+                "role": "user",
+                "content": "use the cache\n\n[message from researcher#1] and the index",
+                PROVENANCE_KEY: PROVENANCE_MIXED,
+            },
+            {"role": "assistant", "content": "done"},
+        ],
+        {"messages": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert out.count("## Turn ") == 1
+    assert "**Mixed (mid-turn):** use the cache\n\n[message from researcher#1] and the index" in out
+    assert "**User (mid-turn):**" not in out

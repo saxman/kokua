@@ -10,7 +10,9 @@ from aimu.models import StreamChunk, StreamingContentType
 
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
+from kokua.core.messaging import MessageBus, current_address, current_bus
 from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, subagent_events
+from kokua.toolsets.messaging import send_message
 from tests.channels import SubagentCapturingChannel
 
 # No existing reporter test produces a response over RESPONSE_PREVIEW_CHARS, so nothing is ever
@@ -53,8 +55,8 @@ def _continuing(kind, prompt):
     return StreamChunk(StreamingContentType.CONTINUING, {"kind": kind, "prompt": prompt})
 
 
-def _steering(text):
-    return StreamChunk(StreamingContentType.STEERING, {"text": text})
+def _inbox(text):
+    return StreamChunk(StreamingContentType.INBOX, {"text": text})
 
 
 async def test_a_spawn_opens_a_running_card_and_closes_it_with_the_answer():
@@ -323,16 +325,44 @@ async def test_an_injected_round_reaches_the_card_with_what_the_worker_was_told(
     assert events[-1] == {"id": "researcher-abc", "append": entry}
 
 
-async def test_a_workers_steering_chunk_is_recorded_on_its_card():
-    """A steering message is the user's own words reaching a worker already running, not the loop
-    injecting a round of its own, so it has to land as its own kind rather than a `loop` entry (which
-    would credit the loop with what a person said)."""
+async def test_a_workers_inbox_chunk_is_recorded_on_its_card():
+    """A message sent into a worker already running is the user's own words, not the loop injecting a
+    round of its own, so it has to land as its own kind rather than a `loop` entry (which would credit
+    the loop with what a person said)."""
     reporter, channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _steering("stop that"))
+    await reporter.chunk("r-1", _inbox("stop that"))
 
-    entry = {"kind": "steering", "text": "stop that"}
+    entry = {"kind": "message", "text": "stop that"}
+    assert channel.subagent_frames[-1] == {"id": "r-1", "append": entry}
+    assert events[-1] == {"id": "r-1", "append": entry}
+
+
+async def test_a_message_chunk_becomes_a_card_entry_naming_its_sender():
+    """The card entry carries whatever a real bus drain produced, not a hand-written stand-in for it.
+
+    A fixture that types the attributed text itself (``{"text": "researcher#1 said: use the index"}``)
+    would pass this test whether or not ``core/messaging.py`` ever composed that prefix at all, since
+    ``SubagentReporter.chunk`` only ever repeats the text it is given. So the input here is the real
+    output of :meth:`MessageBus.entry_reader`'s drain -- ``_for_model``'s own ``[message from {sender}]``
+    rendering of a worker's note to its parent -- and the assertion compares the card entry against
+    that same variable rather than against a second, independently typed copy of it. Whether that
+    rendering happens at all, which is the security property, is pinned separately in
+    ``tests/core/test_messaging.py``; what this test owns is narrower: the card shows the sender's
+    words unmodified, carrying whatever attribution the drain actually put there.
+    """
+    bus = MessageBus()
+    bus.send("use the index", sender="researcher#1", to="assistant")
+    delivered = bus.entry_reader("assistant")()
+    assert len(delivered) == 1  # one message sent, one line drained; see the drain call just above
+
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _inbox(delivered[0]))
+
+    entry = {"kind": "message", "text": delivered[0]}
     assert channel.subagent_frames[-1] == {"id": "r-1", "append": entry}
     assert events[-1] == {"id": "r-1", "append": entry}
 
@@ -545,3 +575,111 @@ async def test_a_spawn_with_no_thinking_configured_anywhere_records_none():
     events = _collect()
     await reporter.spawned("s-1", "researcher", "find sources")
     assert "thinking" not in events[0]
+
+
+# The other half of refusing a run with no address of its own. `send_message` refuses when
+# `current_address` is unset,
+# and these cover why it is ever *correctly* unset or restored rather than merely hoping `reader()`
+# ran. `core/messaging.py` itself cannot do this: a reader opens once, at a run's own start, and
+# nothing in AIMU's Inbox protocol calls back when a run ends, so there is no hook there to restore
+# the caller's address once a spawned run returns. `spawned`/`finished` are the one pair AIMU calls
+# around every spawn Kokua makes, declared or composed (both factories pass this reporter as
+# `observer`), which is what makes them the right place for this instead.
+
+
+async def test_spawned_clears_current_address_for_the_run_about_to_start():
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+
+    assert current_address.get() is None
+
+
+async def test_finished_restores_whatever_spawned_saved():
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+    # Standing in for the spawned run opening its own reader mid-flight, between `spawned` and
+    # `finished`, the way a real one does inside `agent.run()`.
+    current_address.set("researcher#1")
+    await reporter.finished("s-1", "the answer", None)
+
+    assert current_address.get() == "assistant"
+
+
+async def test_finished_restores_even_when_the_spawn_failed():
+    # `_run_observed` calls `finished` from a `finally`, so the restore must not depend on a clean
+    # result either. Nothing here reaches into AIMU's loop to prove that ordering; it only pins that
+    # *this* reporter's own restore does not skip itself when `error` is set.
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+    current_address.set("researcher#1")
+    await reporter.finished("s-1", "", ValueError("boom"))
+
+    assert current_address.get() == "assistant"
+
+
+async def test_nested_spawns_restore_in_the_right_order():
+    # A composed worker that itself composes one more (depth > 1) is two `spawned`/`finished` pairs,
+    # not one, and they nest: the outer's `finished` must not run before the inner's, and each must
+    # restore to what was current when *it* started, not to some shared default. Tokens keyed by
+    # spawn_id (see `SubagentReporter.__init__`) are what keeps this correct without an explicit
+    # stack: each `finished` only ever resets the token its own `spawned` saved.
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("outer", "composed", "task")
+    current_address.set("researcher#1")  # the outer spawn claims its own address
+
+    await reporter.spawned("inner", "composed", "nested task")
+    current_address.set("coder#1")  # the inner spawn claims its own, deeper still
+    assert current_address.get() == "coder#1"
+
+    await reporter.finished("inner", "inner answer", None)
+    assert current_address.get() == "researcher#1"  # back to the outer spawn's own address
+
+    await reporter.finished("outer", "outer answer", None)
+    assert current_address.get() == "assistant"  # back to the original caller
+
+
+async def test_a_real_spawn_through_the_reporter_leaves_the_parents_own_send_correctly_attributed():
+    """The join the bracket exists for, which neither half proves alone.
+
+    Each half is pinned on its own
+    elsewhere: `spawned`/`finished` restoring `current_address` is the tests above, and `bus.send`
+    attributing a message to whatever `current_address` holds is `tests/core/test_messaging.py`.
+    Neither is the join the bracket was built for -- `send_message`, called by the parent right after
+    a real spawn runs through this reporter, attributed to the parent and not to the worker it just
+    spawned -- which is the shape that has to be reconstructed by hand whenever this is questioned, so
+    it is pinned here instead.
+    """
+    reporter, _ = _reporter()
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+
+    bus_token = current_bus.set(bus)
+    try:
+        await reporter.spawned("s-1", "researcher", "find sources")
+        # Stands in for the spawned worker's own `agent.run()` calling `_open_inbox`, which is what a
+        # real spawn does between `spawned` and `finished` -- see `spawned`'s own docstring.
+        bus.reader("subagent-researcher")
+        await reporter.finished("s-1", "the answer", None)
+
+        # The spawn has returned; this is the parent's own next tool call in the same round. Nothing
+        # between `finished` and this line reopens the parent's reader, so if the bracket's restore
+        # had not run, this would still be attributed to "researcher#1".
+        receipt = send_message("researcher#1", "any luck?")
+    finally:
+        current_bus.reset(bus_token)
+
+    assert "no agent" not in receipt.lower()
+    assert "no address" not in receipt.lower()
+    resubmit, report = bus.close()
+    assert resubmit == []
+    assert len(report) == 1
+    assert report[0].sender == "assistant"
+    assert report[0].to == "researcher#1"

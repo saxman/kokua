@@ -7,7 +7,11 @@ every capped read an `offset` and a truncation notice naming the call that conti
 not reused, so the gap it left stays. Item 18, the page guessing which of the messages it drew became
 turns, was resolved 2026-10-01: a composer message now carries a token the server echoes on whichever
 frame reports that message's fate, so `app.js` matches a bubble to its turn instead of counting saves
-off against bubbles and predicting which text runs no turn at all.
+off against bubbles and predicting which text runs no turn at all. Item 21, a composed sub-agent being
+unreachable mid-turn and uncounted, was resolved 2026-10-06 by the agent-messaging change: that spawn
+call now passes both `inbox=WORKER_SOURCE` and `events=record_event`, and the first of those turned out
+to carry a second obligation nobody had seen, since a run that opens no reader mints no bus address and
+`send_message` would have attributed its message to whoever composed it.
 Backlog only, not yet scheduled. File references point at current code.
 
 ## 1. Make session-level config overrides visible
@@ -219,17 +223,3 @@ Approving from the card itself was considered and rejected in the same discussio
 `execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread.
 
-## 21. A composed sub-agent is unsteerable and uncounted
-`toolsets/capabilities.py`'s `compose_subagent` builds its own `make_async_subagent_tool` rather than
-going through `core/agents.py`, and passes neither `steering=STEERING_SOURCE` nor `events=record_event`.
-So a worker composed per call cannot be reached by a message the user types mid-turn (the redirection
-stops at the supervisor, which is the thing mid-turn steering exists to prevent), and its model calls
-are invisible to `TurnMetrics`, so a turn that composes heavily reads as cheap. Both are the same
-omission at the same call: every other spawn path passes both.
-
-Reachable on a default install, not hypothetical: `capabilities` is in `config.example.toml`'s
-`[agents.assistant].tools`. The fix is two keyword arguments, and what it wants first is a decision
-about where that spawn tool is built, since duplicating `core/agents.py`'s argument list is what let
-two of its arguments go missing. `docs/explanation/architecture.md` names the gap where it explains the
-unconditional spec write, and narrows the coverage claim beside it; README and CHANGELOG are narrowed
-to "every worker a declared agent spawned", so they come back when this lands.

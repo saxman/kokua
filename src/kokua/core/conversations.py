@@ -46,11 +46,13 @@ COPY_TITLE_PREFIX = "Copy of "
 # transcript, so indices do not move and these are filtered rather than remapped. That is only true
 # while a branch keeps the parent's messages from index 0 onward; anything that changes what index 0
 # is has to revisit this.
-# `steering` is the first entry whose *values* are message indices too, and the argument for those
+# `messages` is the first entry whose *values* are message indices too, and the argument for those
 # runs one step further than the argument for keys: every index a turn recorded sits below the *next*
 # turn's user message, so a key a prefix cut keeps brings values that are still inside the kept
 # transcript, and a key it drops takes its values with it. Nothing points across the cut either way.
-TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "steering")
+# `undelivered` does not share that further argument: its values are sender/selector/text dicts, not
+# indices, so it only needs the argument every other entry here already makes.
+TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "messages", "undelivered")
 
 
 class TurnNotFound(Exception):
@@ -86,43 +88,55 @@ class TurnInFlight(Exception):
     """
 
 
-def steered_indices(metadata: dict) -> frozenset[int]:
+def mid_turn_indices(metadata: dict) -> frozenset[int]:
     """Every message index a session recorded as a message sent into a turn while it ran.
 
     Flattened across turns, for the reason ``core.transcripts.replay_items`` flattens the same map:
-    the question any reader asks is "was this message steering", and a message belongs to at most one
+    the question any reader asks is "was this message mid-turn", and a message belongs to at most one
     turn, so which turn recorded it adds nothing. Unlike :func:`_metadata_before`, which has to refuse
     a non-digit key before comparing it to a cut, nothing here reads a key at all: a value that is not
     a message index simply matches no message, so a hand-edited key costs a reader nothing.
 
-    What that tolerance does not extend to is a record of the wrong *shape*. A ``steering`` that is not
+    What that tolerance does not extend to is a record of the wrong *shape*. A ``messages`` that is not
     a mapping has no ``values()``, and an index that is not hashable cannot enter a set, so either one
     raises out of here rather than being skipped. That is the exposure ``core/transcripts.py`` already
     has over this same map, so the two readers of it agree on what a malformed record does, and
     hardening one of them alone would only move where the failure surfaces.
     """
-    return frozenset(index for indices in metadata.get("steering", {}).values() for index in indices)
+    return frozenset(index for indices in metadata.get("messages", {}).values() for index in indices)
 
 
-def turn_end(messages: list[dict], user_index: int, *, steered: frozenset[int] = frozenset()) -> Optional[int]:
+def turn_end(messages: list[dict], user_index: int, *, mid_turn: frozenset[int] = frozenset()) -> Optional[int]:
     """The exclusive end of the turn opened at ``user_index``, or None if no turn starts there.
 
-    The end is the next message the user sent to *start* a turn, or the end of the transcript. Two
-    kinds of ``user``-role message sit inside a turn rather than opening one, and neither ends it:
+    The end is the next message the user sent to *start* a turn, or the end of the transcript. Four
+    kinds of ``user``-role message sit inside a turn rather than opening one, and none of them ends it:
 
     - the nudges the agent loop injects between tool-calling iterations, which carry the role and a
-      provenance tag :func:`kokua.core.messages.is_user_turn` recognises; and
+      provenance tag :func:`kokua.core.messages.is_user_turn` recognises;
+    - a message one of the turn's own agents sent to another run on it (see ``core/messaging.py``),
+      which carries ``messages.PROVENANCE_AGENT`` and so is recognised by that same predicate, with
+      no record needed;
     - a message the user typed while the turn was running, which carries no tag at all, because it
-      genuinely is user input rather than something the loop injected (see ``core/steering.py``).
+      genuinely is user input rather than something a machine put in their place; and
+    - one delivery that joined the two, which carries ``messages.PROVENANCE_MIXED``: a tag that
+      predicate deliberately does *not* recognise, because part of the message really is the user's
+      own words, so it answers ``True`` here exactly as the untagged kind above does.
 
-    ``steered`` is what names the second kind, and it has to be a parameter because nothing in such a
-    message distinguishes it: ``session.metadata["steering"]`` is the only record, flattened by
-    :func:`steered_indices`. Ending at one would cut the turn off before the answer it produced, which
-    for a steering message is the redirected answer a user branching there almost certainly wants.
-    A steered index is refused as a turn *start* for the same reason, so no cut this function approves
+    ``mid_turn`` is what names the third kind and the fourth, and it has to be a parameter because
+    nothing in such a message distinguishes it: ``session.metadata["messages"]`` is the only record,
+    flattened by :func:`mid_turn_indices`. It names the second kind too, which is belt and braces
+    rather than redundancy worth removing: there the record and the tag answer independently, so a
+    reader holding the messages without the record still cannot cut an agent's message in half. The
+    mixed kind gets no such second answer, which is why it is listed apart from that one rather than
+    folded into it: for a mixed delivery the record is the whole of what keeps a cut out, exactly as it
+    is for the user's own mid-turn words. Ending at any of the four would cut the turn off before the
+    answer it produced, which
+    for a mid-turn message is the redirected answer a user branching there almost certainly wants.
+    A mid-turn index is refused as a turn *start* for the same reason, so no cut this function approves
     can land inside a turn.
 
-    ``steered`` defaults to empty, which is what makes a transcript stored before mid-turn steering
+    ``mid_turn`` defaults to empty, which is what makes a transcript stored before mid-turn messaging
     existed behave exactly as it did before: no record, no indices, and every untagged ``user`` message
     the boundary it has always been.
 
@@ -130,10 +144,10 @@ def turn_end(messages: list[dict], user_index: int, *, steered: frozenset[int] =
     assistant message holding ``tool_calls`` and the ``tool`` messages answering them, which a provider
     rejects on the next request rather than here, where it could still be reported.
     """
-    if not 0 <= user_index < len(messages) or not is_user_turn(messages[user_index]) or user_index in steered:
+    if not 0 <= user_index < len(messages) or not is_user_turn(messages[user_index]) or user_index in mid_turn:
         return None
     for index in range(user_index + 1, len(messages)):
-        if is_user_turn(messages[index]) and index not in steered:
+        if is_user_turn(messages[index]) and index not in mid_turn:
             return index
     return len(messages)
 
@@ -399,7 +413,7 @@ class ConversationBook:
         operation cannot disagree.
         """
         session = self._store.get(conversation_id)
-        return turn_end(session.messages, user_index, steered=steered_indices(session.metadata)) is not None
+        return turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is not None
 
     def branch(self, conversation_id: str, user_index: int) -> str:
         """Fork a conversation at one of its turns into a new one, switch to it, and return its id.
@@ -424,7 +438,7 @@ class ConversationBook:
         collide with.
         """
         parent = self._store.get(conversation_id)
-        cut = turn_end(parent.messages, user_index, steered=steered_indices(parent.metadata))
+        cut = turn_end(parent.messages, user_index, mid_turn=mid_turn_indices(parent.metadata))
         if cut is None:
             raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
         previous_id = self._active_id
@@ -565,7 +579,7 @@ class ConversationBook:
             if turn_running is not None and turn_running(conversation_id):
                 raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
             session = self._store.get(conversation_id)
-            if turn_end(session.messages, user_index, steered=steered_indices(session.metadata)) is None:
+            if turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is None:
                 raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
             removed = len(session.messages) - user_index
             session.messages = session.messages[:user_index]
@@ -718,7 +732,7 @@ class ConversationBook:
         thinking: Optional[Union[bool, str]] = None,
         failure: Optional[str] = None,
         usage: Optional[dict] = None,
-        steering: Optional[list[int]] = None,
+        messages: Optional[list[int]] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
         reasoning effort it ran at, why it stopped early if it did, what it cost, and which of its
@@ -747,15 +761,15 @@ class ConversationBook:
         says which model that was. A turn whose provider reported no token counts stores the record
         without them rather than storing zeros, so a reader can tell an unmeasured turn from a free one.
 
-        ``steering`` is where the messages the user sent into this turn landed in the transcript, as
-        ``core.messages.resolve_steering_indices`` resolved them. It is the only record of the
+        ``messages`` is where the messages the user sent into this turn landed in the transcript, as
+        ``core.messages.resolve_message_indices`` resolved them. It is the only record of the
         difference: a message handed to a running turn is committed as an ordinary ``user`` message, so
         nothing in the transcript tells it apart from one that started a turn, and a replay that
         guesses from position offers a turn's own controls on a message that has no turn. An empty list
-        stays out of the file, like an unconfigured effort, so an unsteered turn reads as one that
-        never had the question put to it.
+        stays out of the file, like an unconfigured effort, so a turn that received none reads as one
+        that never had the question put to it.
         """
-        if user_index < 0 or not (events or model or thinking is not None or failure or usage or steering):
+        if user_index < 0 or not (events or model or thinking is not None or failure or usage or messages):
             return
         session = self._store.get(conversation_id)
         if events:
@@ -768,8 +782,64 @@ class ConversationBook:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
         if usage:
             session.metadata.setdefault("usage", {})[str(user_index)] = usage
-        if steering:
-            session.metadata.setdefault("steering", {})[str(user_index)] = list(steering)
+        if messages:
+            session.metadata.setdefault("messages", {})[str(user_index)] = list(messages)
+        self._store.save(session)
+
+    def record_undelivered(self, conversation_id: str, user_index: int, reports: list[dict]) -> None:
+        """Persist what one of this turn's own agents sent and no reader took, so a reload still says so.
+
+        A separate call rather than one more keyword on :meth:`record_turn_provenance`, because what it
+        records is discovered later than everything else that method writes: ``MessageBus.close()``
+        runs in the turn's own ``finally``, after every call this turn makes to that method has already
+        returned. ``reports`` is plain ``sender``/``to``/``text`` dicts rather than ``core.messaging``'s
+        ``Message`` objects, which is the caller's to build (``TurnRunner``, which already holds the
+        bus); this module has no reason to import that dataclass just to read three of its fields back
+        out again.
+
+        Keyed the same way every other turn-indexed record here is, ``str(user_index)``, which is what
+        lets it ride ``TURN_KEYED_METADATA``'s existing filter unchanged: a branch or a truncation that
+        keeps this turn keeps this list with it, and one that drops the turn drops the list too, with no
+        special case written for it.
+
+        An empty list stays out of the file, like every other optional entry :meth:`record_turn_provenance`
+        writes, so a turn whose agents' messages all landed reads as one with nothing to report. A
+        negative ``user_index`` means the turn committed no message of its own to key this under, so
+        there is nowhere to write it and this is a no-op, exactly as :meth:`record_turn_provenance`
+        treats the same case.
+
+        **Checked against :meth:`exists` before the read, which is the one guard
+        :meth:`record_turn_provenance` has never needed.** Every other write in this class runs from
+        inside a caller already holding this conversation's ``gate.turn`` (a turn's own record calls,
+        made before its ``finally`` releases the gate; ``retitle``/``truncate``/``delete`` taking that
+        hold directly), so a concurrent ``delete`` is already excluded by the time any of them touches
+        the store. This one is not: ``TurnRunner`` only learns what to write here from
+        ``MessageBus.close()``, which by design runs in the turn's own outer ``finally`` *after* that
+        hold has released (see ``core/turns.py``'s invariant 10 and its own note on this call), so
+        nothing stands between this write and a ``delete_conversation`` racing it. The pin that turn
+        still holds while it writes is no second defense: a pin keeps the conversation's agent in the
+        registry, not its session in the store. The window is narrower than it looks and is not closed,
+        which is the form that invariant states it in: ``TurnGate.turn``'s own exit releases this
+        conversation's lock before re-acquiring the gate's shared condition, and that re-acquire
+        suspends whenever another conversation's turn is finishing in the same instant, which is a
+        yield point a waiting delete can run on. Without the guard, ``get`` on a key a concurrent
+        delete just removed hands back a fresh empty ``Session`` (exactly the hazard this method's own sibling warns about), and
+        ``save`` would write that straight back, resurrecting a conversation someone just deleted as a
+        blank "New conversation". The check and the write that follows it share one synchronous call
+        (this class's store is sync throughout, by the ABC's own contract -- see ``aimu.sessions``),
+        so nothing else on the event loop can run a delete in between them: either the conversation
+        is already gone by the time this call starts, and it stays gone, or it is not, and nothing can
+        remove it before ``save`` lands. A hold of this conversation's own gate would close the same
+        window (and is how every *other* writer here closes it), but would do so by re-opening one
+        this call does not otherwise need, just to serialize against a delete that a plain existence
+        check already rules out cheaply.
+        """
+        if user_index < 0 or not reports:
+            return
+        if not self.exists(conversation_id):
+            return
+        session = self._store.get(conversation_id)
+        session.metadata.setdefault("undelivered", {})[str(user_index)] = list(reports)
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

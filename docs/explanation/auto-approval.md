@@ -206,6 +206,13 @@ against `update_config`, so reading is the whole of the reach.
 request, and the arguments. It does not see the conversation, the files on disk, or what the previous
 call did. A sequence of individually innocuous calls is reviewed as individually innocuous calls.
 
+**The request grows only when you say more.** A message you type into a turn already running is
+appended to it, so a turn you redirect has its later calls judged against what you now want rather
+than against instructions you have already replaced. A message one of the turn's *agents* sends to
+another (`core/messaging.py`'s `send_message`) is not, and that is a rule rather than an oversight: a
+model editing what its own reviewer judges it against is an escalation, where you editing it is you
+exercising your own budget. The whole of that rule is one sender test in `MessageBus.send`.
+
 ## How other assistants do this
 
 Worth reading even if you never turn this on, because the differences are design decisions rather than

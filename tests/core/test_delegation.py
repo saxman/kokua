@@ -5,7 +5,7 @@ from aimu.tools import builtin
 
 from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.core.agents import build_agent_specs, build_registry
-from kokua.core.steering import STEERING_SOURCE
+from kokua.core.messaging import WORKER_SOURCE
 from kokua.registry.context import LiveState
 
 SPAWN = "spawn_subagent"
@@ -302,7 +302,7 @@ def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
         "generate_kwargs",
         "max_iterations",
         "compaction",
-        "steering",
+        "inbox",
     } <= SUBAGENT_SPEC_KEYS
 
 
@@ -565,8 +565,8 @@ def test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_ex
     assert {"export_conversation", "read_file"} <= names
 
 
-def test_every_worker_spec_carries_the_steering_source(tmp_path):
-    """``STEERING_SOURCE``, never ``ENTRY_STEERING_SOURCE``: a worker reads an independent cursor, so a
+def test_every_worker_spec_carries_the_worker_source(tmp_path):
+    """``WORKER_SOURCE``, never ``ENTRY_SOURCE``: a worker reads an independent cursor, so a
     message only a worker consumed still comes back from ``close`` and runs as a follow-up turn rather
     than counting as the conversation having seen it.
 
@@ -582,4 +582,4 @@ def test_every_worker_spec_carries_the_steering_source(tmp_path):
     specs = build_agent_specs(config, state, config.entry_agent)
 
     assert sorted(specs) == ["coder", "researcher"]
-    assert all(spec["steering"] is STEERING_SOURCE for spec in specs.values())
+    assert all(spec["inbox"] is WORKER_SOURCE for spec in specs.values())

@@ -12,7 +12,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
 from kokua.core.conversations import ConversationNotFound, TurnInFlight, TurnNotFound
-from kokua.core.messages import TITLE_MAX
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, TITLE_MAX
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -302,7 +302,7 @@ async def test_persist_writes_active_conversation(tmp_path):
 
 
 async def test_switch_methods_sync_channel_active_conversation_id(tmp_path):
-    """Item 1 from the Task 5 review: the muting key (WebChannel.active_conversation_id) and the
+    """The muting key (WebChannel.active_conversation_id) and the
     background-completion notification key (Assistant._active_id) must agree on what's viewed, so
     every switch method mirrors _active_id onto the channel (when it tracks one)."""
 
@@ -498,6 +498,42 @@ async def test_record_turn_provenance_writes_nothing_when_there_is_nothing_to_wr
     assistant._book.record_turn_provenance([], "", -1, assistant._active_id, usage=None)
 
     assert "usage" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_record_undelivered_persists_the_reports_under_the_turn_index(tmp_path):
+    """So a reload still shows what one of the turn's own agents sent and nobody read, the thing
+    `MessageBus.close()` only ever reports live otherwise."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(
+        assistant._active_id, 2, [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    )
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]["2"]
+    assert stored == [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+
+
+async def test_record_undelivered_writes_nothing_for_an_empty_report(tmp_path):
+    """Every turn's agents' messages landing is the common case, and it must not bloat every session
+    file the way a present-but-empty entry would."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(assistant._active_id, 2, [])
+
+    assert "undelivered" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_record_undelivered_writes_nothing_without_a_turn_to_key_it_under(tmp_path):
+    """A negative index means this turn committed no message of its own, so there is nowhere in the
+    transcript to anchor the report: the same guard `record_turn_provenance` applies to every entry
+    it writes."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(
+        assistant._active_id, -1, [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    )
+
+    assert "undelivered" not in assistant._store.get(assistant._active_id).metadata
 
 
 async def test_a_turn_that_reasoned_at_no_configured_effort_records_no_thinking(tmp_path):
@@ -1168,6 +1204,13 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
+        # Shaped like `usage`/`model` above, not `subagent`'s list-per-event map, but it rides the
+        # same TURN_KEYED_METADATA filter: a dict value, not an index, so it needs no further
+        # argument than the one every other entry here already makes (see that tuple's own comment).
+        undelivered={
+            "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}],
+            "5": [{"sender": "researcher#2", "to": "assistant", "text": "stale cache"}],
+        },
     )
 
     branch_id = assistant._book.branch(parent.key, 1)
@@ -1176,6 +1219,9 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
     assert branched.metadata["usage"] == {"1": {"calls": 1}}
     assert branched.metadata["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in branched.metadata
+    assert branched.metadata["undelivered"] == {
+        "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    }
 
 
 async def test_branch_records_where_it_came_from(tmp_path):
@@ -1390,6 +1436,10 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
+        undelivered={
+            "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}],
+            "5": [{"sender": "researcher#2", "to": "assistant", "text": "stale cache"}],
+        },
     )
 
     await assistant._book.truncate(parent.key, 5)
@@ -1399,6 +1449,7 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
     assert kept["usage"] == {"1": {"calls": 1}}
     assert kept["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in kept
+    assert kept["undelivered"] == {"1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}
 
 
 async def test_truncate_rebuilds_the_agent_from_the_shortened_transcript(tmp_path):
@@ -1630,11 +1681,12 @@ async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
     assert book.resolve(first) is not None
 
 
-# Two turns, each steered: an untagged `user` message between the turn's tool round and the answer it
-# redirected. That is the only `user`-role message with no tell at all (an injected nudge carries a
-# provenance tag), so it is the fixture every claim about `metadata["steering"]` has to be made on:
-# without a real one, a test can pin the metadata filter and nothing about the cut.
-STEERED_MESSAGES = [
+# Two turns, each carrying a mid-turn message: an untagged `user` message between the turn's tool
+# round and the answer it redirected. That is the only `user`-role message with no tell at all (an
+# injected nudge carries a provenance tag), so it is the fixture every claim about
+# `metadata["messages"]` has to be made on: without a real one, a test can pin the metadata filter and
+# nothing about the cut.
+MID_TURN_MESSAGES = [
     {"role": "system", "content": "you are kokua"},
     {"role": "user", "content": "plan the trip"},
     {
@@ -1656,57 +1708,58 @@ STEERED_MESSAGES = [
     {"role": "assistant", "content": "second answer"},
 ]
 
-STEERED_METADATA = {"1": [4], "6": [9]}
+MID_TURN_METADATA = {"1": [4], "6": [9]}
 
 
-async def _assistant_with_steered_parent(tmp_path):
-    """An assistant whose active conversation holds STEERED_MESSAGES and the record of its steering."""
+async def _assistant_with_mid_turn_parent(tmp_path):
+    """An assistant whose active conversation holds MID_TURN_MESSAGES and the record of its mid-turn
+    messages."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     parent = assistant._session
-    parent.messages = [dict(message) for message in STEERED_MESSAGES]
+    parent.messages = [dict(message) for message in MID_TURN_MESSAGES]
     parent.metadata["title"] = "Kauai trip"
-    parent.metadata["steering"] = {key: list(value) for key, value in STEERED_METADATA.items()}
+    parent.metadata["messages"] = {key: list(value) for key, value in MID_TURN_METADATA.items()}
     assistant._store.save(parent)
     return assistant, parent
 
 
-async def test_a_steering_record_survives_a_cut_that_keeps_its_turn(tmp_path):
-    """The steering map is turn-keyed like every other per-turn record, so a branch or a truncation
+async def test_a_mid_turn_record_survives_a_cut_that_keeps_its_turn(tmp_path):
+    """The messages map is turn-keyed like every other per-turn record, so a branch or a truncation
     has to carry it: a kept turn whose record was dropped replays its mid-turn messages as turns of
     their own again, which is the cut-in-half control the record exists to prevent."""
-    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
 
     await assistant._book.truncate(parent.key, 6)
 
     # Filtered rather than remapped, like its siblings: a prefix cut leaves surviving indices alone.
-    assert assistant._store.get(parent.key).metadata["steering"] == {"1": [4]}
+    assert assistant._store.get(parent.key).metadata["messages"] == {"1": [4]}
 
 
-async def test_branching_a_steered_turn_keeps_the_answer_the_steering_redirected(tmp_path):
-    """A steering message is an untagged `user` entry, so a scan for the next one stops at it and cuts
+async def test_branching_a_turn_keeps_the_answer_its_mid_turn_message_redirected(tmp_path):
+    """A mid-turn message is an untagged `user` entry, so a scan for the next one stops at it and cuts
     the turn in half. The branch would then lose both the redirection and the answer it produced, which
     is normally the whole reason for branching at that turn, and it would do so silently: `branchable`
     reads the same `turn_end`, so the control is offered and honoured and nothing reports the loss.
     """
-    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
 
     assert assistant._book.branchable(parent.key, 1)
     branch_id = assistant._book.branch(parent.key, 1)
 
-    # Through index 5, the redirected answer. A scan that stopped at the steering message (index 4)
+    # Through index 5, the redirected answer. A scan that stopped at the mid-turn message (index 4)
     # would have cut after index 3, the `tool` result answering the turn's first call, losing both the
     # redirection and the answer it produced.
-    assert assistant._store.get(branch_id).messages == STEERED_MESSAGES[:6]
-    assert assistant._store.get(branch_id).metadata["steering"] == {"1": [4]}
+    assert assistant._store.get(branch_id).messages == MID_TURN_MESSAGES[:6]
+    assert assistant._store.get(branch_id).metadata["messages"] == {"1": [4]}
 
 
-async def test_a_steering_message_is_not_a_turn_any_cut_can_land_on(tmp_path):
+async def test_a_mid_turn_message_is_not_a_turn_any_cut_can_land_on(tmp_path):
     """The other half of the same answer: a message sent into a turn does not start one, so no cut may
-    land on it. The page never offers the index (a steering item carries no `message_index`), which
+    land on it. The page never offers the index (an inbox item carries no `message_index`), which
     leaves this guard as what backstops a stale one, and a cut accepted here would fall between an
     assistant message holding `tool_calls` and the `tool` messages answering them.
     """
-    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
 
     assert not assistant._book.branchable(parent.key, 4)
     with pytest.raises(TurnNotFound):
@@ -1715,35 +1768,81 @@ async def test_a_steering_message_is_not_a_turn_any_cut_can_land_on(tmp_path):
         await assistant._book.truncate(parent.key, 4)
 
 
-async def test_a_transcript_with_no_steering_record_cuts_exactly_as_it_always_did(tmp_path):
+async def test_a_transcript_with_no_mid_turn_record_cuts_exactly_as_it_always_did(tmp_path):
     """Backward compatibility is the empty default, and it is worth a test of its own because it is
-    what lets every conversation stored before mid-turn steering existed keep its old boundaries: with
+    what lets every conversation stored before mid-turn messaging existed keep its old boundaries: with
     no record, nothing is excluded, and every untagged `user` message is the turn start it has always
     been. Same fixture, record withheld, and the answer moves to the one the old code gave.
     """
-    assistant, parent = await _assistant_with_steered_parent(tmp_path)
-    parent.metadata.pop("steering")
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    parent.metadata.pop("messages")
     assistant._store.save(parent)
 
     branch_id = assistant._book.branch(parent.key, 1)
 
-    assert assistant._store.get(branch_id).messages == STEERED_MESSAGES[:4]
+    assert assistant._store.get(branch_id).messages == MID_TURN_MESSAGES[:4]
     assert assistant._book.branchable(parent.key, 4)
 
 
-async def test_recording_an_unsteered_turn_writes_no_steering_map(tmp_path):
+async def test_an_agent_message_is_no_turn_to_cut_at_even_with_the_record_withheld(tmp_path):
+    """What the tag buys over the record, on the pair of claims the record alone answers above.
+
+    An agent's message carries ``messages.PROVENANCE_AGENT``, so ``is_user_turn`` already refuses it
+    and ``turn_end`` scans past it with nothing recorded anywhere. Read against the test above, which
+    is this same fixture with the record withheld and the message untyped: there the cut lands at 4
+    and the branch loses the answer, here it cannot. The record is still what answers for the user's
+    own mid-turn message, which is untagged on purpose.
+    """
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    parent.messages[4] = {**parent.messages[4], PROVENANCE_KEY: PROVENANCE_AGENT}
+    parent.metadata.pop("messages")
+    assistant._store.save(parent)
+
+    assert not assistant._book.branchable(parent.key, 4)
+    with pytest.raises(TurnNotFound):
+        await assistant._book.truncate(parent.key, 4)
+    # Through index 5, the answer the message redirected, exactly as the recorded case keeps it.
+    assert assistant._store.get(assistant._book.branch(parent.key, 1)).messages == parent.messages[:6]
+
+
+async def test_a_mixed_delivery_is_no_turn_to_cut_at_only_because_the_record_says_so(tmp_path):
+    """The fourth kind of in-turn ``user`` message, which ``turn_end``'s enumeration used to leave out.
+
+    ``messages.PROVENANCE_MIXED`` is deliberately outside ``INJECTED_USER_PROVENANCE``, because part
+    of such a message really is the user's own words, so ``is_user_turn`` answers True for it exactly
+    as it does for the untagged kind. Read against the agent-tagged sibling above, which is this same
+    fixture with the record withheld and holds anyway: withholding the record here puts the cut back
+    at 4. So for a mixed delivery the record is the whole of what keeps a turn from being cut in half,
+    which is what that docstring now says rather than implying the tag answers for it too.
+    """
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    parent.messages[4] = {**parent.messages[4], PROVENANCE_KEY: PROVENANCE_MIXED}
+    assistant._store.save(parent)
+
+    # With the record in place the tag changes nothing: no cut lands on the message.
+    assert not assistant._book.branchable(parent.key, 4)
+
+    parent.metadata.pop("messages")
+    assistant._store.save(parent)
+
+    assert assistant._book.branchable(parent.key, 4)
+    # Cut at 4, losing the redirected answer, which is the outcome the record alone prevents.
+    assert assistant._store.get(assistant._book.branch(parent.key, 1)).messages == parent.messages[:4]
+
+
+async def test_recording_a_turn_with_no_mid_turn_messages_writes_no_messages_map(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
-    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, steering=[])
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, messages=[])
 
-    assert "steering" not in assistant._store.get(assistant._active_id).metadata
+    assert "messages" not in assistant._store.get(assistant._active_id).metadata
 
 
-async def test_a_turn_that_only_has_steering_to_record_is_still_recorded(tmp_path):
+async def test_a_turn_that_only_has_messages_to_record_is_still_recorded(tmp_path):
     """The guard that skips a turn with nothing to say has to count this as something to say, or the
     record would be dropped for exactly the turn that needs it."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
-    assistant._book.record_turn_provenance([], "", 0, assistant._active_id, steering=[3])
+    assistant._book.record_turn_provenance([], "", 0, assistant._active_id, messages=[3])
 
-    assert assistant._store.get(assistant._active_id).metadata["steering"] == {"0": [3]}
+    assert assistant._store.get(assistant._active_id).metadata["messages"] == {"0": [3]}

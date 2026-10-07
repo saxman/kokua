@@ -167,7 +167,8 @@ def render_markdown(
         subagent=metadata.get("subagent"),
         trace=metadata.get("trace"),
         failure=metadata.get("failure"),
-        steering=metadata.get("steering"),
+        mid_turn=metadata.get("messages"),
+        undelivered=metadata.get("undelivered"),
     )
     lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
@@ -413,6 +414,18 @@ def _render_subagent(
             lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
         elif kind == "loop":
             lines.append(_loop_line(append, max_payload_chars))
+        elif kind == "message":
+            # A message that reached this worker while it ran: the user's own words, or one of the
+            # turn's own agents' (`core/messaging.py`). Total loss otherwise, not merely an unlabeled
+            # line: a message delivered here never becomes a message in `session.messages` at all
+            # (`core/subagents.py`'s own module docstring says why), so this card entry is the *only*
+            # place its text exists anywhere in the stored record. No per-sender label the way the
+            # top-level `inbox` item gets ("User"/"Agent"/"Mixed" from its own provenance tag): this
+            # entry carries no separate sender field to read one off (the same reason `app.js`'s
+            # `renderMidTurn` needs none here either -- see `core/subagents.py`'s `INBOX` branch), so
+            # an agent's words already carry their own `[message from {sender}]` prefix inline and a
+            # user's read bare, exactly as delivered.
+            lines.append(f"**Message (mid-turn):** {_capped(append.get('text', ''), max_payload_chars)}")
     status = events[-1].get("status")
     if status:
         lines.append("")
@@ -519,12 +532,19 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         return [f"_[image: {url}]_" if url else "_[image]_"]
     if item_type == "loop":
         return [_loop_line(item, max_payload_chars)]
-    if item_type == "steering":
+    if item_type == "inbox":
         # A label rather than ``loop``'s italic machine note, and uncapped like the turn's own user
-        # text: this is a person's words, sent into a turn that was already running. It opens no turn
-        # heading of its own because ``replay_items`` gives it no ``message_index``, which is what
-        # keeps one steered turn from reading as two.
-        return [f"**User (mid-turn):** {item.get('text', '')}"]
+        # text: a message sent into a turn that was already running is somebody's words either way. It
+        # opens no turn heading of its own because ``replay_items`` gives it no ``message_index``,
+        # which is what keeps the turn it joined from reading as two.
+        #
+        # Who said it has to be read off the item rather than assumed, because one of the turn's own
+        # agents can send one too (``core/messaging.py``) and a line signed "User" over a worker's
+        # note, or over a delivery that joined the two into one message, is the impersonation the
+        # provenance tag exists to stop. "Agent" and "Mixed" rather than a name: the sender's address
+        # is not on the stored message, only the fact that it was not the user, or not the user alone.
+        speaker = {"agent": "Agent", "mixed": "Mixed"}.get(item.get("from"), "User")
+        return [f"**{speaker} (mid-turn):** {item.get('text', '')}"]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars, payloads_path)
     if item_type == "notice":
@@ -532,6 +552,18 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         # before stopping, not as more of that output.
         text = _capped(item.get("text", ""), max_payload_chars)
         return [f"> {line}" for line in text.splitlines()] or ["> "]
+    if item_type == "undelivered":
+        # A blockquote, like `notice`: this is the turn reporting on itself, not more of what it
+        # produced. Unlike `inbox`, this message never reached a stored transcript message at all
+        # (``MessageBus.close()``'s own report, surfaced here through ``core/transcripts.py``'s
+        # ``undelivered`` metadata), so the sender and the selector are read straight off the item
+        # rather than off a provenance tag -- there is no message here for one to ride. Both are
+        # named because neither alone tells a reader anything to act on: who sent it, and who it
+        # never reached.
+        sender = item.get("sender", "")
+        to = item.get("to", "")
+        text = _capped(item.get("text", ""), max_payload_chars)
+        return [f"> **Undelivered:** {sender} -> {to}: {text}"]
     return [f"_(unrendered item type: {item_type})_"]
 
 

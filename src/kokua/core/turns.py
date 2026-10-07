@@ -138,24 +138,28 @@ Every rule here was learned from a bug. Read them before changing anything in th
    gated call there is denied before a reviewer is asked, so the missing context is a second, structural
    reason nothing is auto-approved while nobody is watching.
 
-9. **A steering message reaches the running turn or becomes the next one, never both and never
-   neither.** ``SteeringMailbox.offer`` and ``close`` are both synchronous and asyncio is
-   single-threaded, so the serve loop cannot observe a mailbox as open in the same tick this
-   ``finally`` shuts it. What that alone does not cover is the window after the loop's last drain:
-   a message accepted there is never read, so ``close`` hands it back and this path runs it as a
-   follow-up turn. The "never both" half rests on which of the mailbox's two cursors the entry
-   agent's own run opens: ``close`` measures the leftovers from the entry cursor's position, so
-   handing this run a worker's independent source would leave that position at zero and re-run every
-   *delivered* message as its own turn. A stop is the one exception and is deliberate: someone who
-   cancelled the turn is not asking for one more, so those messages are reported as undelivered
-   instead.
+9. **A message typed mid-turn reaches the running turn or becomes the next one, never both and never
+   neither.** ``MessageBus.send`` and ``close`` are both synchronous and asyncio is single-threaded,
+   so the serve loop cannot observe a bus as open in the same tick this ``finally`` shuts it. What that
+   alone does not cover is the window after the loop's last drain: a message accepted there is never
+   read, so ``close`` hands it back and this path runs it as a follow-up turn. The "never both" half
+   rests on which of the bus's two cursors the entry agent's own run opens: ``close`` measures the
+   leftovers from the entry cursor's position, so handing this run a worker's independent source would
+   leave that position at zero and re-run every *delivered* message as its own turn. A stop is the
+   one exception and is deliberate: someone who cancelled the turn is not asking for one more, so
+   those messages are reported as undelivered instead.
    One window is uncovered and known: the re-submit happens after the ``finally`` has released the
-   gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``, or
-   ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
+   gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``,
+   ``_notify_if_backgrounded``, or a cancellation landing in ``_report_undeliverable``, which swallows
+   everything else by design) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
-   A scheduled firing carries the same mailbox and the same guarantee, and the three places it differs
-   all follow from its shape rather than from a different rule. Its mailbox is opened by
+   Two of those awaits this module added rather than inherited, ``_notify_if_backgrounded`` and
+   ``_report_undeliverable``, and the second is why that method catches: an invariant-10 notice must
+   not be able to widen invariant 9's window, which is the whole reason it is ordered ahead of the
+   re-submit at all.
+   A scheduled firing carries the same bus and the same guarantee, and the three places it differs
+   all follow from its shape rather than from a different rule. Its bus is opened by
    ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
    beside it (invariant 3): the body runs in a child task, which copies the context at creation, so a
    contextvar set before the task starts reaches it; and ``close`` has to be reached where the gate
@@ -166,12 +170,117 @@ Every rule here was learned from a bug. Read them before changing anything in th
    leftovers past the re-submit. And a stopped firing says less than a stopped reactive turn: that
    path peeks and tells the user their last message was not delivered, while a firing's stop returns
    from inside the hold and drops its leftovers in silence, even where ``echo_reply`` puts its output
-   in front of someone who is reading. The mailbox does the same thing in both cases, which is to
-   drop those messages rather than run them; only the sentence about it is missing.
+   in front of someone who is reading. The bus does the same thing in both cases, which is to drop
+   those messages rather than run them; only the sentence about it is missing.
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
+   ``test_a_user_message_no_reader_matched_still_runs_as_a_follow_up_turn``,
    ``test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn``.)
+
+10. **A message addressed to an agent is delivered to a matching reader at its next round boundary,
+    or reported undeliverable because no matching reader took it, never both and never neither.**
+    Note which word does the work. ``close`` splits by who a message was *from*, not by who it was
+    for: the user's own words can become a turn whatever they were addressed to, so a user message to
+    a run nothing answered for is re-submitted rather than reported, and is invariant 9's business
+    instead of this one. What cannot become a turn is an *agent's* message, because re-running one
+    worker's note to another as a user turn would put words in the user's mouth. So this invariant
+    governs an agent's message, invariant 9 governs the user's, and the fallback here is a sentence
+    rather than a turn.
+    Read "a matching reader" strictly, because the obvious stronger reading is not what holds. A bare
+    label naming several runs is satisfied by **any one** of them: the drain record is per message
+    rather than per address, so a message to ``researcher`` that one of two researchers drained is
+    delivered and is not reported, though the second never saw it. The stronger rule would need to
+    know which addresses are still running, and nothing in AIMU's protocol says that (see
+    ``MessageBus._register``), so there is no honest version of it. This is also the bound on what a
+    sender may be promised: a receipt can say a message was accepted and, later, that nothing took
+    it, never that a particular run read it.
+    The bus records which messages a reader drained, which is what lets ``close`` tell an undelivered
+    message from a delivered one rather than inferring it from a cursor position. A position cannot
+    carry that fact: every cursor advances past every message whether its filter matched or not, so a
+    message addressed to a run that never drained it is passed over by each reader in turn and looks
+    read from all of their positions. ``close`` therefore returns two lists, the user's messages to
+    re-run and the agents' to report, and this path reports the second before running the first, so
+    the notice reads ahead of the follow-up turn's own output.
+    **Where the report goes follows from who is watching, not from which path ran.** The report is
+    display-only and lands after ``_persist``, so it is never stored: sending it to a channel that is
+    showing a different conversation does not misplace it, it destroys it, because
+    ``streaming_conversation`` has already been reset by the ``finally`` and the channel can no longer
+    tell that this turn was backgrounded. So ``_report_undeliverable`` compares the turn's
+    conversation against the active one itself and raises a ``ChannelUI.alert`` instead of sending
+    when they differ, which is the same test ``_notify_if_backgrounded`` makes and the opposite branch
+    of it. An alert rather than a log, because a log is only right on a channel with somewhere else to
+    put a backgrounded turn's output and ``CLIChannel`` has nowhere: it does not mute, so its user is
+    reading the terminal that turn is printing to, and a log would make it the one shipped front end
+    where this sentence vanished. ``alert`` is the method written for that split, printing where there
+    is no card surface. One rule covers both paths: a scheduled firing is backgrounded by construction
+    (invariant 4 leaves the active pointer alone), so it alerts, except on a channel with no
+    conversation list, where the firing shares the viewed conversation and the user is reading it
+    after all.
+    Two gaps are known rather than covered, and both are about the *sentence* rather than about the
+    pair of them, which is why the two halves of this invariant are stated separately below. The
+    window invariant 9 names, an exception escaping the outer ``finally``, applies here too, and this
+    notice is an await inside it, which is why it catches rather than raises. A stopped turn reports
+    nothing, because the report sits after that ``finally`` rather than inside it, the cancelled branch
+    returns before reaching it, and it cannot be moved in, being an await inside a cancellation
+    (invariant 9's own argument). So a stop is the same deliberate exception invariant 9 makes for a
+    user's message, one shade worse: there, the stop notice at least says a message was not delivered.
+    A firing whose own run *failed* loses the sentence the same way and for the same reason, since the
+    error raises past the report on its way to ``proactive``: named here rather than left for a reader
+    to infer from the record paragraph below, which is where that case is established and which is a
+    worse place to meet it than the list of what this invariant does not cover.
+    What neither a stop nor a failure loses is the record, for the reason that paragraph gives.
+    A message to an address that never existed this turn needs nothing extra: no reader can match it,
+    so it is reported here like any other undeliverable one. Refusing it at send time would serve the
+    sender better, and the roster can answer that much without tracking liveness, but it belongs with
+    whatever lets a sender write an address rather than here.
+    **The live report above is not the only one: ``_record_undelivered`` persists the same list
+    (``ConversationBook.record_undelivered``) so a reload shows what the live sentence otherwise loses
+    the moment it scrolls off. It is written from inside the outer ``finally`` on both paths, as the
+    statement after the ``bus.close()`` that discovers what there is to write, and that placement is
+    the one thing about this pair that is not a free choice: every ending has to reach the record,
+    including the three the report cannot.** A reactive stop returns from the cancelled branch; a
+    firing's stop returns from inside its own gate hold, and a firing's failure raises out of it. The
+    report cannot follow the record in, being an await inside a cancellation, while this write is
+    synchronous, which is the whole of why one half of the pair moved and the other stayed where it is.
+    So the two halves answer differently: the sentence is conditional on how the turn ended, and the
+    record is not. A firing needs one thing more, because its index is resolved inside a child task
+    that raises on two of its three endings and so can hand nothing back by returning:
+    ``_unattended_body`` publishes it instead (see :class:`_PublishedIndex`), which is the same answer
+    the workflow branch of ``reactive`` already reaches for with ``WorkflowContext.publish_user_index``.
+    Both calls catch, for two reasons rather than one: a store error must not replace a cancellation
+    propagating out of that ``finally``, and must not skip the teardown below it, which would leave the
+    turn's pin and its contextvars set for the life of the process.
+    **The write still takes no hold of its own, so the delete it can race is still
+    :meth:`ConversationBook.record_undelivered`'s own guard to refuse.** It runs after this
+    conversation's gate hold has released and before its pin does, which is nearer than the old
+    placement after ``_notify_if_backgrounded``'s await and is not the same thing as safe:
+    ``TurnGate.turn``'s exit releases this conversation's lock and *then* re-acquires the gate's shared
+    condition, and that re-acquire suspends whenever another conversation's turn is finishing in the
+    same instant, which is a yield point a waiting ``delete_conversation`` can run on before this
+    ``finally`` executes at all. By contrast ``_record_provenance`` and every call it makes into
+    ``record_turn_provenance`` run from inside the gate hold, which is why those never had this
+    exposure. So the guard (checking :meth:`ConversationBook.exists` before reading) is what closes
+    the window, not a second gate hold taken here -- the store is synchronous throughout (by
+    ``aimu.sessions``'s own contract), so the check and the write that follows it cannot be
+    interleaved by anything else on the event loop, and a hold would only re-open a second way of
+    saying the same thing. Contrast the resubmit call below this block in ``reactive``: that one *does*
+    re-take this conversation's gate, because it calls ``self.reactive(...)`` again, a whole new turn
+    rather than one store write, and a second, sequential ``gate.turn`` taken only after the first has
+    fully released is not the nested case invariant 1 forbids (``_prune_task_conversations`` taking
+    ``delete``'s own hold, sequentially, after ``_run_unattended`` has returned, is the same shape). So
+    the record and the resubmit are safe for two different reasons, and neither reason transfers to the
+    other: the resubmit's safety is mutual exclusion, and the record's is a single-shot check on an
+    already-atomic write.
+    (Regressions: ``test_close_reports_an_undelivered_agent_message_rather_than_resubmitting_it``,
+    ``test_a_message_every_cursor_passed_over_is_reported_rather_than_lost``,
+    ``test_a_bare_label_one_of_two_readers_drained_is_delivered_not_reported``,
+    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``,
+    ``test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation``,
+    ``test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run``,
+    ``test_a_stopped_turn_still_records_an_undelivered_agent_message``,
+    ``test_a_stopped_firing_still_records_an_undelivered_agent_message``,
+    ``test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation``.)
 """
 
 from __future__ import annotations
@@ -192,9 +301,9 @@ from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title, resolve_steering_indices, resolve_user_index
+from kokua.core.messages import PROVENANCE_MIXED, derive_title, resolve_message_indices, resolve_user_index
+from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
-from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, SteeringMessage, current_steering
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -225,6 +334,26 @@ class ProactiveTarget:
     announce: Optional[str] = None
     prunes_for_task: Optional[str] = None
     task_id: Optional[str] = None
+
+
+@dataclass
+class _PublishedIndex:
+    """Where an unattended turn's own user message landed, handed back by a body that may raise.
+
+    A return value reaches ``_run_unattended`` on one of ``_unattended_body``'s three endings only:
+    a stop and a failure both raise, and an exception carries no return value with it. The caller
+    needs the index on all three, because what the turn's bus hands back when it closes has to be
+    keyed under that index whatever the ending was, and the caller never sees ``agent.model_client``
+    to resolve it for itself. So the body publishes it as it commits, which is the same answer the
+    workflow branch of ``reactive`` already reaches for with ``WorkflowContext.publish_user_index``,
+    for the identical reason.
+
+    ``-1`` is the honest starting value and the one the store reads as "no turn to key this under"
+    (:meth:`ConversationBook.record_undelivered`), so a run that raised before committing anything
+    records nothing rather than recording against the wrong turn.
+    """
+
+    value: int = -1
 
 
 def _holds_no_report(session: SessionSummary) -> bool:
@@ -258,6 +387,40 @@ def _describe_refusal(exc: ModelRefusalError, subject: str) -> str:
     label = f" ({exc.category})" if exc.category else ""
     detail = f": {exc.explanation}" if exc.explanation else "."
     return f"declined {subject}{label}{detail}"
+
+
+#: How much of one undelivered message's text the notice and the record keep. The same number
+#: ``core/transcripts.py`` caps a single message at on read, because this is the same kind of payload:
+#: the words of a message, where that module's cap exists so one pasted document cannot consume a read.
+#: ``core/subagents.py`` spills past 4,000 characters into a payload file instead, which is the right
+#: trade for a tool response somebody may need whole and the wrong one here, where the text is one
+#: line of context inside a sentence about something that did not happen.
+UNDELIVERED_TEXT_CHARS = 2_000
+
+
+def _capped_message_text(text: str) -> str:
+    """One undelivered message's text, cut with a note saying how much is missing.
+
+    Both surfaces this feeds take it: the live notice and the stored record, which is the one
+    model-authored record on this feature that followed none of this codebase's own caps. The record
+    is why the cap exists rather than the notice. A notice scrolls away, while
+    ``session.metadata["undelivered"]`` is durable, and the text in it is written by a model
+    (``toolsets/messaging.py``'s ``send_message``) behind nothing but a non-blank check, where a
+    mid-turn message the *user* typed is self-limiting.
+
+    The note is the point, as it is in ``transcript_export``'s own ``_capped``: a silent cut reads as
+    a complete record of a short message, so a reader cannot tell the thing they are judging was
+    abridged. Worded like ``core/transcripts.py``'s, so one idiom covers both.
+
+    What this does not bound is how many messages one turn can leave undelivered, and that is left
+    uncapped deliberately rather than overlooked: a sender spends one of its own permitted rounds per
+    send, so the count is already bounded by the round budgets of the runs doing the sending, and the
+    record's worst case is that many messages at this cap. Capping the list as well would mean
+    dropping whole messages, which needs a second note saying so, for a bound the loop already gives.
+    """
+    if len(text) <= UNDELIVERED_TEXT_CHARS:
+        return text
+    return f"{text[:UNDELIVERED_TEXT_CHARS]}... [message truncated, {len(text)} chars total]"
 
 
 class TurnRunner:
@@ -330,23 +493,23 @@ class TurnRunner:
         # gated call before a reviewer is ever consulted, so a budget there would never be spent.
         review_context = ReviewContext(request=msg.text)
         review_token = current_review_context.set(review_context)
-        # The turn's steering mailbox, open for its whole life so a message typed while it runs can
+        # The turn's message bus, open for its whole life so a message typed while it runs can
         # reach it rather than queuing behind it on the gate (invariant 9). Published before the first
         # `await` for a reason the contextvars above do not share: the serve loop reads this entry to
         # route a message, so every statement between its `add` and this line is a window in which a
-        # live entry has no mailbox. Keeping the window at zero statements is not possible from here:
+        # live entry has no bus. Keeping the window at zero statements is not possible from here:
         # a message already in the channel's inbound queue when this turn was submitted is drained in
         # the same loop step and does read the entry before this line runs, which is why
-        # `Assistant._offer_steering` refuses an entry whose mailbox is absent. A late *reader* is
-        # harmless by contrast, since the mailbox is append-only and a cursor opened afterwards still
-        # sees what was offered before it.
-        # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
+        # `Assistant._offer_message` refuses an entry whose bus is absent. A late *reader* is
+        # harmless by contrast, since the bus is append-only and a cursor opened afterwards still
+        # sees what was sent before it.
+        # Carries `review_context` rather than reading the contextvar, because a send arrives on the
         # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
-        mailbox = SteeringMailbox(review_context=review_context)
-        steering_token = current_steering.set(mailbox)
+        bus = MessageBus(review_context=review_context)
+        bus_token = current_bus.set(bus)
         # Recorded on the tracker entry the serve loop already added for this conversation, so routing
-        # can find this turn's mailbox by conversation id alone.
-        self._tracker.attach_steering(conversation_id, mailbox)
+        # can find this turn's bus by conversation id alone.
+        self._tracker.attach_bus(conversation_id, bus)
         # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
         # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
         # above is what keeps concurrent turns on other conversations out of this record. Assigned
@@ -367,7 +530,7 @@ class TurnRunner:
         # record under the index a completed turn would use; -1 means the turn committed no user
         # message, and recording no-ops.
         user_index = -1
-        steering_indices: list[int] = []
+        message_indices: list[int] = []
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -399,7 +562,11 @@ class TurnRunner:
                             # rolled back (`_make_plan`), so a message delivered while the plan was
                             # being drafted shows live, reaches the catch-up record a switch-in
                             # replays, and is gone on reload.
-                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
+                            message_indices = resolve_message_indices(agent.model_client.messages, user_index)
+                            # The rollback just described is exactly the case this cannot pair a
+                            # delivery with its message in; see `_tag_agent_messages` for what it
+                            # does instead.
+                            self._tag_agent_messages(agent, bus, message_indices)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
                         # user message is searched for from, so anything another turn appended first
@@ -411,7 +578,7 @@ class TurnRunner:
                                 stream=True,
                                 images=msg.images,
                                 thinking=thinking,
-                                steering=ENTRY_STEERING_SOURCE,
+                                inbox=ENTRY_SOURCE,
                             )
                             await self._ui.send(stream, reply_to=msg)
                         finally:
@@ -420,7 +587,10 @@ class TurnRunner:
                             # seeds the system message ahead of it. Reached on the cancelled path too,
                             # where the agent has already snapshotted the partial turn in its finally.
                             user_index = resolve_user_index(agent.model_client.messages, base_len)
-                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
+                            message_indices = resolve_message_indices(agent.model_client.messages, user_index)
+                            # Before `_persist` writes these messages to the store, which is what the
+                            # tag has to reach; see `_tag_agent_messages`.
+                            self._tag_agent_messages(agent, bus, message_indices)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
                     # below is one more await, and a second cancellation racing it would otherwise
@@ -434,14 +604,14 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     # A stop does not re-submit (invariant 9's one exception), so anything the entry
                     # agent had not yet read needs to be said rather than silently run or silently
                     # dropped. `peek_undelivered` rather than `close`: `close` still runs in the
                     # `finally` below and must still see those messages to decide what to hand back.
-                    pending = mailbox.peek_undelivered()
+                    pending = bus.peek_undelivered()
                     notice = "(stopped)" if not pending else "(stopped; your last message was not delivered)"
                     try:
                         await self._ui.send(notice, reply_to=msg)
@@ -457,7 +627,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
@@ -472,7 +642,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     # info, not exception: the model was reached and answered in the time it took, so
                     # there is no fault here and a stack trace would file one against Kokua.
@@ -487,7 +657,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
@@ -499,7 +669,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
@@ -507,8 +677,19 @@ class TurnRunner:
         finally:
             current_metrics.reset(metrics_token)
             current_review_context.reset(review_token)
-            current_steering.reset(steering_token)
-            undelivered = mailbox.close()
+            current_bus.reset(bus_token)
+            resubmit, undeliverable = bus.close()
+            # Written here rather than beside the report below, which is what a stopped turn can still
+            # be given: the cancelled branch returns before the report, and the report cannot follow it
+            # in here, being an await inside a cancellation (invariant 9's own argument), while this
+            # write is synchronous and this block runs on every ending. Caught rather than allowed out,
+            # for two reasons: a store error must not replace a cancellation propagating out of this
+            # `finally`, and must not skip the resets below it, which would leave this turn's pin and
+            # contextvars set for the life of the process.
+            try:
+                self._record_undelivered(conversation_id, user_index, undeliverable)
+            except Exception:
+                logger.warning("A message no run read could not be recorded", exc_info=True)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
@@ -516,14 +697,84 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
-        if undelivered and not stopped:
-            # Accepted by the mailbox and never read, because the turn ended first. Running them as a
+        # These same messages are already recorded, by the `finally` above: a channel that fails to take
+        # the report (swallowed just below) still leaves a reload with something to show, and the record
+        # does not depend on the report succeeding, nor the other way around.
+        # Ahead of the re-submit, so the notice reads before the follow-up turn's own output rather
+        # than after it. Safe in that order only because the report swallows what it can (see
+        # `_report_undeliverable`): a channel failing here must not cost the user the turn below.
+        await self._report_undeliverable(conversation_id, undeliverable, reply_to=msg)
+        if resubmit and not stopped:
+            # Accepted by the bus and never read, because the turn ended first. Running them as a
             # follow-up turn is the fallback the design promises: a message is delivered or it is the
-            # next turn, never neither.
-            await self._resubmit_steering(conversation_id, undelivered, like=msg)
+            # next turn, never neither (invariant 9). Only the user's own messages are here; an
+            # agent's were reported just above, for the reason invariant 10 gives.
+            await self._resubmit_messages(conversation_id, resubmit, like=msg)
 
-    async def _resubmit_steering(
-        self, conversation_id: str, messages: list[SteeringMessage], *, like: Optional[ChannelMessage] = None
+    async def _report_undeliverable(
+        self, conversation_id: str, messages: list[Message], *, reply_to: Optional[ChannelMessage] = None
+    ) -> None:
+        """Say that an agent's message reached no run, which is the only fate it can be given.
+
+        A user's message gets a turn of its own instead; an agent's cannot, because re-running one
+        worker's note to another as a user turn would put words in the user's mouth (invariant 10). So
+        saying so is what is left, and the user is who is told: the sender is a model whose run has
+        ended, so there is nobody else still in the turn to tell.
+
+        The sender, the selector and the text are all named, because no two of them identify the
+        message. The selector is what nothing answered to and the sender is who is now waiting on an
+        answer that will not come, which together are the fact worth acting on; the text is what a
+        user would otherwise have to ask the assistant to repeat, capped where the record caps it
+        (:func:`_capped_message_text`) so one sentence does not become the whole screen.
+
+        **A backgrounded turn raises an alert instead of sending, and the comparison is made here
+        rather than left to the channel.** This runs after ``reactive``'s ``finally``, which has
+        already reset ``streaming_conversation``, so a channel that mutes background frames can no
+        longer tell that this turn was not the one being watched and would show the notice in whatever
+        conversation the user has moved to. The notice is display-only and lands after ``_persist``, so
+        that is not a misplacement but a loss: it is gone from the conversation it belongs to.
+        ``conversation_id`` against ``self._book.active_id`` is the same test
+        ``_notify_if_backgrounded`` makes, taken on the opposite branch, since a notice is *for* a
+        backgrounded turn and this is *about* the conversation it ran in.
+
+        ``alert`` rather than a log, and that choice is the one with a trap under it. A log would be
+        right only on a channel that has somewhere else to put a background turn's output, and
+        ``CLIChannel`` does not: it has no notification frame and does not mute, so its user is reading
+        the terminal that turn is still printing to, and logging would make this the one shipped front
+        end where the sentence disappeared. ``ChannelUI.alert`` is written for exactly that split,
+        raising a card where there is a card surface and printing the sentence where there is not,
+        which is why the text names the conversation in words (see its docstring). No ``group``:
+        ``notify`` groups by conversation so a later completion supersedes an earlier one, and
+        superseding is wrong here, since two turns in one conversation each losing a message are two
+        things to know rather than one.
+
+        ``Exception`` is caught and ``CancelledError`` is deliberately not: this await sits inside the
+        window invariant 9 names, ahead of a re-submit carrying the user's own words into a turn, so a
+        channel that cannot take a notice must not be what loses them. A cancellation is the one thing
+        that still has to propagate, which leaves exactly the window invariant 9 already describes
+        rather than a wider one. The log is what that failure leaves behind, on either branch.
+        """
+        if not messages:
+            return
+        lines = "\n".join(
+            f"- from {message.sender} to {message.to}: {_capped_message_text(message.text)}" for message in messages
+        )
+        try:
+            if conversation_id == self._book.active_id:
+                await self._ui.send(
+                    f"(a message this turn's agents sent was not delivered)\n{lines}", reply_to=reply_to
+                )
+            else:
+                title = self._book.get(conversation_id).metadata.get("title") or "a conversation"
+                await self._ui.alert(
+                    f"In '{title}', a message one of the turn's agents sent was not delivered.\n{lines}",
+                    conversation_id=conversation_id,
+                )
+        except Exception:
+            logger.warning("A message no run read could not be reported:\n%s", lines, exc_info=True)
+
+    async def _resubmit_messages(
+        self, conversation_id: str, messages: list[Message], *, like: Optional[ChannelMessage] = None
     ) -> None:
         """Run messages the turn never read as an ordinary follow-up turn on the same conversation.
 
@@ -535,14 +786,15 @@ class TurnRunner:
         one. Both callers reach here only with something to run, so there is always a first.
 
         ``like`` is the message the finishing turn was made of, used as the template this one is built
-        from so the follow-up keeps that turn's ``sender`` and ``channel``. The mailbox carries only
-        text and a token (see :class:`kokua.core.steering.SteeringMessage`), so those two fields have no
-        other route back, and they are what a channel routes a reply by (``send(reply_to=...)``): inert
-        on every channel in this repository, and not inert by definition. ``images`` is cleared because
-        a steering message is text only, and ``metadata`` is replaced rather than inherited so nothing
-        else riding the original (a per-turn reasoning effort, for one) is re-applied to a turn the user
-        never asked that of. A scheduled firing passes nothing, because it was started by a prompt and
-        not by a message: its follow-up is as anonymous as the firing was.
+        from so the follow-up keeps that turn's ``sender`` and ``channel``. A bus message carries a
+        front-end token but no channel identity (see :class:`kokua.core.messaging.Message`), so those
+        two ``ChannelMessage`` fields have no other route back, and they are what a channel routes a
+        reply by (``send(reply_to=...)``): inert on every channel in this repository, and not inert by
+        definition. ``images`` is cleared because a
+        message handed to a running turn is text only, and ``metadata`` is replaced rather than
+        inherited so nothing else riding the original (a per-turn reasoning effort, for one) is
+        re-applied to a turn the user never asked that of. A scheduled firing passes nothing, because it
+        was started by a prompt and not by a message: its follow-up is as anonymous as the firing was.
         """
         template = like if like is not None else ChannelMessage(text="")
         await self.reactive(
@@ -593,11 +845,11 @@ class TurnRunner:
         that closes over ``ctx.agent`` and runs it directly does append, and persists normally. Whether
         a self-contained base-tier turn's own exchange should be persisted is an open product question.
 
-        Nothing here passes ``steering``, so a base-tier runner is not steerable by default. A runner
-        that wants it closes over ``ctx.agent`` and passes ``ENTRY_STEERING_SOURCE`` to its own
-        ``run()`` call, which it can: the symbol is importable from ``kokua.core.steering``, and the
-        cursor it opens belongs to the turn around it rather than to the run. A self-contained runner
-        cannot, because there is no agent run for a mailbox to reach.
+        Nothing here passes ``inbox``, so a base-tier runner does not receive a mid-turn message by
+        default. A runner that wants it closes over ``ctx.agent`` and passes ``ENTRY_SOURCE`` to its
+        own ``run()`` call, which it can: the symbol is importable from ``kokua.core.messaging``, and
+        the cursor it opens belongs to the turn around it rather than to the run. A self-contained
+        runner cannot, because there is no agent run for a bus to reach.
         """
         base_len = len(ctx.agent.model_client.messages)
         try:
@@ -605,6 +857,62 @@ class TurnRunner:
             await self._ui.send(stream, reply_to=msg)
         finally:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
+
+    @staticmethod
+    def _tag_agent_messages(agent, bus: MessageBus, message_indices: list[int]) -> None:
+        """Mark the mid-turn messages that came from an agent, so none of them wears the user's role.
+
+        AIMU appends a delivery as a plain ``user`` message with no provenance of its own (its loop
+        tags only the nudges it composes itself, because an inbox message is normally the user's), so
+        this is the only place a worker's note can be told from something the user typed once the turn
+        is over. Written onto the message dict, which is what ``_persist`` snapshots into the session
+        store, so it must run before that: called wherever a turn resolves its indices, which on the
+        reactive path is the ``finally`` that reaches the cancelled turn too, rather than from the
+        outer ``finally`` that closes the bus, which runs after the store has already been written.
+
+        **A delivery is paired with the message it became by position**, because each non-empty entry
+        drain becomes exactly one appended message and ``message_indices`` lists those in order. When
+        the two counts disagree the pairing is not safe to make, and the ``/plan`` path is where that
+        happens: the planner's rounds are rolled back (``workflows/planning``), so a message delivered
+        while the plan was being drafted was drained and then had its appended message discarded,
+        leaving more deliveries than indices and every surviving pair off by one.
+
+        The fallback answers one question for the whole turn at once, and the guarantee it has to keep
+        is that it can only under-tag, never put the agent tag on an index no delivery actually
+        produced. That guarantee needs *more* deliveries than indices, not merely an unequal count:
+        with fewer deliveries than indices, broadcasting one answer across every index would also
+        answer for an index nothing delivered at all, which is a mis-pairing a count mismatch alone
+        does not rule out. So the broadcast only runs with deliveries to spare; short of that, nothing
+        here is safe to tag and every index is left untagged, under-tagging completely rather than
+        guessing. With deliveries to spare, the broadcast asks whether every delivery in the whole turn
+        was agent-only and tags every index if so, which still cannot mis-tag: an aggregate answer of
+        "mixed" or "user" leaves every index untagged exactly as a mixed single delivery would.
+
+        ``tag_for_delivery`` is what decides each answer, including the mixed delivery that must stay
+        untagged; see it for why under-tagging is the safe direction and what covers the gap. That gap
+        is not undefended even when untagged, on either side of it: see
+        :func:`kokua.core.messaging._for_model` for the half that protects the model reading the turn
+        live, and :meth:`kokua.core.messaging.MessageBus.is_mixed_delivery` for the half below, which
+        writes :data:`kokua.core.messages.PROVENANCE_MIXED` so a transcript export or a search does not
+        sign or count an agent's contributed words as the user's own, without disturbing
+        ``tag_for_delivery``'s own answer or ``is_user_turn``'s.
+        """
+        deliveries = bus.entry_deliveries()
+        if len(deliveries) < len(message_indices):
+            # Fewer deliveries than appended messages: at least one index was not produced by any
+            # recorded delivery, so no single answer can be broadcast across all of them without
+            # answering for content that was never there. Leave every index untagged.
+            deliveries = []
+        elif len(deliveries) > len(message_indices):
+            whole_turn = [message for delivery in deliveries for message in delivery]
+            deliveries = [whole_turn] * len(message_indices)
+        messages = agent.model_client.messages
+        for index, delivery in zip(message_indices, deliveries):
+            tag = bus.tag_for_delivery(delivery)
+            if tag is not None:
+                messages[index][PROVENANCE_KEY] = tag
+            elif bus.is_mixed_delivery(delivery):
+                messages[index][PROVENANCE_KEY] = PROVENANCE_MIXED
 
     def _record_provenance(
         self,
@@ -615,7 +923,7 @@ class TurnRunner:
         thinking: Optional[Union[bool, str]],
         metrics: Optional[TurnMetrics],
         started: Optional[float],
-        steering_indices: list[int],
+        message_indices: list[int],
     ) -> None:
         """Persist what produced this turn: whatever its spawns reported, the model that answered, the
         reasoning effort it ran at, why it stopped early if it did, and what it cost. Synchronous, so it
@@ -634,10 +942,11 @@ class TurnRunner:
         call site that forgot them would silently record a turn as having cost nothing, which is the
         one failure mode worth making impossible to omit by accident.
 
-        ``steering_indices`` is where the messages the user sent into this turn landed, resolved by the
-        caller after the run for the reason ``resolve_steering_indices`` gives. Keyword-only and
+        ``message_indices`` is where the messages the user sent into this turn landed, resolved by the
+        caller after the run for the reason ``resolve_message_indices`` gives. Keyword-only and
         required on the same principle as the two above: a caller that forgot it would record the turn
-        as unsteered, and nothing downstream could tell that apart from a turn nobody steered.
+        as having received no messages, and nothing downstream could tell that apart from a turn that
+        genuinely received none.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -650,7 +959,31 @@ class TurnRunner:
             thinking=thinking,
             failure=failure,
             usage=usage,
-            steering=steering_indices,
+            messages=message_indices,
+        )
+
+    def _record_undelivered(self, conversation_id: str, user_index: int, messages: list[Message]) -> None:
+        """Persist what one of this turn's own agents sent and no reader took, so a reload still shows it.
+
+        A call of its own rather than one more keyword on :meth:`_record_provenance`, because what it
+        has to record does not exist yet when that one runs: ``messages`` here is ``MessageBus.close()``'s
+        second list, and ``close`` is only ever reached in the turn's own ``finally``, after every
+        ``_record_provenance`` call this turn makes has already returned.
+
+        Converts each ``Message`` to the plain dict :meth:`ConversationBook.record_undelivered` stores,
+        rather than handing the dataclass across: that module has no other reason to import
+        ``core.messaging``, and the record only ever needs the three fields a reader of it acts on.
+
+        The text is capped on the way in (:func:`_capped_message_text`), which is the one thing this
+        conversion does rather than copies, because the words are a model's and this record is durable.
+        """
+        self._book.record_undelivered(
+            conversation_id,
+            user_index,
+            [
+                {"sender": message.sender, "to": message.to, "text": _capped_message_text(message.text)}
+                for message in messages
+            ],
         )
 
     def _answering_model(self, conversation_id: str) -> str:
@@ -801,29 +1134,33 @@ class TurnRunner:
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
-        # This firing's steering mailbox, opened here rather than inside the body as `current_metrics`
+        # This firing's message bus, opened here rather than inside the body as `current_metrics`
         # is, for two reasons that scope does not have. The child task copies this context when it
-        # starts, so a contextvar set before `RunHandle.start` is what carries the mailbox into the
+        # starts, so a contextvar set before `RunHandle.start` is what carries the bus into the
         # run; and `close` has to be reached outside the gate hold below, since anything the run never
         # read becomes an ordinary turn and that turn takes a hold of its own (invariant 1). No review
         # context: an unattended turn opens none (invariant 8).
-        mailbox = SteeringMailbox()
-        steering_token = current_steering.set(mailbox)
+        bus = MessageBus()
+        bus_token = current_bus.set(bus)
         self._book.pin(conversation_id)  # invariant 2
+        # Where this firing's own user message landed, for the `record_undelivered` call in the
+        # `finally` below. Published by the body rather than returned, because every one of its three
+        # endings needs to reach that call and two of them raise; see :class:`_PublishedIndex`.
+        published_index = _PublishedIndex()
         try:
             # Held here rather than in the child so there is exactly one hold for the firing either way
             # (invariant 1). An asyncio lock has no owning task, so releasing it here is sound.
             async with self._gate.turn(conversation_id):  # invariant 1
-                handle = RunHandle.start(self._unattended_body(prompt, spec))
+                handle = RunHandle.start(self._unattended_body(prompt, spec, bus=bus, index=published_index))
                 # Tracked inside the gate, for the same reason the catch-up record is opened there: a
                 # firing queued behind a turn already running on this conversation would otherwise
                 # overwrite that turn's entry, which is the one `/stop` and shutdown reach. A queued
                 # firing is therefore not yet stoppable, which is what the tracker's one-entry-per-
                 # conversation rule buys. Registered before the first await below, so the entry is in
                 # place by the time the child's first statement runs.
-                # The mailbox rides the entry rather than being attached to it afterwards, because
+                # The bus rides the entry rather than being attached to it afterwards, because
                 # this path builds the entry itself: unlike a reactive turn, whose entry the serve loop
-                # already added, there is no window here in which a live entry has no mailbox.
+                # already added, there is no window here in which a live entry has no bus.
                 self._tracker.add(
                     conversation_id,
                     TurnInfo(
@@ -831,10 +1168,13 @@ class TurnRunner:
                         started=time.monotonic(),
                         preview=prompt[:120],
                         task_id=spec.task_id,
-                        steering=mailbox,
+                        bus=bus,
                     ),
                 )
                 try:
+                    # Nothing to take from the result: the index this run's record is keyed under
+                    # arrives through `published_index` instead, on every ending rather than on the
+                    # one that returns (see :class:`_PublishedIndex`).
                     await handle.result()
                 except asyncio.CancelledError:
                     # Two different cancellations land here and have to end differently: a stop, which
@@ -852,18 +1192,36 @@ class TurnRunner:
         finally:
             # Ahead of the rest of the teardown, as the same pair is in `reactive`: `end_catch_up`
             # calls back into the channel, so a front end raising there would skip the close and leak
-            # an open mailbox for the life of the process, routing every later message into a turn
+            # an open bus for the life of the process, routing every later message into a turn
             # that has already ended.
-            current_steering.reset(steering_token)
-            undelivered = mailbox.close()
+            current_bus.reset(bus_token)
+            resubmit, undeliverable = bus.close()
+            # In this block for the reason `reactive` writes it in its own: a stop returns from inside
+            # the hold above and a failure raises out of it, so this is the only place a record reaches
+            # all three endings. Caught for that method's two reasons, the second of which is the
+            # teardown directly below.
+            try:
+                self._record_undelivered(conversation_id, published_index.value, undeliverable)
+            except Exception:
+                logger.warning("A message no run read could not be recorded", exc_info=True)
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
             self._ui.end_catch_up(conversation_id)
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
-        if undelivered:
-            # Accepted by the mailbox and never read, because the firing ended first, so it runs as a
+        # These messages are already recorded, in the `finally` above and for the reason it gives.
+        # Reached only by a firing that finished: a stop returns before this line and a failure raises
+        # past it, which is why the record is the half that had to move and this one did not.
+        # The same helper the reactive path uses, and it decides the same way: a firing is
+        # backgrounded by construction (invariant 4 leaves the active pointer alone), so this alerts,
+        # except on a channel with no conversation list, where the firing shares the viewed
+        # conversation and the user is reading it after all. One rule rather than two (invariant 10),
+        # and on a channel with no card surface `alert` prints, so the sentence reaches the user there
+        # rather than only a log.
+        await self._report_undeliverable(conversation_id, undeliverable)
+        if resubmit:
+            # Accepted by the bus and never read, because the firing ended first, so it runs as a
             # follow-up turn: a message is delivered or it is the next turn, never neither (invariant
             # 9). Reached only by a firing that finished, which is what the two paths that skip it want:
             # a stop returns above, and someone who stopped a firing is not asking for one more turn.
@@ -871,7 +1229,7 @@ class TurnRunner:
             # uncovered window invariant 9 names on the reactive path and wider here, since a firing
             # reports its failure rather than catching it.
             try:
-                await self._resubmit_steering(conversation_id, undelivered)
+                await self._resubmit_messages(conversation_id, resubmit)
             except Exception:
                 # Held here rather than allowed out, where it would be reported as the *firing*
                 # having failed and would suppress the announce for a run that finished. `reactive`
@@ -880,12 +1238,26 @@ class TurnRunner:
                 logger.warning("A message a scheduled firing never read could not be run", exc_info=True)
         return False
 
-    async def _unattended_body(self, prompt: str, spec: ProactiveTarget) -> None:
+    async def _unattended_body(
+        self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus, index: _PublishedIndex
+    ) -> None:
         """One unattended turn, inside its caller's gate hold. See the module's concurrency invariants.
 
         Ends cancelled when it was stopped, as a cancelled task should, having first recorded and
         persisted as much of the turn as it got: ``_run_unattended`` is what turns that back into an
         ordinary return.
+
+        ``bus`` is the firing's own, passed rather than read from ``current_bus`` even though the child
+        task this runs in does inherit it. The contextvar exists so a tool call anywhere inside the run
+        can reach the bus without it being threaded through; this body is not that, it is the caller's
+        own code, and a parameter leaves no absent case to guard against.
+
+        ``index`` is where this turn's own user message landed, published as soon as it is resolved
+        rather than returned. ``_run_unattended`` is what ``close()``s ``bus`` and so discovers what
+        went undelivered, but it is this body that knows where the turn landed in the transcript,
+        since the caller never sees ``agent.model_client``; and all three of this body's endings have
+        to carry that fact, where a return value carries it on the one that does not raise. See
+        :class:`_PublishedIndex`.
         """
         conversation_id = spec.conversation_id
         started = time.monotonic()
@@ -929,7 +1301,7 @@ class TurnRunner:
                 # The conversation's own cursor, not a worker's independent one: what a user who
                 # switched into this conversation types is the conversation having seen it, and `close`
                 # measures the leftovers from this cursor's position.
-                reply = await agent.run(prompt, steering=ENTRY_STEERING_SOURCE)
+                reply = await agent.run(prompt, inbox=ENTRY_SOURCE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
             except asyncio.CancelledError:
@@ -942,6 +1314,20 @@ class TurnRunner:
                 error, failure = exc, _describe_refusal(exc, "this request")
             except Exception as exc:
                 error, failure = exc, f"failed: {describe_error(exc)}"
+            # A firing carries a bus too, so one of its own agents can message it, and that message
+            # must not be read as the firing's own output: `is_user_turn` treats a proactive tag as a
+            # turn somebody took, where the agent tag is exactly what says nobody did. The agent tag
+            # survives either order, since this pass assigns where the loop below defaults, and it
+            # goes first because it is the more specific of the two claims. Resolving the indices here
+            # rather than below the loop changes nothing about what they find: neither helper reads
+            # the tag that loop writes.
+            proactive_index = resolve_user_index(agent.model_client.messages, start)
+            # Published the moment it is known, which is ahead of every ending below: the two that
+            # raise reach the caller with no return value, and its `record_undelivered` call needs
+            # this index on all three (see :class:`_PublishedIndex`).
+            index.value = proactive_index
+            message_indices = resolve_message_indices(agent.model_client.messages, proactive_index)
+            self._tag_agent_messages(agent, bus, message_indices)
             for message in agent.model_client.messages[start:]:
                 # Tag every message this unprompted run appended, so replayed history can distinguish
                 # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
@@ -952,7 +1338,6 @@ class TurnRunner:
             # The reason is recorded here rather than left to `_report`, whose status line goes to
             # whichever conversation the user is viewing rather than to this one. Before the persist,
             # and synchronously, for invariant 5's reason.
-            proactive_index = resolve_user_index(agent.model_client.messages, start)
             self._record_provenance(
                 conversation_id,
                 proactive_index,
@@ -962,7 +1347,7 @@ class TurnRunner:
                 thinking=self._config.thinking_for(self._config.entry_agent),
                 metrics=metrics,
                 started=started,
-                steering_indices=resolve_steering_indices(agent.model_client.messages, proactive_index),
+                message_indices=message_indices,
             )
             await self._persist(conversation_id, proactive_index)
             if stopped:

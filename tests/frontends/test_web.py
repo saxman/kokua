@@ -12,6 +12,7 @@ import pytest
 
 from tests.helpers import BlockingModelClient, MockAsyncModelClient
 from kokua.channels.web import WebChannel
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
 from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.core.transcripts import replay_items
 from kokua.config import AssistantConfig
@@ -271,27 +272,69 @@ async def test_web_channel_send_turn_saved_echoes_the_token_the_page_sent():
     assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4, "token": "t-7"}]
 
 
-async def test_web_channel_send_steering_carries_the_token_of_the_message_that_landed():
-    """The message's other possible fate. A steered message normally produces no `turn_saved` of its
-    own, so this is the only frame that can tell the page which bubble joined the running turn; the
-    exception is one the turn accepts and never reads, which comes back as a follow-up turn carrying
-    this same token."""
+async def test_web_channel_send_message_frame_carries_the_token_of_the_message_that_landed():
+    """The message's other possible fate. A message that joins a running turn normally produces no
+    `turn_saved` of its own, so this is the only frame that can tell the page which bubble joined the
+    running turn; the exception is one the turn accepts and never reads, which comes back as a
+    follow-up turn carrying this same token.
+
+    The frame type is `"inbox"`, AIMU's own name for the chunk the stream sends when the run actually
+    reads the message (see the next test): matching it here, rather than keeping Kokua's former
+    `"steering"`, is what lets the page hold one handler for both frames instead of two that must be
+    kept in step by hand."""
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_steering("use the cache", token="t-8")
-    assert ws.frames == [{"type": "steering", "text": "use the cache", "token": "t-8"}]
+    await channel.send_message_frame("use the cache", token="t-8")
+    assert ws.frames == [{"type": "inbox", "text": "use the cache", "token": "t-8"}]
 
 
-async def test_a_steering_frame_with_no_token_names_no_bubble():
+async def test_a_message_frame_with_no_token_names_no_bubble():
     """A message no page minted a token for (one typed at another front end, or sent to the socket as
     bare text) has no bubble to name, so the key is absent rather than null: the page claims on the
     token's presence, and a null would be a second spelling of "nothing to claim" for both ends to
     remember. It also leaves the frame identical to the one the stream sends when the run reads the
-    message, which is the frame this one sits beside."""
+    message, which is the frame this one sits beside: both are `{"type": "inbox", "text": ...}`,
+    whether the stream's side reaches the page through `stream_activity`'s own mapping (a planned
+    turn) or through AIMU's un-overridden base `send()` loop (a plain reactive turn) -- see
+    `test_the_two_inbox_emitters_agree_on_the_frame_type` below, which pins that identity directly
+    rather than leaving it to this docstring."""
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_steering("use the cache")
-    assert ws.frames == [{"type": "steering", "text": "use the cache"}]
+    await channel.send_message_frame("use the cache")
+    assert ws.frames == [{"type": "inbox", "text": "use the cache"}]
+
+
+async def test_the_two_inbox_emitters_agree_on_the_frame_type():
+    """One event, two code paths, and the page holds exactly one handler for it
+    (``frame.type === "inbox"`` in ``app.js``): ``send_message_frame``'s accept-time frame, and the
+    frame a plain reactive turn's delivery produces through the base ``send()`` loop this subclass
+    delegates to for every chunk it does not map itself. Nothing but agreement between the two keeps
+    that one handler correct, and that agreement used to live only in a docstring's prose
+    (``test_a_message_frame_with_no_token_names_no_bubble``'s "leaves the frame identical...") with no
+    test driving the base path at all -- which is exactly how AIMU's floor move broke it silently: the
+    base path's own name for the chunk changed out from under Kokua's emitter, the two frame tests of
+    the time both called ``send_message_frame`` directly, and nothing noticed.
+
+    Drives both paths for real rather than asserting either string on its own, so a change to either
+    emitter alone, not just a simultaneous rename of both, is what this is built to catch. The
+    delivery side goes through ``send()``, not ``stream_activity()``: that override maps the chunk
+    itself and would prove nothing about the base loop, which is the path that actually broke.
+    """
+    accept_ws = _FakeWS()
+    accept_channel = WebChannel(accept_ws)
+    await accept_channel.send_message_frame("use the cache")
+    accept_type = accept_ws.frames[0]["type"]
+
+    deliver_ws = _FakeWS()
+    deliver_channel = WebChannel(deliver_ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
+
+    await deliver_channel.send(gen())
+    deliver_type = next(f["type"] for f in deliver_ws.frames if f.get("text") == "use the cache")
+
+    assert accept_type == deliver_type == "inbox"
 
 
 async def test_web_channel_send_settings_emits_frame():
@@ -343,38 +386,41 @@ async def test_web_channel_stream_activity_types_a_missing_kind_as_a_string():
     assert {"type": "loop", "reason": "", "text": "Keep going."} in ws.frames
 
 
-async def test_a_steering_chunk_becomes_a_steering_frame():
+async def test_an_inbox_chunk_becomes_an_inbox_frame():
     """`stream_activity` maps chunks itself rather than reusing the base loop (see the CONTINUING
-    test above), so this branch has to exist here too or a planned turn swallows a steering message
-    that an ordinary turn would show."""
+    test above), so this branch has to exist here too or a planned turn swallows a mid-turn message
+    that an ordinary turn would show. It maps to `"inbox"`, the same type the base loop now carries
+    for a plain reactive turn's own delivery, not a type of its own."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     await channel.stream_activity(gen())
-    assert {"type": "steering", "text": "use the cache"} in ws.frames
+    assert {"type": "inbox", "text": "use the cache"} in ws.frames
 
 
-async def test_web_channel_send_relays_a_steering_message():
-    """The base channel already maps STEERING (AIMU 0.33.0), and what this pins is what the CONTINUING
-    test above pins: Kokua's ``send`` override delegates to the base loop, so the base's mapping reaches
-    the page unchanged, and an override that grew its own per-chunk branches would have to carry this
-    arm forward. Contrast ``stream_activity``, which maps chunks itself and so needs a STEERING arm of
-    its own, pinned separately."""
+async def test_web_channel_send_relays_a_mid_turn_message():
+    """The base channel already maps INBOX (AIMU 0.34.0, renamed from STEERING), and what this pins is
+    what the CONTINUING test above pins: Kokua's ``send`` override delegates to the base loop, so the
+    base's mapping reaches the page unchanged, and an override that grew its own per-chunk branches
+    would have to carry this arm forward. The base now names the frame ``"inbox"`` rather than
+    ``"steering"``, which is the base's own wire vocabulary and not Kokua's: contrast
+    ``stream_activity``, which maps chunks itself to Kokua's own ``"inbox"`` frame type and so needs
+    an INBOX arm of its own, pinned separately."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.GENERATING, "a")
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
         yield StreamChunk(StreamingContentType.GENERATING, "b")
 
     await channel.send(gen())
     assert ws.frames == [
         {"type": "token", "text": "a"},
-        {"type": "steering", "text": "use the cache"},
+        {"type": "inbox", "text": "use the cache"},
         {"type": "token", "text": "b"},
         {"type": "done"},
     ]
@@ -693,10 +739,12 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
     assert tool["response"] == "4"
 
 
-async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
-    """`steering` is a turn-scoped marker exactly like `loop`, so it has to be muted while the user is
-    looking elsewhere and still recorded, or a redirect sent into a background turn would vanish
-    instead of showing up on the switch-in that catches the rest of that turn up."""
+async def test_a_muted_turns_inbox_frame_is_caught_up_not_dropped():
+    """`inbox` (AIMU's own name, reaching the page unmapped through the base `send()` loop this
+    subclass delegates to for a plain reactive turn) is a turn-scoped marker exactly like `loop`, so it
+    has to be muted while the user is looking elsewhere and still recorded, or a redirect sent into a
+    background turn would vanish instead of showing up on the switch-in that catches the rest of that
+    turn up."""
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
@@ -705,7 +753,7 @@ async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
     channel.begin_catch_up("running", "look it up")
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     token = streaming_conversation.set("running")
     try:
@@ -716,8 +764,8 @@ async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
 
     channel.active_conversation_id = "running"
     await channel.send_history([], {})
-    steering = next(item for item in ws.frames[-1]["items"] if item["type"] == "steering")
-    assert steering["text"] == "use the cache"
+    inbox_item = next(item for item in ws.frames[-1]["items"] if item["type"] == "inbox")
+    assert inbox_item["text"] == "use the cache"
 
 
 async def test_the_replayed_answer_keeps_its_place_above_a_later_tool_call():
@@ -2833,7 +2881,7 @@ async def test_web_channel_notification_carries_its_group():
     assert ws.frames[0]["group"] == "Digest"
 
 
-async def test_send_history_replays_a_stored_turns_steering_messages_as_steering():
+async def test_send_history_replays_a_stored_turns_mid_turn_messages_as_inbox_items():
     """The conversation's own record of which messages were sent into a running turn reaches the
     replay, so a reload draws them the way the live frame marked them rather than as turns of their
     own (see `replay_items`, where the index a turn's controls act on is the stake)."""
@@ -2845,20 +2893,97 @@ async def test_send_history_replays_a_stored_turns_steering_messages_as_steering
         {"role": "assistant", "content": "done"},
     ]
 
-    await channel.send_history(messages, {"steering": {"0": [1]}})
+    await channel.send_history(messages, {"messages": {"0": [1]}})
 
     items = ws.frames[-1]["items"]
-    assert [item["type"] for item in items] == ["user", "steering", "message"]
+    assert [item["type"] for item in items] == ["user", "inbox", "message"]
     assert items[1]["text"] == "use the cache"
 
 
-async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice():
-    """Two frames report one steered message, and only one of them belongs in the record.
+async def test_send_history_tags_an_agent_sent_inbox_item_so_the_page_can_tell_it_apart():
+    """The frame is the only place the page learns which of the three states an `inbox` item is in:
+    deleting the `undelivered=`/metadata pass-through this history frame builds from would leave
+    every one of them reading as the user's own words, a regression the default suite would not
+    catch without this. One of the turn's own agents sent this message, tagged `PROVENANCE_AGENT` on
+    the stored message, and the frame has to carry that as `from: "agent"` or the page draws the
+    undimmed user row for words nobody typed."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {})
+
+    inbox_items = [item for item in ws.frames[-1]["items"] if item["type"] == "inbox"]
+    assert inbox_items == [{"type": "inbox", "text": "look at the index", "from": "agent"}]
+
+
+async def test_send_history_tags_a_mixed_inbox_item_so_the_page_can_tell_it_apart():
+    """The third state: a delivery that joined the user's own words with an agent's into one message,
+    tagged `PROVENANCE_MIXED`. Distinct from `"agent"` because this one is not entirely a machine's
+    words -- carried through so the page keeps its undimmed treatment rather than dimming a message
+    that is still partly the user's own."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {
+            "role": "user",
+            "content": "use the cache\n\n[message from researcher#1] and the index",
+            PROVENANCE_KEY: PROVENANCE_MIXED,
+        },
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {})
+
+    inbox_items = [item for item in ws.frames[-1]["items"] if item["type"] == "inbox"]
+    assert inbox_items == [
+        {
+            "type": "inbox",
+            "text": "use the cache\n\n[message from researcher#1] and the index",
+            "from": "mixed",
+        }
+    ]
+
+
+async def test_send_history_replays_an_undelivered_report():
+    """`undelivered=meta.get("undelivered")` is the one pass-through line in `send_history` with no
+    test of its own before this: deleting it left 550 other tests green, because nothing else in the
+    default suite calls `send_history` with that key set. This message never became a stored message
+    at all (nobody read it), so it has no provenance tag to carry it the way the two tests above do --
+    the frame is the only route it has."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [{"role": "user", "content": "summarize the log"}, {"role": "assistant", "content": "done"}]
+
+    await channel.send_history(
+        messages, {"undelivered": {"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}}
+    )
+
+    reports = [item for item in ws.frames[-1]["items"] if item["type"] == "undelivered"]
+    assert reports == [
+        {"type": "undelivered", "sender": "researcher#1", "to": "assistant", "text": "look at the index"}
+    ]
+
+
+async def test_an_accepted_mid_turn_message_is_caught_up_once_rather_than_twice():
+    """Two frames report one mid-turn message, and only one of them belongs in the record.
 
     The accept-time frame is sent from the serve loop, outside any turn, so there is no running
     conversation for it to be recorded against; the drain-time frame is the only evidence AIMU
     actually delivered the message, and it arrives inside the turn. A switch-in therefore sees the
     redirection, and sees it once.
+
+    Both frames carry the *same* type now (``"inbox"``: the accept-time one is Kokua's own
+    ``send_message_frame``, the drain-time one reaches the page through the base ``send()`` loop this
+    subclass delegates to, carrying AIMU's own name for the chunk), which is exactly why "only one
+    belongs in the record" is the thing worth pinning here: a filter on type alone could no longer
+    tell the two apart, so the dedup has to come from the turn-context gate (no catch-up record keyed
+    under "no conversation") rather than from the frames looking different.
     """
     from kokua.channels.web import streaming_conversation
 
@@ -2867,10 +2992,10 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
     channel.active_conversation_id = "running"
     channel.begin_catch_up("running", "summarize the log")
 
-    await channel.send_steering("use the cache", token="b1")  # accepted, on the serve loop's own task
+    await channel.send_message_frame("use the cache", token="b1")  # accepted, on the serve loop's own task
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     token = streaming_conversation.set("running")
     try:
@@ -2879,4 +3004,4 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
         streaming_conversation.reset(token)
     await channel.send_history([], {})
 
-    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "steering"] == ["steering"]
+    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "inbox"] == ["inbox"]

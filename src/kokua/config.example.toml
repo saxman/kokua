@@ -163,7 +163,7 @@ max_per_turn = 5
 #
 # One namespace covers everything, so a `tools` entry may be an AIMU built-in group ("web", "fs",
 # "fs_write", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",
-# "documents", "skills", "capabilities", "config", "conversations", "mcp", "planning",
+# "documents", "skills", "capabilities", "config", "conversations", "mcp", "messaging", "planning",
 # "scheduling"), a plugin toolset ("aimu_agents", "benchmark", "github_backup", "image"), a skill by name, or an
 # MCP server by its [[mcp.server]] name. `kokua --list-toolsets` lists them; an unknown name fails
 # startup.
@@ -179,7 +179,7 @@ max_per_turn = 5
 # the spot with `capabilities`, so there is no catch-all role here to route to instead.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
+tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark", "messaging"]
 delegates_to = ["researcher", "coder", "introspector"]
 
 [agents.researcher]
@@ -187,7 +187,7 @@ description = "Research specialist: gather and verify information from the web."
 # model = "ollama:qwen3:32b"   # this agent alone runs on a bigger model
 # thinking = "high"            # ...and reasons harder than the rest; `false` would turn it off
 # max_iterations = 25          # ...and gets more rounds, since every round spends a search
-tools = ["web", "misc", "time"]
+tools = ["web", "misc", "time", "messaging"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
 against sources rather than memory, and return a concise, well-organized findings summary that names \
@@ -205,7 +205,7 @@ its sources."""
 # the same outcome.
 [agents.coder]
 description = "Coding specialist: read/write files and run code to complete a task."
-tools = ["fs", "fs_write", "compute", "time"]
+tools = ["fs", "fs_write", "compute", "time", "messaging"]
 system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
@@ -219,7 +219,7 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 # agent (and its name from delegates_to above) if you would rather not have either.
 [agents.introspector]
 description = "Evaluates a past conversation against the criteria you specify: what was reasoned, called, delegated, and cost."
-tools = ["conversations", "fs", "time"]
+tools = ["conversations", "fs", "time", "messaging"]
 system_message = """\
 You are an introspection sub-agent. Your subject is one of the user's own conversations and your job is \
 to evaluate it against the criteria you were given.

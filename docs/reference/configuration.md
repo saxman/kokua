@@ -622,6 +622,13 @@ reaches the file: anything else would be quoted on the way in and land under a n
 again. `agents.*` is refused for that reason and one more, being the wildcard a lock pattern covers the
 whole section with rather than an agent.
 
+**Two names are refused outright: `user` and `everyone`.** An agent's name is also the address a message
+typed mid-turn is sent to, and those two already mean something there: `user` is the user's own address,
+and `everyone` reaches every run. An agent declared under either would collide rather than merely
+confuse, so it is refused twice over: `update_config` refuses the write when it is attempted, because it
+dry-runs the same startup check, and a config that reaches the file some other way (a hand edit) is
+refused at startup, naming the agent to rename.
+
 **This whole section is locked by default.** See [who may change which key](#who-may-change-which-key)
 for what removing `agents.*` from `[security].locked_config_keys` actually permits.
 
@@ -643,7 +650,8 @@ list is gone, and one you add is there on the next start.
 
 There is one namespace for every capability, so a name may be an AIMU built-in tool group (`web`, `fs`,
 `fs_write`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), one of Kokua's own (`memory`,
-`documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp`, `planning`, `scheduling`),
+`documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp`, `messaging`, `planning`,
+`scheduling`),
 an installed plugin toolset (`aimu_agents`, `benchmark`, `github_backup`, `image`), a skill in your skills folder
 named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list
 does not say which kind a name is. Run `kokua --list-toolsets` for every name this install accepts,

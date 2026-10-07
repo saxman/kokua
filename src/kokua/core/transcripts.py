@@ -23,7 +23,13 @@ from typing import Any, Optional
 from aimu.models import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
 
-from kokua.core.messages import INJECTED_USER_PROVENANCE, message_text
+from kokua.core.messages import (
+    INJECTED_USER_PROVENANCE,
+    LOOP_INJECTED_PROVENANCE,
+    PROVENANCE_AGENT,
+    PROVENANCE_MIXED,
+    message_text,
+)
 
 # Cut one message on its own, before any whole-transcript budget, so a single pasted document cannot
 # consume a read and hide every message around it.
@@ -60,7 +66,11 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
     """The ``(label, timestamp, text)`` of each message that carries something the user or the assistant
     actually said, in order.
 
-    Skips the system message, tool results, the loop's injected user turns, and any message left with no
+    Skips the system message, tool results, every user-role message the user did not type (the loop's
+    injected turns, and a message one of a turn's agents sent to another, which is neither the user
+    nor the assistant speaking), a mid-turn message that mixed the two into one appended text
+    (``messages.PROVENANCE_MIXED``, which cannot be split back into its two halves, so the whole
+    message is left out rather than counted as the user's), and any message left with no
     text -- which drops an assistant message whose only content was ``tool_calls``. The cost is that a
     turn whose visible work was all delegation shows only its final answer; that is acceptable because
     the loop ends every turn with a text answer, and the web UI is where the full trace is inspectable.
@@ -72,7 +82,7 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
         if role in _SKIPPED_ROLES:
             continue
         provenance = message.get(PROVENANCE_KEY)
-        if role == "user" and provenance in INJECTED_USER_PROVENANCE:
+        if role == "user" and (provenance in INJECTED_USER_PROVENANCE or provenance == PROVENANCE_MIXED):
             continue
         content = message.get("content")
         text = (message_text(content) + _image_placeholders(content)).strip()
@@ -209,11 +219,15 @@ def search(
 # --- replay --------------------------------------------------------------------------------------
 
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
-# ordinary user messages except for this provenance tag, so display keys off the tag alone. Same set
-# as messages.INJECTED_USER_PROVENANCE (both name "a loop injection, not real user input"), kept under
-# its own name here because the two call sites ask different questions of it: that one filters a
-# message out of what counts as user input, this one decides how to render one that was not filtered.
-_LOOP_PROVENANCE = INJECTED_USER_PROVENANCE
+# ordinary user messages except for this provenance tag, so display keys off the tag alone.
+#
+# A *subset* of messages.INJECTED_USER_PROVENANCE, and the difference matters: that set is every
+# user-role message the user did not type, which now includes a message one of the turn's agents sent
+# to another (messages.PROVENANCE_AGENT). Both are "not real user input", so both are filtered out of
+# what counts as user input there, but only a loop injection renders as a loop marker here. Keying
+# this on the wider set would draw an agent's message as a `loop` item carrying a `reason` the page
+# has no marker for, instead of the `inbox` row it belongs in.
+_LOOP_PROVENANCE = LOOP_INJECTED_PROVENANCE
 
 # AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
 # literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
@@ -265,7 +279,8 @@ def replay_items(
     subagent: Optional[dict] = None,
     trace: Optional[dict] = None,
     failure: Optional[dict] = None,
-    steering: Optional[dict] = None,
+    mid_turn: Optional[dict] = None,
+    undelivered: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
@@ -294,29 +309,32 @@ def replay_items(
     produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
     status line for a firing goes to whichever conversation the user was viewing at the time.
 
-    ``steering`` is keyed the same way and holds the *message* indices of what the user sent into that
-    turn while it ran (``record_turn_provenance``'s ``steering`` map). Those messages are ordinary
-    untagged ``user`` entries in the transcript, so nothing in the messages themselves distinguishes
-    one from a message that started a turn, and position cannot: this record is the only thing that
-    can say. Without it a steering message replays as a turn of its own, which is destructive rather
+    ``mid_turn`` is keyed the same way and holds the *message* indices of what was sent into that turn
+    while it ran (``record_turn_provenance``'s ``messages`` map). What the *user* sent is an ordinary
+    untagged ``user`` entry in the transcript, so nothing in the message itself distinguishes one from
+    a message that started a turn, and position cannot: for those, this record is the only thing that
+    can say. (What one of the turn's *agents* sent carries ``messages.PROVENANCE_AGENT``, and a
+    delivery that mixed the user's words with an agent's carries ``messages.PROVENANCE_MIXED``, so
+    both have a second answer that survives without the record; see the branch below.)
+    Without it a mid-turn message replays as a turn of its own, which is destructive rather
     than untidy, because a renderer stamps a turn's branch and delete-from-here controls on the first
     item carrying a ``message_index`` and the index of a message sent mid-turn cuts its *host* turn in
     half. A transcript stored before turns recorded this has no entry and still replays the old way,
     which is the best a reader can do with a record that was never written.
 
-    What this emits for a steering message, a ``"steering"`` item with no ``message_index``, is not
-    what the live page shows for the same message: there it is a ``user`` bubble marked ``steered``,
+    What this emits for a mid-turn message, an ``"inbox"`` item with no ``message_index``, is not
+    what the live page shows for the same message: there it is a ``user`` bubble marked ``mid-turn``,
     carrying the user's own styling, where here it is a collapsed row rendered the way a tool call or
     a loop marker is. That divergence was a deliberate choice rather than an oversight. The live mark
     is a CSS class on a bubble the page already drew for the message as it was typed; replay draws no
     such bubble; there is no earlier draw for this function to find and re-mark. Reusing the row
     renderer costs nothing new on the page (it already exists, for the live case where a turn is still
     open when a reload or switch-in lands on it), where matching the live bubble would mean teaching
-    ``app.js`` a second way to draw a steered item: a ``user`` item carrying a ``steered`` flag beside
+    ``app.js`` a second way to draw a mid-turn item: a ``user`` item carrying a ``mid-turn`` flag beside
     its absent ``message_index``, read by a branch neither ``stampTurnStart`` nor any existing replay
     code has. That branch has no default-suite coverage were it added (the page's own tests are the
     opt-in end-to-end suite), which is the cost weighed against it here. The row is not wrong where it
-    differs: a steering message's words are no less readable collapsed than expanded, only slower to
+    differs: a mid-turn message's words are no less readable collapsed than expanded, only slower to
     read, and nothing about the fix this record exists for (the truncate control) depends on which
     presentation the page chooses.
 
@@ -325,16 +343,28 @@ def replay_items(
     message, not only its text: a message sent with an image and no text yields no ``"user"`` item at
     all, and the Markdown export opens a turn's heading at whichever item carries this key first, so an
     image-only turn still needs one somewhere to anchor to.
+
+    ``undelivered`` is keyed the same way as ``failure`` (``str(user_index)``) and holds what
+    ``MessageBus.close()``'s second list reported for that turn: one of the turn's own agents sent a
+    message no reader took. It never became a message in ``messages`` at all -- that is the whole of
+    what "undelivered" means -- so unlike a mid-turn ``inbox`` item there is no stored message to read
+    this off; the record this function reads it from is the only place it exists. Rendered as its own
+    item type rather than folded into ``inbox``, because the two answer different questions a reader
+    asks ("did this reach anyone" rather than "did the user or an agent say this"), and flushed at the
+    same point ``failure`` is (the next turn, or the end of the transcript), since both are discovered
+    only when a turn ends and neither has anywhere earlier to attach to.
     """
     subagent = subagent or {}
     trace = trace or {}
     failure = failure or {}
-    # Flattened across turns: the question asked per message is "was this one steering", and a
+    undelivered = undelivered or {}
+    # Flattened across turns: the question asked per message is "was this one mid-turn", and a
     # message belongs to at most one turn, so which turn recorded it adds nothing here.
-    steered = {index for indices in (steering or {}).values() for index in indices}
+    mid_turn_set = {index for indices in (mid_turn or {}).values() for index in indices}
     items: list[dict] = []
     results = _tool_results_by_call_id(messages)
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
+    pending_undelivered: Optional[tuple[list[dict], object]] = None  # (the turn's reports, its timestamp)
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -345,19 +375,37 @@ def replay_items(
             item["ts"] = timestamp
         items.append(item)
 
-    def flush_failure() -> None:
-        """Close the turn in progress with its recorded reason, if it had one.
+    def flush_turn_end() -> None:
+        """Close the turn in progress with its recorded failure and whatever it reported as
+        undelivered, if either survived to the end of the turn.
 
-        Held until the turn ends rather than emitted where it is read, because the reason belongs after
-        the output it cut short. A turn ends at the next user message or at the end of the transcript,
-        so this is called from both places; a conversation the user carried on in after a failed turn
-        therefore keeps the notice inside that turn instead of trailing it off the bottom.
+        Held until the turn ends rather than emitted where each is read, because both belong after the
+        output they are about. A turn ends at the next user message or at the end of the transcript,
+        so this is called from both places; a conversation the user carried on in after a failed or
+        incomplete turn therefore keeps both notices inside that turn instead of trailing them off the
+        bottom. Failure first, undelivered second, which is the order the live turn itself produces
+        them in (``TurnRunner.reactive`` sends the failure from inside its own ``except`` branch, before
+        its ``finally`` closes the bus that ``_report_undeliverable`` reads afterwards), so a replay
+        reads in the order it was watched in.
         """
-        nonlocal pending_failure
+        nonlocal pending_failure, pending_undelivered
         if pending_failure is not None:
             reason, turn_ts = pending_failure
             pending_failure = None
             add({"type": "notice", "text": reason}, turn_ts)
+        if pending_undelivered is not None:
+            reports, turn_ts = pending_undelivered
+            pending_undelivered = None
+            for report in reports:
+                add(
+                    {
+                        "type": "undelivered",
+                        "sender": report.get("sender", ""),
+                        "to": report.get("to", ""),
+                        "text": report.get("text", ""),
+                    },
+                    turn_ts,
+                )
 
     for index, message in enumerate(messages):
         role = message.get("role")
@@ -373,16 +421,40 @@ def replay_items(
                 # so it must not close that turn's failure notice either.
                 add({"type": "loop", "reason": provenance, "text": message_text(message.get("content"))}, ts)
                 continue
-            if index in steered:
-                # A message the user sent into the turn already running. Deliberately carries no
-                # `message_index`: it has no turn of its own, so a renderer must neither open one here
-                # nor offer the controls that act on one. It continues the turn in progress, so like a
-                # loop marker it must not close that turn's failure notice either.
-                add({"type": "steering", "text": message_text(message.get("content"))}, ts)
+            if index in mid_turn_set or provenance in (PROVENANCE_AGENT, PROVENANCE_MIXED):
+                # A message sent into the turn already running, by the user, by one of the turn's own
+                # agents, or by both at once (one delivery can join the two into a single appended
+                # text). Deliberately carries no `message_index`: it has no turn of its own, so a
+                # renderer must neither open one here nor offer the controls that act on one. It
+                # continues the turn in progress, so like a loop marker it must not close that turn's
+                # failure notice either.
+                #
+                # Either test is enough on its own, and the tag is the one that does not depend on a
+                # record surviving: the index comes from this turn's metadata, while the tag rides the
+                # message itself, so an agent's message, mixed or not, is kept out of a plain user
+                # bubble even by a reader holding the messages and not the record. The user's own
+                # mid-turn message has no such second route, deliberately (it is untagged because it
+                # really is the user speaking), which is why the index is still what answers for it.
+                #
+                # `from` says which of the three it was, and only a reader that attributes the words
+                # in so many letters needs it: the Markdown export writes "User (mid-turn)" over an
+                # inbox item with none, which would be a worker's note (or half of one) signed by the
+                # user. A flag on the item rather than an item type of its own, because a renderer that
+                # has not learned the flag still draws the message (the web page's replay keys on
+                # `inbox` and ignores keys it does not know, where an unknown *type* would be dropped
+                # in silence).
+                item = {"type": "inbox", "text": message_text(message.get("content"))}
+                if provenance == PROVENANCE_AGENT:
+                    item["from"] = "agent"
+                elif provenance == PROVENANCE_MIXED:
+                    item["from"] = "mixed"
+                add(item, ts)
                 continue
-            flush_failure()  # whatever turn was in progress ends where this one begins
+            flush_turn_end()  # whatever turn was in progress ends where this one begins
             if str(index) in failure:
                 pending_failure = (failure[str(index)], ts)
+            if str(index) in undelivered:
+                pending_undelivered = (undelivered[str(index)], ts)
             text = message_text(message.get("content"))
             if text:
                 # Stamped with this message's position in the transcript, the key record_turn_provenance
@@ -439,5 +511,5 @@ def replay_items(
             # reference the user asked to see, so surface it as an image of its own.
             for url in image_refs_of(message.get("content")):
                 add({"type": "image", "url": url, "from": "assistant"}, ts)
-    flush_failure()  # the last turn ends at the end of the transcript
+    flush_turn_end()  # the last turn ends at the end of the transcript
     return items

@@ -766,15 +766,15 @@ let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 // Bubbles whose fate the server has not reported yet, keyed by the token the page minted for each.
 // Keyed rather than ordered because a message has two frames it can be named by in sequence, not one:
-// `steering` first if it is accepted into the turn already running, and then either nothing more (the
+// `inbox` first if it is accepted into the turn already running, and then either nothing more (the
 // run reads it and it stays folded into that turn) or a `turn_saved` of its own after all (the run
 // never reads it, so it becomes a follow-up turn, carrying the same token). The page cannot know which
-// of those it sends toward. A positional queue could not tell any of this apart, so a steering message
-// stranded an entry at the head and the *next* turn's save took the stale entry, stamping an older
-// bubble with a newer turn's index. That is worse than losing the control, because the index is a
-// valid turn boundary the server will honour, so the user would click delete on one message and lose
-// that one and the message before it. See the `turn_saved` and `steering` frame handling below for how
-// the sequence actually plays out.
+// of those it sends toward. A positional queue could not tell any of this apart, so a message joining
+// a running turn stranded an entry at the head and the *next* turn's save took the stale entry,
+// stamping an older bubble with a newer turn's index. That is worse than losing the control, because
+// the index is a valid turn boundary the server will honour, so the user would click delete on one
+// message and lose that one and the message before it. See the `turn_saved` and `inbox` frame
+// handling below for how the sequence actually plays out.
 //
 // Matching also makes an unclaimed entry harmless, where a count had to be kept honest: text the server
 // answers as a command (or as the reply to a pending approval) runs no turn and is simply never claimed,
@@ -890,12 +890,16 @@ function appendSubagentEntry(card, entry) {
     renderLoop(entry.text, undefined, { parent: card.body, reason: entry.reason });
     return;
   }
-  if (entry.kind === "steering") {
+  if (entry.kind === "message") {
     // Its own branch rather than `loop`'s: `loop` is the agent loop injecting a round of its own,
-    // and this is the user's own words reaching a worker already running. Filing it under `loop`
-    // would show the card crediting the loop with what a person said.
+    // and this is somebody's own words (the user's, or one of the turn's own agents') reaching a
+    // worker already running. Filing it under `loop` would show the card crediting the loop with
+    // what a person, or another agent, said. `cardMessageFrom` reads the attribution straight off
+    // `entry.text` rather than a field of its own: the card carries none (principle 1 again), but
+    // the text is already there, so a card row can draw the same dimmed treatment the main log's
+    // `inbox.agent` gets instead of reading as a one-state row forever.
     card.answer = null;
-    renderSteering(entry.text, undefined, { parent: card.body });
+    renderMidTurn(entry.text, undefined, { parent: card.body, from: cardMessageFrom(entry.text) });
     return;
   }
   if (entry.kind === "tool") {
@@ -1501,12 +1505,46 @@ function renderLoop(text, ts, opts) {
   return f;
 }
 
-// A message the user sent into a worker already running. Its own foldable class, not `loop`'s: a
-// `loop` row is the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in
-// app.css), and this text is a person's words, so it keeps the card's ordinary foreground colour
+// Fold header word for a mid-turn message, by `opts.from`. On the main log's replayed `inbox` item
+// this comes from `core/transcripts.py`'s stored provenance tag (`replay_items`), the one honest
+// source for "who", since a mixed delivery's text does not reliably carry a marker at all (the
+// user's half of it has none) -- which is also why "mixed" is never guessed at anywhere else. On a
+// live sub-agent card there is no such tag (see `cardMessageFrom`): that caller passes "agent" only
+// when it can read the attribution directly off the text's own leading marker, and nothing in
+// between.
+const INBOX_LABELS = { agent: "agent", mixed: "mixed" };
+
+// Whether a live sub-agent card's `message` entry opens with an agent's own attribution
+// (`core/messaging.py`'s `_for_model`'s `[message from {sender}] `), the one marker that function's
+// own docstring calls authentic because only a *leading* one is ever composed there -- anything
+// elsewhere in the body could be forged. The card carries no `from` field of its own (principle 1:
+// addressing stays out of the channel, so `core/subagents.py` sends only `{"text": ...}`), so this
+// is the one place a live view recovers any of what the main log's replayed `inbox` item gets from a
+// stored tag, and only the unambiguous half of it: a delivery that joined the user's own words with
+// an agent's reads as the plain case here, the same direction `MessageBus.tag_for_delivery` already
+// takes when it cannot tell either (showing a worker's note undimmed is a smaller mistake than
+// dimming the user's own words).
+function cardMessageFrom(text) {
+  return /^\[message from [^\]]+\] /.test(text || "") ? "agent" : undefined;
+}
+
+// A message sent into a turn already running. Its own foldable class, not `loop`'s: a `loop` row is
+// the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in app.css), and
+// the plain case here is a person's own words, which keeps the card's ordinary foreground colour
 // rather than reading as something the assistant did.
-function renderSteering(text, ts, opts) {
-  const f = addFoldable("steering", { kind: "steering" }, { parent: opts && opts.parent }, ts);
+//
+// Three states, not one, since a previous task's reader fix only carried the *user's* mid-turn
+// message this far: `opts.from` is absent for the plain case, `"agent"` for a delivery no reader
+// should mistake for the user's own, and `"mixed"` for a delivery that joined the two into one
+// message (replay only; see `cardMessageFrom` for why a live card never claims this one). An agent's
+// note folds into the dimmed `.inbox.agent` treatment below, since it really is a machine event; a
+// mixed delivery keeps the undimmed default, since part of it is still the user's own typed words
+// and dimming the whole line would misrepresent that part.
+function renderMidTurn(text, ts, opts) {
+  const from = opts && opts.from;
+  const label = Object.prototype.hasOwnProperty.call(INBOX_LABELS, from) ? INBOX_LABELS[from] : "inbox";
+  const cls = from === "agent" ? "inbox agent" : from === "mixed" ? "inbox mixed" : "inbox";
+  const f = addFoldable(cls, { kind: label }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;
 }
@@ -1652,11 +1690,16 @@ function handleFrame(event) {
         // accepted it into one, that turn ended before reading it, and it was re-run as a turn of
         // its own. The mark is withdrawn rather than left standing beside the controls, since the
         // two would otherwise say the message both did and did not become a turn.
-        pending.classList.remove("steered");
+        pending.classList.remove("mid-turn");
         stampTurnControls(pending, frame.message_index, frame.conversation_id);
       }
     }
-  } else if (frame.type === "steering") {
+  } else if (frame.type === "inbox") {
+    // AIMU's own name for this chunk (renamed from `STEERING`), matched here because both of the
+    // server's emitters now send it: a plain reactive turn's delivery frame and a planned turn's
+    // both carry this type, and a mid-turn message's live marker would render nothing without this
+    // branch, on either kind of turn.
+    //
     // The bubble's other possible fate, and the reason this map matches rather than counts: the
     // message joined the turn already running, so no `turn_saved` for a turn of its own will name it.
     // Marked rather than stamped, and deliberately given no turn controls: while that holds it has no
@@ -1670,13 +1713,13 @@ function handleFrame(event) {
     // left behind when the message *is* delivered is inert, for the reason the map's own comment
     // gives: only a frame carrying this token can ever claim it, and nothing else mints one.
     //
-    // Two frames of this type arrive for one steered message and only one carries a token. This is
+    // Two frames of this type arrive for one mid-turn message and only one carries a token. This is
     // the server reporting the message accepted, and the token is what names the bubble; the other
     // comes from the agent loop as it reads the message, which is the one a sub-agent card renders
     // and which names no bubble. So an untokened frame marks nothing here, as a `turn_saved` with
     // no token stamps nothing just above.
-    const steered = pendingBubbles.get(frame.token);
-    if (steered) steered.classList.add("steered");
+    const midTurn = pendingBubbles.get(frame.token);
+    if (midTurn) midTurn.classList.add("mid-turn");
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
@@ -1733,12 +1776,15 @@ function handleFrame(event) {
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       // A message sent into a turn already running, read from the stored record
-      // (`record_turn_provenance`'s `steering` map) rather than a frame about a turn still open: this
+      // (`record_turn_provenance`'s `messages` map) rather than a frame about a turn still open: this
       // item type reaches here for a turn long since finished and saved exactly as it does for one
       // still in flight when the page connected, since the item carries nothing saying which. Rendered
-      // as a collapsed row rather than the live view's marked user bubble (the `.steered` class), a
+      // as a collapsed row rather than the live view's marked user bubble (the `.mid-turn` class), a
       // deliberate divergence reasoned about in `replay_items`'s own docstring rather than here.
-      else if (item.type === "steering") renderSteering(item.text, item.ts);
+      // `item.from` is absent for the user's own words and `"agent"` / `"mixed"` for the two cases
+      // `replay_items` tells apart from the stored provenance tag; see `renderMidTurn` for why those
+      // three states render differently.
+      else if (item.type === "inbox") renderMidTurn(item.text, item.ts, { from: item.from });
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
@@ -1746,6 +1792,15 @@ function handleFrame(event) {
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
+      // One of the turn's own agents sent this and no reader ever took it (`MessageBus.close()`'s
+      // report, see `core/transcripts.py`'s `undelivered` item). The live turn said so too
+      // (`TurnRunner._report_undeliverable`), as an ordinary send rather than a frame of its own, so
+      // without this branch a reload lost that account entirely. "Undelivered:" up front is the fact
+      // that makes this row worth keeping at all -- without it the sender and the selector alone read
+      // as a message that arrived, which is the opposite of what happened -- and the sender and the
+      // selector after it are what a reader can act on, the same two facts the live sentence and the
+      // Markdown export both lead with.
+      else if (item.type === "undelivered") addBubble("notice", `Undelivered: ${item.sender} -> ${item.to}: ${item.text}`, item.ts);
     }
     autoscroll();
   } else if (frame.type === "ready") {

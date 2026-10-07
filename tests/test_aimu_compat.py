@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
@@ -179,30 +180,22 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``aio.SkillAgent.run``'s ``steering`` parameter: a run already in progress can
-    be handed a user message without waiting for it to finish, which is what lets a message typed
-    mid-turn reach the turn running now instead of queuing behind it.
+    The surface today is ``aimu.agents.Inbox``: AIMU renamed its mid-turn-message seam from ``Steering``
+    to ``Inbox``, with no legacy path, and taught it which agent is opening each reader, so a sibling
+    still on the previous branch has ``Steering`` and no ``Inbox`` at all.
 
-    It grips the *subclass*, not ``aio.Agent.run``, which took the same parameter in the first of the
-    release's steering commits. ``SkillAgent.run`` cannot delegate to ``super().run()`` (it prepares,
-    sets skills up, then calls the post-prepare helpers that do the real work), so it repeats
-    ``Agent.run``'s whole parameter list by hand, and ``steering`` was not copied across until a
-    whole-branch review caught the gap, in the release's last functional commit. Gripping ``Agent``
-    would date a checkout to one drain site on one driver; gripping ``SkillAgent`` dates it to every
-    steering commit in the release and every fix after it, which is what Kokua's entry agent runs.
+    A plain name lookup, not a signature check: unlike the parameter it replaces, the capability here is
+    the export itself, so nothing else has to be true of a checkout once the class is importable.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    holder = getattr(module, aimu_compat._PROBE_CLASS)
-    probe = getattr(holder, aimu_compat._PROBE_SYMBOL, None)
+    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.aio"
-    assert aimu_compat._PROBE_CLASS == "SkillAgent"
-    assert aimu_compat._PROBE_SYMBOL == "run"
-    # A keyword argument no `getattr` would notice, since `SkillAgent.run` predates this floor by a long
-    # way: only whether it takes `steering` dates a checkout, not whether the method exists at all.
-    assert aimu_compat._PROBE_PARAMETER == "steering"
+    assert aimu_compat._PROBE_MODULE == "aimu.agents"
+    assert aimu_compat._PROBE_CLASS is None
+    assert aimu_compat._PROBE_SYMBOL == "Inbox"
+    assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
 
 
@@ -421,6 +414,12 @@ def test_every_stated_floor_matches_the_packaged_requirement():
 
     root = Path(__file__).resolve().parents[1]
     claims = (
+        # CLAUDE.md states the floor twice, as an install requirement and as the dependency
+        # narrative's current-floor sentence, and it is also the file that documents this very pin.
+        # It was the one file the pin named and did not cover, so the guidance claiming the
+        # protection was the only guidance without it.
+        ("CLAUDE.md", r"requires `aimu>=(\d+\.\d+\.\d+)`"),
+        ("CLAUDE.md", r"AIMU (\d+\.\d+\.\d+) is the current floor"),
         ("README.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
         ("CHANGELOG.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
         ("docs/index.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
@@ -475,18 +474,187 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
         require_aimu()
 
 
-def test_the_probe_grips_the_steering_parameter():
+def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
+    """0.33.0's probe surface is 0.34.0's floor now that ``Inbox`` holds the one probe slot.
+
+    ``aio.SkillAgent.run`` is the exact method a mid-turn message reaches (Kokua's entry agent is an
+    ``aio.SkillAgent``), and the parameter the rename left it holding is spelled ``inbox``, not
+    ``steering``. Pinned directly, the way every other demoted surface in this file is: one probe slot
+    cannot hold every capability the floor has come to cover.
+    """
     import inspect
 
     from aimu.aio import SkillAgent
 
-    assert "steering" in inspect.signature(SkillAgent.run).parameters
+    assert "inbox" in inspect.signature(SkillAgent.run).parameters
+    assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_33_0():
+def test_the_floor_is_0_34_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 33, 0)
+    assert MINIMUM_AIMU == (0, 34, 0)
+
+
+def test_the_probe_grips_the_inbox_protocol():
+    from aimu.agents import Inbox
+
+    assert Inbox is not None
+
+
+def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monkeypatch):
+    """Kokua strips `subagent-` to turn AIMU's label into the declared name a sender can type. A
+    change to this convention upstream would silently rename every worker address, so it is pinned
+    here as a fact about the release rather than left for the bus to discover.
+
+    Asserted behaviorally, against a mock client, rather than against the factory's source text: AIMU's
+    own suite now does exactly this (``tests/test_aio_subagent_tools.py``'s
+    ``test_a_spawned_worker_opens_its_reader_under_its_own_label``), spawning through
+    ``make_async_subagent_tool`` with a recording inbox and reading back the label the loop opened a
+    reader under. A source-text match would break on an upstream reformat that changed nothing this
+    depends on; this reads the label AIMU actually used instead.
+    """
+    import asyncio
+
+    from aimu.aio.tools import builtin as aio_builtin
+    from aimu.aio.tools.builtin import make_async_subagent_tool
+
+    from tests.helpers import MockAsyncModelClient
+
+    seen_agent_names: list[Optional[str]] = []
+
+    class _RecordingInbox:
+        def reader(self, agent: Optional[str] = None):
+            seen_agent_names.append(agent)
+            return lambda: []
+
+    # The factory builds a real `Agent` per spawn already; only the client needs faking, since a real
+    # model call is what the loop's own `run()` needs to reach the point where it opens a reader.
+    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: MockAsyncModelClient(["done"]))
+
+    spawn = make_async_subagent_tool(
+        "mock:mock",
+        agent_types={"researcher": {"system_message": "Look things up."}},
+        inbox=_RecordingInbox(),
+    )
+    asyncio.run(spawn("researcher", "find something"))
+    assert seen_agent_names == ["subagent-researcher"]
+
+
+def test_aimu_still_drains_the_inbox_after_a_rounds_dispatch_not_only_on_a_healthy_turn(monkeypatch):
+    """Pins the drain AIMU messaging depends on, not merely that some drain happens.
+
+    An earlier version of this test scripted a one-shot answer with no tool
+    call at all, so it only proved AIMU drains *somewhere* during a run -- the ``TERMINAL_HEALTHY``
+    branch drains once before returning, with no dispatch anywhere in the run. Skipping only the
+    *after-dispatch* drain while leaving that one in place still left the whole suite green, which
+    is exactly the upstream change this test exists to catch and the one it was missing.
+
+    The after-dispatch drain is not a detail of ``current_address``: it is **the primary delivery
+    window for the entire messaging feature**. A message a worker sends mid-round has to reach its
+    parent on the round immediately after that round's own dispatch, or it waits for a round that may
+    never come; `current_address`'s reassertion there is one more thing riding the same window, not
+    the reason it exists.
+
+    This needs a genuine ``TERMINAL_PENDING_TOOLS`` round, which the project's ``MockAsyncModelClient``
+    cannot produce on its own (its ``"tool"`` response simulates one by appending messages directly,
+    without ever handing AIMU's loop a real tool call to classify and dispatch). ``_PendingToolClient``
+    below is the ~20-line fix: it appends a genuine ``tool_calls``-bearing assistant message once, so
+    AIMU's own ``classify_terminal_turn`` calls it pending, its own ``_dispatch`` calls the real tool
+    below, and only then does the loop call ``_take_message`` -- all AIMU's code, not a stand-in for
+    it. The tool and the inbox share one list, so the recorded order (``"dispatch(drains_so_far=N)"``
+    once, ``"drain"`` one or more times) says directly whether a drain landed after the dispatch
+    rather than only before it -- and specifically whether *two* drains happened (the one right after
+    this round's own dispatch, and the final round's), since one survivor sorts after the dispatch
+    entry exactly the same as two would and a weaker "any drain after dispatch" check cannot tell
+    them apart. Proven to fail, not merely to read as though it should: skipping the after-dispatch
+    drain alone (patching ``_AsyncToolLoop._take_message`` to a no-op only on the ``TERMINAL_PENDING_
+    TOOLS`` branch, while leaving the ``TERMINAL_HEALTHY`` one untouched) fails this test while the
+    other 113 tests across this file, ``tests/core/test_messaging.py`` and
+    ``tests/core/test_subagents.py`` stay green -- checked by hand, not committed as a mutation.
+    """
+    import asyncio
+
+    from aimu.aio.tools import builtin as aio_builtin
+    from aimu.aio.tools.builtin import make_async_subagent_tool
+    from aimu.tools import tool as aimu_tool
+
+    from tests.helpers import MockAsyncModelClient
+
+    order: list[str] = []
+
+    @aimu_tool
+    def mock_tool() -> str:
+        """A real tool AIMU's own dispatch calls, so an entry here means AIMU ran it, not a stand-in
+        for running it. Carries how many drains had already happened, so the recorded order also
+        proves dispatch precedes draining within its own round, not only that both occur somewhere."""
+        order.append(f"dispatch(drains_so_far={order.count('drain')})")
+        return "tool result"
+
+    class _PendingToolClient(MockAsyncModelClient):
+        """Returns a genuine ``tool_calls`` turn once, then a plain answer, so AIMU's own loop (not
+        this test) decides there is a pending-tools round and dispatches it for real."""
+
+        def __init__(self):
+            super().__init__([])
+            self._answered = False
+
+        async def _chat(
+            self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None
+        ):
+            self._append_message({"role": "user", "content": user_message})
+            if not self._answered:
+                self._answered = True
+                self._append_message(
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {"type": "function", "function": {"name": "mock_tool", "arguments": {}}, "id": "c1"}
+                        ],
+                    }
+                )
+                return ""
+            self._append_message({"role": "assistant", "content": "done"})
+            return "done"
+
+    class _RecordingInbox:
+        def reader(self, agent: Optional[str] = None):
+            def drain():
+                order.append("drain")
+                return []
+
+            return drain
+
+    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: _PendingToolClient())
+
+    spawn = make_async_subagent_tool(
+        "mock:mock",
+        agent_types={"researcher": {"system_message": "Look things up.", "tools": [mock_tool]}},
+        inbox=_RecordingInbox(),
+    )
+    asyncio.run(spawn("researcher", "find something"))
+
+    # One round dispatches the tool call, with no drain yet; the round after it drains once (the
+    # window a worker's own send would have to land in); the final, tool-free round drains again on
+    # its way to returning. Two drains total is the fact that matters: the break the brief called
+    # realistic (skip only the drain that follows a PENDING_TOOLS dispatch, keep the one on a
+    # TERMINAL_HEALTHY turn) leaves exactly one, which the weaker "a drain happened somewhere after
+    # dispatch" check could not tell apart from this, since the later round's own drain still sorts
+    # after the dispatch entry either way.
+    assert order[0] == "dispatch(drains_so_far=0)", f"dispatch did not come first, or came after a drain: {order}"
+    assert order.count("drain") >= 2, f"expected the after-dispatch drain and the final round's; got {order}"
+
+
+def test_the_floor_covers_the_agent_parameter_the_probe_cannot_see():
+    """The probe is a name lookup, so it cannot tell whether the loop passes the agent's name.
+
+    Asserted here as a fact about the release rather than a shape the preflight has to learn.
+    """
+    import inspect
+
+    from aimu.agents import Inbox
+
+    assert "agent" in inspect.signature(Inbox.reader).parameters
 
 
 def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
