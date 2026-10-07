@@ -930,7 +930,10 @@ opens a reader this turn (an exact one per worker, like `researcher#1`, and the 
 the entry agent), and until this release the only sender who could use an address was the user's own
 typed message, sent to `EVERYONE`. This toolset lets an agent address one of those runs directly: the
 entry agent can redirect a worker already running, and a worker can report back to the parent that
-spawned it, by its declared name. `list_agents` shows the current roster plus `everyone`; the person
+spawned it, by its declared name. `list_agents` shows the current roster plus `everyone`, and marks
+the caller's own address `(you)`: without it a worker cannot tell itself from a sibling under the same
+label, and one did message itself, believing it was asking the run that had written the file it needed
+checked, then read its own words coming back as an echo. The person
 the turn is for is not on it, since `user` is a sender (the address the bus re-runs a redirected message
 under), not a selector a tool argument can name. `send_message` refuses a `to` that matches nothing on
 the roster right now, rather than accepting it and later reporting nothing delivered, since the roster

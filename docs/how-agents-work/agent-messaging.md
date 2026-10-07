@@ -232,7 +232,10 @@ declaration buys is different: `list_agents`, and the broadcast-before-spawn rou
 only reason an orchestrator has to hold `send_message` at all.
 
 `list_agents` is not garnish either way: without discovery a model invents addresses, which is how
-sends reach nobody.
+sends reach nobody. It marks the caller's own line `(you)` (the captured runs above predate the mark), for the
+mirror-image failure: a worker that cannot tell its own address from a sibling's will message itself.
+One did, asking `report-writer#1` to check a file it believed `report-writer#1` had written, while being
+`report-writer#1`; its own words came back on the next drain, and it read them as an echo.
 
 ```toml
 [agents.assistant]

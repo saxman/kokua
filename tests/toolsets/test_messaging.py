@@ -115,6 +115,35 @@ def test_list_agents_names_the_roster_and_everyone():
         current_bus.reset(token)
 
 
+def test_list_agents_marks_the_callers_own_address():
+    # Without the mark a worker cannot tell its own address from a sibling's, and a report-writer
+    # once messaged itself believing it was asking the agent that wrote the file it needed checked.
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    bus.reader("report-writer")
+    token = current_bus.set(bus)
+    address_token = current_address.set("report-writer#1")
+    try:
+        lines = list_agents().splitlines()
+        assert "- report-writer#1 (you)" in lines
+        assert "- assistant" in lines
+    finally:
+        current_address.reset(address_token)
+        current_bus.reset(token)
+
+
+def test_list_agents_marks_nobody_for_a_caller_with_no_address():
+    bus = MessageBus()
+    bus.reader("researcher")
+    token = current_bus.set(bus)
+    address_token = current_address.set(None)
+    try:
+        assert "(you)" not in list_agents()
+    finally:
+        current_address.reset(address_token)
+        current_bus.reset(token)
+
+
 def test_list_agents_outside_a_turn_says_so_rather_than_raising():
     assert "no turn" in list_agents().lower()
 

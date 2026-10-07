@@ -100,15 +100,20 @@ def send_message(to: str, text: str) -> str:
 def list_agents() -> str:
     """List every agent reachable with `send_message` in this turn, plus `everyone`.
 
-    Each line is one address. A worker's address may already name a run that has finished: nothing
-    tells this list that, so a name here is "opened a reader this turn", not "still running". The
-    person you are talking to is not on this list and cannot be addressed with `send_message`: they
-    are who a turn is run *for*, not a run this bus has a reader for.
+    Each line is one address, and the one marked `(you)` is your own: a message sent there comes back
+    to you, so it never reaches whoever else carries your label. A worker's address may already name
+    a run that has finished: nothing tells this list that, so a name here is "opened a reader this
+    turn", not "still running". The person you are talking to is not on this list and cannot be
+    addressed with `send_message`: they are who a turn is run *for*, not a run this bus has a reader
+    for.
     """
     bus = current_bus.get()
     if bus is None:
         return NO_ROSTER
-    lines = [f"- {address}" for address in bus.roster()]
+    # Read from the same contextvar `send_message` takes its sender from, so the mark and the return
+    # address on a message can never disagree.
+    caller = current_address.get()
+    lines = [f"- {address} (you)" if address == caller else f"- {address}" for address in bus.roster()]
     lines.append(f"- {EVERYONE}: every one of the above at once.")
     return "\n".join(lines)
 
