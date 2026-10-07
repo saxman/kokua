@@ -430,6 +430,32 @@ def test_a_cards_loop_entry_falls_back_and_caps_like_its_siblings():
     assert "_[some_new_kind: short]_" in out
 
 
+def test_a_cards_message_entry_is_not_dropped():
+    """A `message` card entry matched none of the branches here before this test existed, so the
+    loop fell through to appending nothing: the blank line ahead of the `if`/`elif` chain stayed,
+    and the text itself vanished. Total loss for an agent-to-worker message specifically, since a
+    message delivered into a running worker never becomes a message in `session.messages` at all
+    (`core/subagents.py`'s own docstring says so) -- this card entry is the only place its words
+    exist anywhere in the stored record, live or exported."""
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "message", "text": "[message from assistant] use the index"}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, None))
+    assert "**Message (mid-turn):** [message from assistant] use the index" in out
+
+
+def test_a_cards_message_entry_is_capped_like_its_siblings():
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "message", "text": "x" * 40}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, 10))
+    assert "xxxxxxxxxx\n... [truncated, 40 chars total]" in out
+
+
 def test_a_phase_with_detail_shows_both_the_label_and_the_detail():
     session = _session(
         [{"role": "user", "content": "plan it"}],

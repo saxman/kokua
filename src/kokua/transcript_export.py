@@ -414,6 +414,18 @@ def _render_subagent(
             lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
         elif kind == "loop":
             lines.append(_loop_line(append, max_payload_chars))
+        elif kind == "message":
+            # A message that reached this worker while it ran: the user's own words, or one of the
+            # turn's own agents' (`core/messaging.py`). Total loss otherwise, not merely an unlabeled
+            # line: a message delivered here never becomes a message in `session.messages` at all
+            # (`core/subagents.py`'s own module docstring says why), so this card entry is the *only*
+            # place its text exists anywhere in the stored record. No per-sender label the way the
+            # top-level `inbox` item gets ("User"/"Agent"/"Mixed" from its own provenance tag): this
+            # entry carries no separate sender field to read one off (the same reason `app.js`'s
+            # `renderMidTurn` needs none here either -- see `core/subagents.py`'s `INBOX` branch), so
+            # an agent's words already carry their own `[message from {sender}]` prefix inline and a
+            # user's read bare, exactly as delivered.
+            lines.append(f"**Message (mid-turn):** {_capped(append.get('text', ''), max_payload_chars)}")
     status = events[-1].get("status")
     if status:
         lines.append("")

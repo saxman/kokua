@@ -12,6 +12,7 @@ import pytest
 
 from tests.helpers import BlockingModelClient, MockAsyncModelClient
 from kokua.channels.web import WebChannel
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
 from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.core.transcripts import replay_items
 from kokua.config import AssistantConfig
@@ -2897,6 +2898,76 @@ async def test_send_history_replays_a_stored_turns_mid_turn_messages_as_inbox_it
     items = ws.frames[-1]["items"]
     assert [item["type"] for item in items] == ["user", "inbox", "message"]
     assert items[1]["text"] == "use the cache"
+
+
+async def test_send_history_tags_an_agent_sent_inbox_item_so_the_page_can_tell_it_apart():
+    """The frame is the only place the page learns which of the three states an `inbox` item is in:
+    deleting the `undelivered=`/metadata pass-through this history frame builds from would leave
+    every one of them reading as the user's own words, a regression the default suite would not
+    catch without this. One of the turn's own agents sent this message, tagged `PROVENANCE_AGENT` on
+    the stored message, and the frame has to carry that as `from: "agent"` or the page draws the
+    undimmed user row for words nobody typed."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {})
+
+    inbox_items = [item for item in ws.frames[-1]["items"] if item["type"] == "inbox"]
+    assert inbox_items == [{"type": "inbox", "text": "look at the index", "from": "agent"}]
+
+
+async def test_send_history_tags_a_mixed_inbox_item_so_the_page_can_tell_it_apart():
+    """The third state: a delivery that joined the user's own words with an agent's into one message,
+    tagged `PROVENANCE_MIXED`. Distinct from `"agent"` because this one is not entirely a machine's
+    words -- carried through so the page keeps its undimmed treatment rather than dimming a message
+    that is still partly the user's own."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {
+            "role": "user",
+            "content": "use the cache\n\n[message from researcher#1] and the index",
+            PROVENANCE_KEY: PROVENANCE_MIXED,
+        },
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {})
+
+    inbox_items = [item for item in ws.frames[-1]["items"] if item["type"] == "inbox"]
+    assert inbox_items == [
+        {
+            "type": "inbox",
+            "text": "use the cache\n\n[message from researcher#1] and the index",
+            "from": "mixed",
+        }
+    ]
+
+
+async def test_send_history_replays_an_undelivered_report():
+    """`undelivered=meta.get("undelivered")` is the one pass-through line in `send_history` with no
+    test of its own before this: deleting it left 550 other tests green, because nothing else in the
+    default suite calls `send_history` with that key set. This message never became a stored message
+    at all (nobody read it), so it has no provenance tag to carry it the way the two tests above do --
+    the frame is the only route it has."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [{"role": "user", "content": "summarize the log"}, {"role": "assistant", "content": "done"}]
+
+    await channel.send_history(
+        messages, {"undelivered": {"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}}
+    )
+
+    reports = [item for item in ws.frames[-1]["items"] if item["type"] == "undelivered"]
+    assert reports == [
+        {"type": "undelivered", "sender": "researcher#1", "to": "assistant", "text": "look at the index"}
+    ]
 
 
 async def test_an_accepted_mid_turn_message_is_caught_up_once_rather_than_twice():
