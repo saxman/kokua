@@ -521,6 +521,25 @@ def test_a_drain_attributes_an_agent_sent_message_to_its_sender():
     assert drain() == ["[message from researcher#1] and the index", "use the cache"]
 
 
+def test_a_worker_reads_an_agent_message_sent_before_it_opened_as_earlier():
+    """A worker's cursor opens at zero, so it is replayed what a run that may since have finished
+    sent. Without a mark a replayed request reads as live: a second report-writer once answered the
+    first one's stale broadcast, the first having ended before the second was spawned, and the
+    answer came back as an undelivered report. The user-sent control stays bare, since the user's own
+    words are never marked."""
+    bus = MessageBus()
+    bus.send("can anyone read this file?", sender="report-writer#1", to=EVERYONE)
+    bus.send("use the cache", sender=USER, to=EVERYONE)
+    drain = bus.reader("report-writer")
+    bus.send("and the index", sender="researcher#1", to=EVERYONE)
+
+    assert drain() == [
+        "[message from report-writer#1, sent before you started] can anyone read this file?",
+        "use the cache",
+        "[message from researcher#1] and the index",
+    ]
+
+
 def test_an_agent_only_delivery_is_tagged():
     bus = MessageBus()
     entry = bus.entry_reader("assistant")

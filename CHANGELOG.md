@@ -933,7 +933,10 @@ entry agent can redirect a worker already running, and a worker can report back 
 spawned it, by its declared name. `list_agents` shows the current roster plus `everyone`, and marks
 the caller's own address `(you)`: without it a worker cannot tell itself from a sibling under the same
 label, and one did message itself, believing it was asking the run that had written the file it needed
-checked, then read its own words coming back as an echo. The person
+checked, then read its own words coming back as an echo. A worker's drain also marks an agent's message
+sent before that worker started (`[message from report-writer#1, sent before you started]`): its cursor
+opens at zero, so it is replayed a sibling's earlier words, and unmarked a finished sibling's request
+read as live and drew an answer nothing could receive. The person
 the turn is for is not on it, since `user` is a sender (the address the bus re-runs a redirected message
 under), not a selector a tool argument can name. `send_message` refuses a `to` that matches nothing on
 the roster right now, rather than accepting it and later reporting nothing delivered, since the roster

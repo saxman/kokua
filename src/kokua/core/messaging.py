@@ -79,7 +79,7 @@ class Message:
     token: Optional[str] = None
 
 
-def _for_model(message: Message) -> str:
+def _for_model(message: Message, *, earlier: bool = False) -> str:
     """The text a drain hands AIMU's loop for *message*, attributed if an agent sent it.
 
     The user's own words pass through bare: the model is already reading inside the user's own
@@ -112,9 +112,19 @@ def _for_model(message: Message) -> str:
     enough to rule a forged one out, and the spec forbids adding it. So the residual is structural, not
     a gap in this rendering, and whatever reads this text for authorization rather than for display has
     to trust only a line's position, never its shape.
+
+    **``earlier`` marks an agent's message sent before the reading run started.** A worker's cursor
+    opens at zero (see :meth:`MessageBus.reader`), so it is replayed what other runs sent earlier in
+    the turn, and the sender may have finished since. Unmarked, a replayed request reads as live: a
+    second report-writer once answered the first one's stale broadcast, and the answer went to a run
+    that had already ended. The mark stays inside the brackets so the prefix still opens with
+    ``[message from``, which is what ``web_static/app.js`` recognizes an agent's words by. The user's
+    words stay bare even when replayed, for the reason above.
     """
     if message.sender == USER:
         return message.text
+    if earlier:
+        return f"[message from {message.sender}, sent before you started] {message.text}"
     return f"[message from {message.sender}] {message.text}"
 
 
@@ -322,7 +332,7 @@ class MessageBus:
         deliberate, and it is where this cursor and :meth:`entry_reader`'s differ: the entry cursor
         measures one conversation's progress through the whole turn, while a worker's measures one
         run that did not exist when the earlier messages arrived. Replaying them to it is context
-        rather than news, since the entry agent had already read the message and written the spawn
+        rather than news (and an agent's replayed message says so; see :func:`_for_model`), since the entry agent had already read the message and written the spawn
         prompt with it in hand, and it is bounded (one round-budget reset per worker, under AIMU's own
         cap on those). Opening at the current length instead would make the bus's simplest
         property, append-only with every reader seeing the list, depend on when a reader was opened.
@@ -354,12 +364,17 @@ class MessageBus:
         address = self._register(agent, ordinal=True)
         current_address.set(address)
         seen = 0
+        opened = len(self._messages)
 
         def drain() -> list[str]:
             nonlocal seen
             current_address.set(address)
             start, seen = seen, len(self._messages)
-            return [_for_model(message) for message in self._take(start, seen, address)]
+            replayed = self._take(start, min(seen, opened), address)
+            fresh = self._take(max(start, opened), seen, address)
+            return [_for_model(message, earlier=True) for message in replayed] + [
+                _for_model(message) for message in fresh
+            ]
 
         return drain
 

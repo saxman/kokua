@@ -203,7 +203,7 @@ def test_an_orchestrators_broadcast_reaches_a_worker_it_spawns_afterwards():
     assert "researcher" not in receipt
 
     worker = bus.reader("subagent-researcher")  # spawned a round later, cursor at zero
-    assert worker() == ["[message from assistant] check the cache first"]
+    assert worker() == ["[message from assistant, sent before you started] check the cache first"]
 
     resubmit, report = bus.close()
     assert resubmit == []
