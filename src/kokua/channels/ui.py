@@ -295,7 +295,8 @@ class ChannelUI:
         a reviewer card never carries either.
 
         A card opens with a create event carrying ``id``, ``role`` (plus ``task`` for a spawn) and
-        ``status: "running"``; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
+        ``status: "running"``, and for a spawn made by another spawn, ``parent``, that spawn's ``id``,
+        which a renderer uses to place the card inside its parent's; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
         (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, ``"loop"``, or ``"error"`` for a
         spawn; a ``"tool"`` entry carries ``name``/``arguments``/``response``, the last being what the
         call returned; a ``"loop"`` entry carries ``reason`` (``"continuation"`` or ``"final_answer"``,

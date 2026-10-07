@@ -683,3 +683,106 @@ async def test_a_real_spawn_through_the_reporter_leaves_the_parents_own_send_cor
     assert len(report) == 1
     assert report[0].sender == "assistant"
     assert report[0].to == "researcher#1"
+
+
+# Which spawn made which. AIMU's callbacks name a spawn but not its spawner, so `current_spawn` is
+# bracketed by `spawned`/`finished` the way `current_address` is, and each create event names the
+# spawn current when it opened.
+
+
+async def test_a_spawn_at_the_turns_own_level_names_no_parent():
+    reporter, channel = _reporter()
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+
+    assert "parent" not in channel.subagent_frames[0]
+
+
+async def test_a_spawn_made_inside_another_names_it_as_parent():
+    reporter, channel = _reporter()
+
+    await reporter.spawned("outer", "composed", "task")
+    await reporter.spawned("inner", "composed", "nested task")
+
+    assert channel.subagent_frames[1]["parent"] == "outer"
+
+
+async def test_a_finished_spawn_stops_being_the_parent_of_what_follows():
+    reporter, channel = _reporter()
+
+    await reporter.spawned("outer", "composed", "task")
+    await reporter.spawned("first", "composed", "nested task")
+    await reporter.finished("first", "done", None)
+    await reporter.spawned("second", "composed", "nested task")
+    await reporter.finished("second", "done", None)
+    await reporter.finished("outer", "done", None)
+    await reporter.spawned("later", "composed", "next task")
+
+    creates = {frame["id"]: frame for frame in channel.subagent_frames if "task" in frame}
+    assert creates["second"]["parent"] == "outer", "a sibling must not be recorded as the first one's child"
+    assert "parent" not in creates["later"]
+
+
+async def test_a_failed_spawn_stops_being_a_parent_too():
+    reporter, channel = _reporter()
+
+    await reporter.spawned("outer", "composed", "task")
+    await reporter.finished("outer", "", ValueError("boom"))
+    await reporter.spawned("next", "composed", "task")
+
+    assert "parent" not in channel.subagent_frames[-1]
+
+
+async def test_the_parent_is_recorded_for_replay():
+    reporter, _ = _reporter()
+    events = _collect()
+
+    await reporter.spawned("outer", "composed", "task")
+    await reporter.spawned("inner", "composed", "nested task")
+
+    assert events[1]["parent"] == "outer"
+
+
+class _ScriptedAgent:
+    """Stands in for the agent AIMU's ``_run_observed`` drives: ``await agent.run(task, stream=True)``
+    returning an async iterator. ``during`` runs between two chunks, standing in for the tool round in
+    which a worker spawns workers of its own."""
+
+    def __init__(self, during=None):
+        self._during = during
+
+    async def run(self, task, stream=True):
+        async def chunks():
+            yield _thinking("planning")
+            if self._during is not None:
+                await self._during()
+            yield _generating("answer")
+
+        return chunks()
+
+
+async def test_nested_and_concurrent_spawns_through_aimus_own_spawn_path_name_the_right_parent():
+    """The same claims as above, through AIMU's real ``_run_observed`` rather than hand-ordered calls,
+    because whether a context variable set in ``spawned`` is visible to a spawn made inside the child's
+    run depends on how AIMU iterates that run, which a hand-written sequence cannot establish. The two
+    grandchildren run concurrently, as a round of two tool calls does, so each gets a copied Context."""
+    from aimu.aio.tools.builtin import _run_observed
+
+    reporter, _ = _reporter()
+    events = _collect()
+
+    async def two_concurrent_children():
+        await asyncio.gather(
+            _run_observed(_ScriptedAgent(), "left", "a", reporter),
+            _run_observed(_ScriptedAgent(), "right", "b", reporter),
+        )
+
+    await _run_observed(_ScriptedAgent(during=two_concurrent_children), "outer", "task", reporter)
+    await _run_observed(_ScriptedAgent(), "after", "task", reporter)
+
+    creates = {event["role"]: event for event in events if "task" in event}
+    outer_id = creates["outer"]["id"]
+    assert "parent" not in creates["outer"]
+    assert creates["left"]["parent"] == outer_id
+    assert creates["right"]["parent"] == outer_id
+    assert "parent" not in creates["after"], "a finished spawn must not be the parent of the next one"

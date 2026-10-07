@@ -449,6 +449,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     muted, and switching in later shows the work. A round the worker's own loop injected shows inside
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.
+  - **A sub-agent spawned by a sub-agent is drawn inside its parent's card.** A composed worker can
+    compose another, and every card used to land at the top level, so a three-deep chain read as
+    unrelated siblings interleaved in the transcript, with nothing saying which worker made which call.
+    `core/subagents.py` now records the spawning card's id as `parent` on the child's create event,
+    recovered through a `current_spawn` context variable bracketed by `spawned`/`finished` the way
+    `current_address` is, since AIMU's observer callbacks name a spawn but not its spawner. The page
+    draws the child card in the parent's body at the point in its run where the spawn happened, and
+    `kokua export` quotes it there. A card recorded before this change carries no `parent` and still
+    renders flat.
   - **An oversized tool response is recorded as a preview plus a reference, not held whole.** A PDF
     fetched as text put 7.8 MB into a single recorded tool-call card, and 51.9 MB of one developer's
     56.8 MB session file was this one field, re-parsed on every store read and replayed to the browser

@@ -1992,7 +1992,12 @@ the create event's id, not by event shape, since a spawn whose text streamed clo
 event indistinguishable from a reviewer's verdict. The
 page's `renderSubagent` builds or updates one foldable card per id, filling its body as `append` frames
 arrive; a nested reasoning chunk and a nested tool call are reported the same way a top-level one is,
-with nothing in the core deciding whether they are worth sending.
+with nothing in the core deciding whether they are worth sending. A spawn made from inside another
+spawn's run (a composed worker composing one more, or a declared worker delegating in turn) carries
+`parent`, the spawning card's id, on its create event, and `renderSubagent` draws it inside that card's
+body rather than at the top level. AIMU's observer callbacks name a spawn but not its spawner, so
+`SubagentReporter` recovers it from a `current_spawn` context variable it sets in `spawned` and resets
+in `finished`, the same bracket it keeps around `current_address`.
 
 A card's body is built from the page's own top-level components, not from card-specific markup:
 `addFoldable` and `renderTool` take an optional parent element (`opts.parent`), so a nested `thinking`

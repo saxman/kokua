@@ -951,6 +951,61 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
 
 
+def test_a_spawn_made_by_a_worker_replays_inside_its_parents_card(page, live_server):
+    """A worker that spawns its own worker: the child card is drawn in the parent card's body, where in
+    the parent's run the spawn happened, and closes the parent's open answer block so the parent's
+    later text lands after it rather than above it. A spawn naming a parent this view never drew stays
+    at the top level instead of disappearing."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "make an image"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "outer", "role": "maker", "task": "make it", "status": "running"},
+                            {"id": "outer", "append": {"kind": "answer", "text": "delegating now"}},
+                            {
+                                "id": "inner",
+                                "role": "generator",
+                                "task": "generate",
+                                "status": "running",
+                                "parent": "outer",
+                            },
+                            {"id": "inner", "status": "done", "append": {"kind": "answer", "text": "inner result"}},
+                            {"id": "outer", "append": {"kind": "answer", "text": "outer result"}},
+                            {"id": "outer", "status": "done"},
+                            {"id": "orphan", "role": "stray", "task": "t", "status": "running", "parent": "gone"},
+                            {"id": "orphan", "status": "done"},
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    top = page.locator("#log > .bubble.subagent")
+    expect(top).to_have_count(2)
+    expect(top.nth(0).locator("> .fold-header .fold-label")).to_contain_text("spawn_subagent(maker)")
+    expect(top.nth(1).locator("> .fold-header .fold-label")).to_contain_text("spawn_subagent(stray)")
+
+    outer = top.nth(0)
+    outer.locator("> .fold-header").click()
+    blocks = outer.locator("> .fold-body > .bubble")
+    expect(blocks).to_have_count(3)
+    expect(blocks.nth(0).locator(".fold-body")).to_have_text("delegating now")
+    expect(blocks.nth(1)).to_have_class(re.compile(r"\bsubagent\b"))
+    expect(blocks.nth(1).locator("> .fold-header .fold-label")).to_contain_text("spawn_subagent(generator)")
+    expect(blocks.nth(2).locator(".fold-body")).to_have_text("outer result")
+
+
 def _seed_subagent_tool_response(config, *, response, response_ref=None, response_bytes=None):
     """A one-tool-call sub-agent conversation, with the append shape `core/subagents.py` records
     for a tool result (optionally oversized, carrying `response_ref`/`response_bytes`)."""

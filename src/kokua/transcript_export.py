@@ -376,6 +376,10 @@ def _render_subagent(
     fencing and capping: an answer containing its own code fence must not break the rest of the
     document, and a long one must not bury the turn that spawned it.
 
+    ``events`` may also hold ``{"nested": [...]}`` markers, which ``_render_subagent_run`` places for a
+    spawn this one's worker made: that spawn's whole card is rendered there as a blockquote, so the
+    document shows who spawned whom the way the page does.
+
     Only ever called on a spawn's events (grouped by id in ``_render_subagent_run``); a workflow
     reviewer's id-less verdict round is a different shape entirely and goes through
     :func:`_render_verdict` instead.
@@ -395,6 +399,12 @@ def _render_subagent(
         lines.append("")
         lines.append("_" + ", ".join(details) + "_")
     for event in events[1:]:
+        nested = event.get("nested")
+        if nested is not None:
+            lines.append("")
+            child = _render_subagent(nested, max_payload_chars, payloads_path)
+            lines.extend(f"> {line}" if line else ">" for line in child)
+            continue
         append = event.get("append")
         if append is None:
             continue
@@ -601,7 +611,13 @@ def _render_subagent_run(
             if group is None:
                 group = []
                 groups[spawn_id] = group
-                order.append(group)
+                parent = groups.get(event.get("parent"))
+                # Placed in its parent's own sequence at the point it was spawned, which is where the
+                # page draws it too. A parent missing from this run leaves it a top-level card.
+                if parent is not None:
+                    parent.append({"nested": group})
+                else:
+                    order.append(group)
             group.append(event)
         index += 1
     lines: list[str] = []
