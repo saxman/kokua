@@ -239,6 +239,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   pair in place of everything the executor appended, so a message delivered there is live and in the
   catch-up record but not in the stored messages. A message delivered while the plan was still being
   drafted is in neither on either path, because planning scratch is rolled back.
+- **Change, and the one that costs a reader an afternoon if it is missing: a new toolset arrives in
+  package metadata rather than in source, so `uv sync` is required after pulling this.** A toolset is
+  registered through `pyproject.toml`'s `kokua.toolsets` entry-point table, and an editable install's
+  entry points are written into its `dist-info` at install time. So an existing checkout that pulls
+  this and runs the suite without re-syncing sees every agent declaring the new capability refused, at
+  the registry rather than at the thing that is actually stale:
+  `ToolsetError: agent 'researcher' declares unknown toolset 'messaging'`, listing twenty-two
+  toolsets, while `src/kokua/toolsets/messaging.py` sits right there in the tree. The failure is loud
+  and its cure is not visible from it, which is the whole reason this entry exists. `uv sync
+  --all-extras` fixes it. This is a fact about any toolset, not about this one; it has simply not come
+  up before, because every toolset the project shipped arrived with the install that first created the
+  environment.
+
 - **Change, for anyone running a pre-release checkout: "steering" is renamed to messaging throughout,
   with no legacy path on either side of the AIMU boundary.** Steering was one case of messaging all
   along, so the special case stops naming the general mechanism. AIMU's half is the 0.34.0 floor below
