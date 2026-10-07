@@ -3896,7 +3896,8 @@ sub-agent holding exactly the capabilities one task needs, and runs it.</p>
 <p>Unlike the sub-agents in <code>[agents.*]</code>, a composed one is not declared anywhere: its capabilities are
 chosen per task from everything installed, except two names it can never be given. <code>skills</code> works only
 on the agent Kokua constructs directly, and <code>capabilities</code> itself would hand it a fresh
-composition budget. It runs on <code>[assistant].model</code> with the <code>[assistant]</code> thinking
+composition budget. A capability that is installed but builds no tools (<code>image</code> with no
+<code>AIMU_IMAGE_MODEL</code> set, for one) is refused by name rather than given as nothing. It runs on <code>[assistant].model</code> with the <code>[assistant]</code> thinking
 and generation defaults, and its tools still go through <code>[security].confirm_tools</code>, so <code>execute_python</code>
 and <code>add_mcp_server</code> still ask you first. Composing itself is not in the shipped <code>confirm_tools</code>, so it
 does not ask; add <code>capabilities.compose_subagent</code> there to gate that too.</p>

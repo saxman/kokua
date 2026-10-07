@@ -1649,6 +1649,12 @@ widens is one task's reach and never a persistent agent's. It may not be handed 
 since a worker holding a fresh copy would read the depth budget from scratch instead of spending down
 the caller's, so <code>[capabilities].max_depth</code> (default 3, <code>0</code> off) is what governs nesting. And its calls
 route through <code>[security].confirm_tools</code> exactly as a declared worker's do.</p>
+<p>A name can resolve and still give a worker nothing: <code>image</code> builds no tool until <code>AIMU_IMAGE_MODEL</code> is
+set, and <code>list_capabilities</code> lists it either way, because discovery never builds a toolset. So
+<code>compose_subagent</code> refuses a capability that builds to no tools, naming it with its description, rather
+than starting a worker without the one tool its task needs. Before that refusal, a request for an image
+on a machine with no image model went seven workers deep: each one found itself without the tool, took
+<code>compose_subagent</code> for the way to get it, and asked again one level down, until the depth cap ran out.</p>
 <p>That is the sense in which a composed sub-agent is not a config-described agent. There is no table to
 read, no <code>wire_agent</code> call, and no entry in <code>[agents.*]</code>: its label is even prefixed <code>composed:</code> so it
 can never collide with an agent name, and every per-agent setting it asks for answers with the

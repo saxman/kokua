@@ -4097,14 +4097,25 @@ text's own <em>leading</em> <code>[message from ...]</code> marker, and a mixed 
 the same direction <code>MessageBus.tag_for_delivery</code> takes when it cannot tell either.</p>
 <p>Planning's reviewer verdicts and a turn's spawned sub-agents share one <code>subagent</code> frame type and one
 persisted map (<code>metadata["subagent"]</code>); <code>task</code> on the create event is what tells the two apart.
-<code>replay_items</code> replays that map on reload, interleaved right after its user bubble; a
-verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
+<code>replay_items</code> replays that map on reload: a reviewer's verdict right after its user bubble, and a spawn
+card in place of the tool call that opened it, which is where it opened live (one whose call never
+reached the transcript lands at the end of its turn). A card and its call are paired by the task string,
+the one value AIMU's observer and the stored call are guaranteed to share, and the same pairing hides
+the call's tool frame live (<code>WebChannel.send_frame</code>) and a worker's own spawn call inside its card
+(<code>SubagentReporter</code>); a spawn call that opened no card, such as a refused composition, keeps its tool
+block, since it is then the only record of what was asked. <code>transcripts.SPAWN_TOOL_NAMES</code> names both
+spawn tools. A verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
 but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace -- kept by
 the create event's id, not by event shape, since a spawn whose text streamed closes with a status-only
 event indistinguishable from a reviewer's verdict. The
 page's <code>renderSubagent</code> builds or updates one foldable card per id, filling its body as <code>append</code> frames
 arrive; a nested reasoning chunk and a nested tool call are reported the same way a top-level one is,
-with nothing in the core deciding whether they are worth sending.</p>
+with nothing in the core deciding whether they are worth sending. A spawn made from inside another
+spawn's run (a composed worker composing one more, or a declared worker delegating in turn) carries
+<code>parent</code>, the spawning card's id, on its create event, and <code>renderSubagent</code> draws it inside that card's
+body rather than at the top level. AIMU's observer callbacks name a spawn but not its spawner, so
+<code>SubagentReporter</code> recovers it from a <code>current_spawn</code> context variable it sets in <code>spawned</code> and resets
+in <code>finished</code>, the same bracket it keeps around <code>current_address</code>.</p>
 <p>A card's body is built from the page's own top-level components, not from card-specific markup:
 <code>addFoldable</code> and <code>renderTool</code> take an optional parent element (<code>opts.parent</code>), so a nested <code>thinking</code>
 or <code>tool &lt;name&gt;</code> row is literally the same builder (and the same CSS) as its top-level counterpart --
@@ -4115,7 +4126,10 @@ reader opens the card for. The card itself starts collapsed, and a spawn card ta
 <code>spawn_subagent</code> tool block the channel suppressed for it: a monospace
 <code>subagent  spawn_subagent(&lt;role&gt;)  &lt;status&gt;</code> header over an argument line built by the same <code>toolArgs</code>
 helper a tool block's body uses. The arguments are reconstructed on the page from the frame's <code>role</code>
-and <code>task</code>, which is faithful because Kokua only ever builds AIMU's typed spawn tool. A reviewer card,
+and <code>task</code>, which is faithful because Kokua only ever builds AIMU's typed spawn tool. A card opened by
+<code>compose_subagent</code> reads <code>compose_subagent(&lt;name&gt;)</code> and shows that call's own arguments, capability names
+included, because its create event carries <code>tool</code> and <code>arguments</code>: the tool declares its call through
+the <code>spawn_call</code> context variable for the length of the spawn, and <code>spawned</code> reads it. A reviewer card,
 which no tool call backs, reads <code>review  &lt;role&gt;  &lt;status&gt;</code> instead, and that kind word is the only
 at-a-glance difference between the two, which is why an e2e test pins it. Generated text streams in
 chunk by chunk as plain text
