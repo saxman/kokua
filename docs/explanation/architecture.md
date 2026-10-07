@@ -1985,8 +1985,14 @@ the same direction `MessageBus.tag_for_delivery` takes when it cannot tell eithe
 
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.
-`replay_items` replays that map on reload, interleaved right after its user bubble; a
-verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
+`replay_items` replays that map on reload: a reviewer's verdict right after its user bubble, and a spawn
+card in place of the tool call that opened it, which is where it opened live (one whose call never
+reached the transcript lands at the end of its turn). A card and its call are paired by the task string,
+the one value AIMU's observer and the stored call are guaranteed to share, and the same pairing hides
+the call's tool frame live (`WebChannel.send_frame`) and a worker's own spawn call inside its card
+(`SubagentReporter`); a spawn call that opened no card, such as a refused composition, keeps its tool
+block, since it is then the only record of what was asked. `transcripts.SPAWN_TOOL_NAMES` names both
+spawn tools. A verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
 but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace -- kept by
 the create event's id, not by event shape, since a spawn whose text streamed closes with a status-only
 event indistinguishable from a reviewer's verdict. The
@@ -2009,7 +2015,10 @@ reader opens the card for. The card itself starts collapsed, and a spawn card ta
 `spawn_subagent` tool block the channel suppressed for it: a monospace
 `subagent  spawn_subagent(<role>)  <status>` header over an argument line built by the same `toolArgs`
 helper a tool block's body uses. The arguments are reconstructed on the page from the frame's `role`
-and `task`, which is faithful because Kokua only ever builds AIMU's typed spawn tool. A reviewer card,
+and `task`, which is faithful because Kokua only ever builds AIMU's typed spawn tool. A card opened by
+`compose_subagent` reads `compose_subagent(<name>)` and shows that call's own arguments, capability names
+included, because its create event carries `tool` and `arguments`: the tool declares its call through
+the `spawn_call` context variable for the length of the spawn, and `spawned` reads it. A reviewer card,
 which no tool call backs, reads `review  <role>  <status>` instead, and that kind word is the only
 at-a-glance difference between the two, which is why an e2e test pins it. Generated text streams in
 chunk by chunk as plain text

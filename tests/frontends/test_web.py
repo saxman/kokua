@@ -13,7 +13,7 @@ import pytest
 from tests.helpers import BlockingModelClient, MockAsyncModelClient
 from kokua.channels.web import WebChannel
 from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
-from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
+from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME, SPAWN_TOOL_NAMES
 from kokua.core.transcripts import replay_items
 from kokua.config import AssistantConfig
 from tests.channels import example_agents, planning_settings
@@ -176,22 +176,51 @@ async def test_web_channel_emits_thinking_and_tool_frames_by_default():
     ]
 
 
-async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
-    """The spawn's own `subagent` card already shows role/task/result, so the parent's `tool` frame
-    for spawn_subagent specifically is dropped -- it would otherwise arrive after the card (AIMU emits
-    TOOL_CALLING only once the tool returns) and duplicate what the card already shows."""
+@pytest.mark.parametrize("tool_name", sorted(SPAWN_TOOL_NAMES))
+async def test_web_channel_send_suppresses_a_spawn_calls_tool_frame_once_its_card_opened(tool_name):
+    """The spawn's own `subagent` card already shows its call, run, and answer, so the parent's `tool`
+    frame for that call is dropped -- it would otherwise arrive after the card (AIMU emits TOOL_CALLING
+    only once the tool returns) and repeat it somewhere else in the transcript."""
     ws = _FakeWS()
     channel = WebChannel(ws)
+    await channel.send_subagent({"id": "s-1", "role": "worker", "task": "find it", "status": "running"})
 
     async def gen():
-        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": tool_name, "arguments": {"task": "find it"}})
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
 
     await channel.send(gen())
-    assert ws.frames == [
-        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None},
-        {"type": "done"},
-    ]
+    assert [frame["type"] for frame in ws.frames] == ["subagent", "tool", "done"]
+    assert ws.frames[1]["name"] == "calc"
+
+
+async def test_web_channel_send_keeps_a_spawn_calls_tool_frame_when_no_card_opened():
+    """A refused composition opens no card, so its tool frame is the only record of what was asked."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    refused = {"name": "compose_subagent", "arguments": {"task": "draw"}, "response": "Could not compose 'x'"}
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, refused)
+
+    await channel.send(gen())
+    assert ws.frames[0] == {"type": "tool", **refused}
+
+
+async def test_web_channel_send_pairs_a_nested_card_with_no_top_level_call():
+    """A card opened by a worker's own call is paired inside its parent's card, not here, so it must not
+    swallow a top-level call that happens to carry the same task."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_subagent({"id": "c", "role": "w", "task": "same", "status": "running", "parent": "p"})
+
+    async def gen():
+        yield StreamChunk(
+            StreamingContentType.TOOL_CALLING, {"name": "compose_subagent", "arguments": {"task": "same"}}
+        )
+
+    await channel.send(gen())
+    assert ws.frames[1]["type"] == "tool"
 
 
 async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
@@ -442,16 +471,19 @@ async def test_web_channel_stream_activity_show_answer_emits_tokens():
     assert "done" not in types  # no terminator; caller ends the turn
 
 
-async def test_web_channel_stream_activity_suppresses_spawn_subagent_tool_frame():
+async def test_web_channel_stream_activity_suppresses_a_spawn_calls_tool_frame_once_its_card_opened():
     ws = _FakeWS()
     channel = WebChannel(ws)
+    await channel.send_subagent({"id": "s-1", "role": "worker", "task": "find it", "status": "running"})
 
     async def gen():
-        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
+        yield StreamChunk(
+            StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {"task": "find it"}}
+        )
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
 
     await channel.stream_activity(gen())
-    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
+    assert ws.frames[1:] == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
 
 
 async def test_web_channel_stream_activity_tool_frame_carries_the_response():
@@ -1022,23 +1054,99 @@ def test_replay_items_full_replay():
     ]
 
 
-def test_replay_items_omits_spawn_subagent_tool_call():
-    """Replay must not resurrect the spawn_subagent tool card either -- only its subagent card (fed
-    separately via the `subagent` map) represents the spawn."""
+def _call(name, arguments, call_id):
+    return {"type": "function", "function": {"name": name, "arguments": arguments}, "id": call_id}
+
+
+def _shape(items):
+    """Each item as its type, plus the tool name or card id, which is what placement is about."""
+    return [(item["type"], item.get("name") or item.get("id")) for item in items]
+
+
+@pytest.mark.parametrize("tool_name", sorted(SPAWN_TOOL_NAMES))
+def test_replay_items_places_a_spawn_card_where_its_call_was_instead_of_the_call(tool_name):
+    """Live, the card opens where the call is made, after the reasoning that led to it. Replay used to
+    emit every card straight after the user bubble, above that reasoning, and showed a composed call's
+    tool block beside its card as well."""
     messages = [
         {"role": "user", "content": "do X"},
         {
             "role": "assistant",
-            "content": "done",
-            "tool_calls": [
-                {"type": "function", "function": {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}}, "id": "1"},
-                {"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "2"},
-            ],
+            "thinking": "delegate it",
+            "content": "",
+            "tool_calls": [_call("calc", {"x": 2}, "1"), _call(tool_name, {"name": "w", "task": "find it"}, "2")],
         },
+        {"role": "assistant", "content": "done"},
     ]
-    items = replay_items(messages)
-    tools = [item for item in items if item["type"] == "tool"]
-    assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
+    subagent = {"0": [{"id": "s", "role": "w", "task": "find it", "status": "running"}, {"id": "s", "status": "done"}]}
+    items = replay_items(messages, subagent=subagent)
+    assert _shape(items) == [
+        ("user", None),
+        ("thinking", None),
+        ("tool", "calc"),
+        ("subagent", "s"),
+        ("subagent", "s"),
+        ("message", None),
+    ]
+
+
+def test_replay_items_carries_a_nested_card_with_its_top_level_ancestor():
+    messages = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "", "tool_calls": [_call("compose_subagent", {"task": "outer"}, "1")]},
+    ]
+    subagent = {
+        "0": [
+            {"id": "a", "role": "w", "task": "outer", "status": "running"},
+            {"id": "b", "role": "w", "task": "inner", "status": "running", "parent": "a"},
+            {"id": "b", "status": "done"},
+            {"id": "a", "status": "done"},
+        ]
+    }
+    items = replay_items(messages, subagent=subagent)
+    assert _shape(items)[1:] == [("subagent", "a"), ("subagent", "b"), ("subagent", "b"), ("subagent", "a")]
+
+
+def test_replay_items_keeps_a_spawn_calls_tool_block_when_no_card_was_opened():
+    """A refused composition, or a transcript stored before cards were recorded: the tool block is then
+    the only record of the call."""
+    messages = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "", "tool_calls": [_call(SPAWN_SUBAGENT_TOOL_NAME, {"task": "t"}, "1")]},
+    ]
+    assert _shape(replay_items(messages)) == [("user", None), ("tool", SPAWN_SUBAGENT_TOOL_NAME)]
+
+
+def test_replay_items_places_a_card_whose_call_is_missing_at_the_end_of_its_turn():
+    """A turn cut short mid-dispatch can hold a card with no stored call. It still replays, after what
+    the turn did produce and before the next turn begins."""
+    messages = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "partial"},
+        {"role": "user", "content": "next"},
+    ]
+    subagent = {"0": [{"id": "s", "role": "w", "task": "t", "status": "running"}]}
+    assert _shape(replay_items(messages, subagent=subagent)) == [
+        ("user", None),
+        ("message", None),
+        ("subagent", "s"),
+        ("user", None),
+    ]
+
+
+def test_replay_items_pairs_two_spawns_of_one_task_in_order():
+    messages = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "", "tool_calls": [_call("compose_subagent", {"task": "t"}, "1")]},
+        {"role": "assistant", "content": "", "tool_calls": [_call("compose_subagent", {"task": "t"}, "2")]},
+    ]
+    subagent = {
+        "0": [
+            {"id": "first", "role": "w", "task": "t", "status": "running"},
+            {"id": "second", "role": "w", "task": "t", "status": "running"},
+        ]
+    }
+    assert _shape(replay_items(messages, subagent=subagent))[1:] == [("subagent", "first"), ("subagent", "second")]
 
 
 def test_replay_items_attaches_the_tool_result_to_its_call():

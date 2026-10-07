@@ -951,6 +951,69 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
 
 
+def test_a_composed_card_replays_in_place_of_its_call_naming_the_tool_and_capabilities(page, live_server):
+    """A card stands in for the call that opened it, where that call was made: after the reasoning
+    that led to it, not straight under the user's message, and with no tool block beside it. It names
+    `compose_subagent` rather than `spawn_subagent`, and its argument line carries the capability names
+    that call asked for, which nothing else on the card would show."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    arguments = {"name": "dog-image-maker", "tools": ["image"], "instructions": "Make images.", "task": "draw a dog"}
+
+    def seed(config):
+        TinyDBSessionStore(str(config.sessions_path)).save(
+            Session(
+                key="seeded",
+                messages=[
+                    {"role": "user", "content": "create an image of a dog"},
+                    {
+                        "role": "assistant",
+                        "thinking": "I lack the tool, so compose one",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {"name": "compose_subagent", "arguments": arguments},
+                                "id": "1",
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "1", "content": "no image"},
+                    {"role": "assistant", "content": "No image was created."},
+                ],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {
+                                "id": "d-1",
+                                "role": "dog-image-maker",
+                                "task": "draw a dog",
+                                "status": "running",
+                                "tool": "compose_subagent",
+                                "arguments": arguments,
+                            },
+                            {"id": "d-1", "status": "done", "append": {"kind": "answer", "text": "no image"}},
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    log = page.locator("#log > .bubble")
+    expect(log).to_have_count(4)
+    expect(log.nth(1)).to_have_class(re.compile(r"\bthinking\b"))
+    card = log.nth(2)
+    expect(card).to_have_class(re.compile(r"\bsubagent\b"))
+    expect(card.locator("> .fold-header .fold-label")).to_contain_text("compose_subagent(dog-image-maker)")
+    expect(page.locator("#log > .bubble.tool")).to_have_count(0)
+    card.locator("> .fold-header").click()
+    expect(card.locator("> .fold-body > .sa-args")).to_contain_text('tools=["image"]')
+
+
 def test_a_spawn_made_by_a_worker_replays_inside_its_parents_card(page, live_server):
     """A worker that spawns its own worker: the child card is drawn in the parent card's body, where in
     the parent's run the spawn happened, and closes the parent's open answer block so the parent's

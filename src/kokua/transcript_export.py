@@ -390,6 +390,11 @@ def _render_subagent(
     header = f"**Sub-agent ({role}):**" + (f" {task}" if task else "")
     lines = [header]
     details = []
+    # A composed worker's capabilities, which its card carries because its call's tool block is not
+    # replayed beside it (see `core/transcripts.py`'s SPAWN_TOOL_NAMES).
+    tools = (create.get("arguments") or {}).get("tools")
+    if tools:
+        details.append("tools " + ", ".join(str(tool) for tool in tools))
     model = create.get("model")
     if model:
         details.append(f"model {model}")

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -59,6 +60,7 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
 from kokua.core.messaging import current_address
+from kokua.core.transcripts import spawn_task
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,14 @@ subagent_events: ContextVar[Optional[list[dict]]] = ContextVar("subagent_events"
 # render as a sibling of every other and a reader could not tell which agent made which call. Bracketed
 # by `spawned`/`finished` exactly as `current_address` is, for the same Context reasons (see `spawned`).
 current_spawn: ContextVar[Optional[str]] = ContextVar("current_spawn", default=None)
+
+# The tool call about to spawn, for a spawn tool that is not AIMU's own: `{"tool": name, "arguments":
+# {...}}`, set by `toolsets/capabilities.py`'s `compose_subagent` around its spawn. A card stands in for
+# the call that opened it (see `transcripts.SPAWN_TOOL_NAMES`), so it has to be able to say which tool
+# that was and with what, and AIMU's callbacks carry only the role and the task. Unset means AIMU's
+# `spawn_subagent`, whose arguments are exactly that role and task. `spawned` reads it and clears it
+# for the worker's own run, so a spawn the worker makes in turn is not credited to this call.
+spawn_call: ContextVar[Optional[dict]] = ContextVar("spawn_call", default=None)
 
 # How much of a sub-agent's tool response is kept inline in a recorded card. Anything longer is
 # written to a payload file and the card holds this much plus a reference (see ``payloads.py``).
@@ -120,9 +130,14 @@ class SubagentReporter:
         # value `send_message` refuses on, the next drain in that Context sets it again, and the
         # Context in question belongs to a turn that is being cancelled.
         self._address_tokens: dict[str, Token[Optional[str]]] = {}
-        # The `current_spawn` token saved per spawn, kept and restored exactly as `_address_tokens` is,
-        # with the same leak on a `BaseException` inside `spawned`.
-        self._spawn_tokens: dict[str, Token[Optional[str]]] = {}
+        # The `current_spawn` and `spawn_call` tokens saved per spawn, kept and restored exactly as
+        # `_address_tokens` is, with the same leak on a `BaseException` inside `spawned`.
+        self._spawn_tokens: dict[str, tuple[Token[Optional[str]], Token[Optional[dict]]]] = {}
+        # (parent spawn id, task) for each nested card opened whose call's tool entry has not reached
+        # the parent's card yet. The child card stands in for that entry, the same pairing
+        # `WebChannel.send_frame` makes at the top level (see `transcripts.SPAWN_TOOL_NAMES`). Counted
+        # because a worker can give two spawns the same task; dropped with the parent in `finished`.
+        self._children_awaiting_call: Counter[tuple[str, str]] = Counter()
         # Where an oversized tool response is spilled to (see ``payloads.py``). A path rather than the
         # whole config, because this is the only setting the reporter reads and taking the config
         # would let it grow a dependency on anything else in there.
@@ -155,12 +170,17 @@ class SubagentReporter:
         """
         self._address_tokens[spawn_id] = current_address.set(None)
         parent = current_spawn.get()
-        self._spawn_tokens[spawn_id] = current_spawn.set(spawn_id)
+        call = spawn_call.get()
+        self._spawn_tokens[spawn_id] = (current_spawn.set(spawn_id), spawn_call.set(None))
         event = {"id": spawn_id, "role": agent_type or "subagent", "task": task, "status": "running"}
         # Omitted at the turn's own level rather than written as None, so a card recorded before this
         # field existed and a top-level card read the same way.
         if parent is not None:
             event["parent"] = parent
+            self._children_awaiting_call[(parent, task)] += 1
+        if call is not None:
+            event["tool"] = call["tool"]
+            event["arguments"] = call["arguments"]
         model = self._model_for(agent_type)
         if model:
             event["model"] = str(model)
@@ -203,6 +223,14 @@ class SubagentReporter:
                 await self._report({"id": spawn_id, "append": {"kind": "reasoning", "text": chunk.content}})
         elif chunk.phase == StreamingContentType.TOOL_CALLING:
             call = chunk.content if isinstance(chunk.content, dict) else {}
+            task = spawn_task(call.get("name"), call.get("arguments"))
+            key = (spawn_id, task)
+            if task is not None and self._children_awaiting_call[key] > 0:
+                # This worker's spawn call, whose own card already sits in this card's body.
+                self._children_awaiting_call[key] -= 1
+                if not self._children_awaiting_call[key]:
+                    del self._children_awaiting_call[key]
+                return
             await self._report({"id": spawn_id, "append": self._tool_append(call)})
         elif chunk.phase == StreamingContentType.GENERATING:
             if chunk.content:
@@ -259,9 +287,12 @@ class SubagentReporter:
         address_token = self._address_tokens.pop(spawn_id, None)
         if address_token is not None:
             current_address.reset(address_token)
-        spawn_token = self._spawn_tokens.pop(spawn_id, None)
-        if spawn_token is not None:
-            current_spawn.reset(spawn_token)
+        spawn_tokens = self._spawn_tokens.pop(spawn_id, None)
+        if spawn_tokens is not None:
+            current_spawn.reset(spawn_tokens[0])
+            spawn_call.reset(spawn_tokens[1])
+        for key in [key for key in self._children_awaiting_call if key[0] == spawn_id]:
+            del self._children_awaiting_call[key]
         streamed = spawn_id in self._streamed_answers
         self._streamed_answers.discard(spawn_id)
         event: dict

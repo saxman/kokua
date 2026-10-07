@@ -107,6 +107,47 @@ def _compose(state, monkeypatch):
     return _tools_by_name(state)["compose_subagent"], spawn
 
 
+def test_core_names_this_tool_the_way_the_toolset_does(tmp_path):
+    """`core/transcripts.py` cannot import a toolset, so it carries the tool's name as a literal of its
+    own, and a card stands in for this call only while the two agree."""
+    from kokua.core.transcripts import COMPOSE_SUBAGENT_TOOL_NAME
+
+    assert COMPOSE_SUBAGENT_TOOL_NAME in _tools_by_name(_state(tmp_path))
+
+
+async def test_compose_subagent_declares_its_call_to_the_card_for_the_length_of_the_spawn(tmp_path, monkeypatch):
+    """The worker's card stands in for this call's tool block, so it needs the call's own arguments,
+    the capability names above all, and AIMU tells the observer only the role and the task."""
+    import kokua.core.agents  # noqa: F401  (see `_recording` for why this import comes first)
+    from kokua.core.subagents import spawn_call
+
+    seen = []
+
+    def factory(model, **kwargs):
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            seen.append(spawn_call.get())
+            return "ran"
+
+        return spawn_subagent
+
+    monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", factory)
+    compose = _tools_by_name(_state(tmp_path))["compose_subagent"]
+    await compose("quote-checker", "Check AAPL.", ["web"], "Check quotes.")
+
+    assert seen == [
+        {
+            "tool": "compose_subagent",
+            "arguments": {
+                "name": "quote-checker",
+                "tools": ["web"],
+                "instructions": "Check quotes.",
+                "task": "Check AAPL.",
+            },
+        }
+    ]
+    assert spawn_call.get() is None, "the declaration must not outlive the spawn"
+
+
 async def test_list_capabilities_reports_every_name_with_its_provider_and_description(tmp_path):
     listing = await _tools_by_name(_state(tmp_path))["list_capabilities"]()
     assert "web [AIMU capability]: web description" in listing

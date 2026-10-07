@@ -458,6 +458,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     draws the child card in the parent's body at the point in its run where the spawn happened, and
     `kokua export` quotes it there. A card recorded before this change carries no `parent` and still
     renders flat.
+  - **A spawn card replays where its call was, and stands in for `compose_subagent` too.** Reload used
+    to put every spawn card straight under the user's message, above the reasoning that led to it, and
+    only `spawn_subagent`'s tool block gave way to its card, so a `compose_subagent` call showed twice,
+    card first live and tool block first on reload. Now a card replaces the call that opened it, live,
+    on reload, and inside a parent's card, paired by the task both carry (`transcripts.spawn_task`); a
+    call that opened no card, such as a refused composition, keeps its tool block. A composed card reads
+    `compose_subagent(<name>)` and its argument line carries the capability names the call asked for.
   - **An oversized tool response is recorded as a preview plus a reference, not held whole.** A PDF
     fetched as text put 7.8 MB into a single recorded tool-call card, and 51.9 MB of one developer's
     56.8 MB session file was this one field, re-parsed on every store read and replayed to the browser
