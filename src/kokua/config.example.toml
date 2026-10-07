@@ -246,7 +246,7 @@ so, and where it went wrong if it did, saying up front that those are the criter
 # tools = ["stocks", "compute", "time"]   # "stocks" matches [[mcp.server]].name below
 # [agents.report-writer]
 # description = "Builds and emails PDF reports."
-# tools = ["markdown-to-pdf", "email-report", "time"]
+# tools = ["markdown-to-pdf", "email-report", "fs", "time"]
 # [agents.reviewer]
 # description = "Reviews code for security, performance, and readability."
 # tools = ["aimu_agents", "time"]

@@ -38,7 +38,7 @@ reach the worker it spawns. Driving the bus directly, which is the shortest way 
 roster when it sends : ['assistant']
 receipt              : Accepted for assistant. Delivered to whichever of them reads it next, if any of them do.
 roster after spawn   : ['assistant', 'researcher#1']
-worker's first drain : ['[message from assistant] check the cache first']
+worker's first drain : ['[message from assistant, sent before you started] check the cache first']
 ```
 
 Two rounds of one turn, no new machinery, and nothing reported undelivered (`close()` returns two
@@ -55,6 +55,16 @@ the worker is being handed the same instruction its task string was written unde
 current length instead would make the bus's simplest property, append-only with every reader seeing the
 list, depend on when a reader happened to open. The escape is a consequence of that choice, not its
 purpose.
+
+**A replayed message says it is replayed**, which is what the `, sent before you started` in the drain
+above is. "Context rather than news" holds for the orchestrator's brief and breaks for a message from a
+*sibling*, whose sender may have finished before this worker was spawned. Unmarked, that reads as a live
+request. One did: a report-writer broadcast "can anyone read this file?" and finished; a second
+report-writer, spawned afterwards, was replayed the broadcast, took it for a current request, and
+answered a run that no longer existed, which the user then saw as an undelivered report. The mark does
+not say the sender has finished (nothing on the bus knows that), only that the message predates the
+reader, which is the fact the worker needed to discount it. The user's own words stay bare, replayed or
+not.
 
 It costs something, and the page's own ledger should carry it: a delivery resets the recipient's round
 budget, so every worker spawned after a broadcast starts with a fresh stretch of autonomous rounds. One
@@ -232,7 +242,10 @@ declaration buys is different: `list_agents`, and the broadcast-before-spawn rou
 only reason an orchestrator has to hold `send_message` at all.
 
 `list_agents` is not garnish either way: without discovery a model invents addresses, which is how
-sends reach nobody.
+sends reach nobody. It marks the caller's own line `(you)` (the captured runs above predate the mark), for the
+mirror-image failure: a worker that cannot tell its own address from a sibling's will message itself.
+One did, asking `report-writer#1` to check a file it believed `report-writer#1` had written, while being
+`report-writer#1`; its own words came back on the next drain, and it read them as an echo.
 
 ```toml
 [agents.assistant]

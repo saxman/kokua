@@ -372,7 +372,9 @@ never reads, so the two drains that hand AIMU's loop a message's text (`MessageB
 `MessageBus.entry_reader`) also render an agent's words attributed to its sender
 (`[message from researcher#1] ...`) and the user's own bare: the same distinction one level below the
 tag, protecting the model that acts on a message rather than the reader that looks at the record
-afterwards. One qualifier, and it is the reason the
+afterwards. A worker's drain adds `, sent before you started` inside that bracket for an agent's message
+that predates the worker, since its cursor opens at zero and a replayed request from a sibling that has
+since finished would otherwise read as live. One qualifier, and it is the reason the
 record still carries both kinds: a drain's list becomes *one* appended message, so a round that
 delivered the user's words and an agent's is one message that is both, and `PROVENANCE_AGENT` cannot
 go on it, since that tag's own contract ("nothing here is the user's") would be false. `is_user_turn`

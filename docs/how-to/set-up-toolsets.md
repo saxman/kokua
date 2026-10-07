@@ -105,7 +105,7 @@ against sources rather than memory, and return a concise findings summary that n
 
 [agents.report-writer]
 description = "Builds and emails PDF reports."
-tools = ["markdown-to-pdf", "email-report", "time"]
+tools = ["markdown-to-pdf", "email-report", "fs", "time"]
 ```
 
 - **`tools`** is the whole capability declaration, in one flat list over the one namespace. A built-in
