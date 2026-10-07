@@ -260,7 +260,10 @@ measured at 69 to 98 per cent where there is no verification protocol, and at ze
    the generous direction rather than the stingy one.
 2. **Delivery** shows on the recipient's sub-agent card at the round it landed, live and on reload.
 3. **Close** reports anything addressed to an agent that no reader took: a sentence to the user, and a
-   record in the turn's own metadata so a reload still shows it.
+   record in the turn's own metadata so a reload still shows it. The two are not quite the same half:
+   the record is written from the turn's own teardown and so survives a `/stop`, where the sentence is
+   an await the cancelled path cannot make and does not. Each message's text is capped in both, with a
+   note saying how much is missing, because these words are a model's own.
 
 **The trust boundary is where this design is interesting, and it rests on two halves that cover each
 other's gap.** The rule is simple to state: a message *you* type arrives bare, because it is you

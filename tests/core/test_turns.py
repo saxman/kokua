@@ -14,6 +14,7 @@ from kokua.core.assistant import Assistant
 from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, is_user_turn
 from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
 from kokua.core.turn_registry import TurnInfo
+from kokua.core.turns import UNDELIVERED_TEXT_CHARS
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
@@ -2173,6 +2174,42 @@ async def test_an_undelivered_agent_message_survives_a_reload(assistant):
     stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
     reports = next(iter(stored.values()))
     assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_long_undelivered_message_is_capped_in_the_record_and_the_notice(assistant):
+    """The text in this record is a model's own, behind nothing but a non-blank check, and the record
+    is durable, so it is the one new stored thing on this feature that has to carry a cap.
+
+    Both surfaces are asserted, and the store is the half that matters: a notice scrolls away, while
+    this metadata is read back on every reload of the conversation. The cut carries the note
+    ``core/transcripts.py`` writes for the same reason, so a reader can tell an abridged message from
+    a short one.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    sent = []
+
+    async def capture(text, **kwargs):
+        sent.append(text)
+
+    assistant._ui.send = capture
+    long_text = "x" * (UNDELIVERED_TEXT_CHARS + 500)
+
+    async def send_a_long_one(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send(long_text, sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = send_a_long_one
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id).metadata["undelivered"]
+    recorded = next(iter(stored.values()))[0]["text"]
+    assert len(recorded) < len(long_text)
+    assert recorded.endswith(f"... [message truncated, {len(long_text)} chars total]")
+    notice = next(text for text in sent if "not delivered" in text)
+    assert long_text not in notice
+    assert f"[message truncated, {len(long_text)} chars total]" in notice
 
 
 async def test_a_stopped_turn_still_records_an_undelivered_agent_message(assistant):

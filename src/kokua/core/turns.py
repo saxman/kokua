@@ -385,6 +385,40 @@ def _describe_refusal(exc: ModelRefusalError, subject: str) -> str:
     return f"declined {subject}{label}{detail}"
 
 
+#: How much of one undelivered message's text the notice and the record keep. The same number
+#: ``core/transcripts.py`` caps a single message at on read, because this is the same kind of payload:
+#: the words of a message, where that module's cap exists so one pasted document cannot consume a read.
+#: ``core/subagents.py`` spills past 4,000 characters into a payload file instead, which is the right
+#: trade for a tool response somebody may need whole and the wrong one here, where the text is one
+#: line of context inside a sentence about something that did not happen.
+UNDELIVERED_TEXT_CHARS = 2_000
+
+
+def _capped_message_text(text: str) -> str:
+    """One undelivered message's text, cut with a note saying how much is missing.
+
+    Both surfaces this feeds take it: the live notice and the stored record, which is the one
+    model-authored record on this feature that followed none of this codebase's own caps. The record
+    is why the cap exists rather than the notice. A notice scrolls away, while
+    ``session.metadata["undelivered"]`` is durable, and the text in it is written by a model
+    (``toolsets/messaging.py``'s ``send_message``) behind nothing but a non-blank check, where a
+    mid-turn message the *user* typed is self-limiting.
+
+    The note is the point, as it is in ``transcript_export``'s own ``_capped``: a silent cut reads as
+    a complete record of a short message, so a reader cannot tell the thing they are judging was
+    abridged. Worded like ``core/transcripts.py``'s, so one idiom covers both.
+
+    What this does not bound is how many messages one turn can leave undelivered, and that is left
+    uncapped deliberately rather than overlooked: a sender spends one of its own permitted rounds per
+    send, so the count is already bounded by the round budgets of the runs doing the sending, and the
+    record's worst case is that many messages at this cap. Capping the list as well would mean
+    dropping whole messages, which needs a second note saying so, for a bound the loop already gives.
+    """
+    if len(text) <= UNDELIVERED_TEXT_CHARS:
+        return text
+    return f"{text[:UNDELIVERED_TEXT_CHARS]}... [message truncated, {len(text)} chars total]"
+
+
 class TurnRunner:
     def __init__(
         self,
@@ -686,7 +720,8 @@ class TurnRunner:
         The sender, the selector and the text are all named, because no two of them identify the
         message. The selector is what nothing answered to and the sender is who is now waiting on an
         answer that will not come, which together are the fact worth acting on; the text is what a
-        user would otherwise have to ask the assistant to repeat.
+        user would otherwise have to ask the assistant to repeat, capped where the record caps it
+        (:func:`_capped_message_text`) so one sentence does not become the whole screen.
 
         **A backgrounded turn raises an alert instead of sending, and the comparison is made here
         rather than left to the channel.** This runs after ``reactive``'s ``finally``, which has
@@ -717,7 +752,9 @@ class TurnRunner:
         """
         if not messages:
             return
-        lines = "\n".join(f"- from {message.sender} to {message.to}: {message.text}" for message in messages)
+        lines = "\n".join(
+            f"- from {message.sender} to {message.to}: {_capped_message_text(message.text)}" for message in messages
+        )
         try:
             if conversation_id == self._book.active_id:
                 await self._ui.send(
@@ -932,11 +969,17 @@ class TurnRunner:
         Converts each ``Message`` to the plain dict :meth:`ConversationBook.record_undelivered` stores,
         rather than handing the dataclass across: that module has no other reason to import
         ``core.messaging``, and the record only ever needs the three fields a reader of it acts on.
+
+        The text is capped on the way in (:func:`_capped_message_text`), which is the one thing this
+        conversion does rather than copies, because the words are a model's and this record is durable.
         """
         self._book.record_undelivered(
             conversation_id,
             user_index,
-            [{"sender": message.sender, "to": message.to, "text": message.text} for message in messages],
+            [
+                {"sender": message.sender, "to": message.to, "text": _capped_message_text(message.text)}
+                for message in messages
+            ],
         )
 
     def _answering_model(self, conversation_id: str) -> str:

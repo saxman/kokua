@@ -1952,7 +1952,10 @@ answer different questions a reader asks (did this reach anyone, versus did the 
 this), and flushes it at the same point `failure` is flushed, at the next user message or the end of the
 transcript, with failure first, which is the order the live turn produces them in. The page draws it
 with `addBubble("notice", ...)`, naming the sender, the selector, and the text, because no two of the
-three identify the message.
+three identify the message. Each text is capped on the way in, with a note saying how much is missing
+(`TurnRunner._capped_message_text`, at `core/transcripts.py`'s own per-message number): this is the one
+durable record here whose words are a model's rather than a person's, written behind nothing but a
+non-blank check, where a mid-turn message somebody typed is self-limiting.
 
 **A mid-turn message replays in one of three states, and the page tells them apart.** `replay_items`
 decides which from the stored provenance tag and marks the `"inbox"` item `from: "agent"`,
