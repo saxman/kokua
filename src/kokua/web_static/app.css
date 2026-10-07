@@ -346,6 +346,11 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    the user's own words, not an event the machine produced, and dimming it would read as the
    opposite. */
 .inbox { margin: 1px 0 1px 14px; max-width: var(--row-measure); font-size: 0.85em; }
+/* A worker's own note into a turn already running (replayed `inbox` item, `from: "agent"`), unlike
+   the plain case above: nobody typed this, so it folds into the dimmed machine-event group after
+   all. A mixed delivery (`from: "mixed"`) keeps the undimmed default instead, since part of that one
+   message really is the user's own words and dimming the whole line would misrepresent that part. */
+.inbox.agent { color: var(--fg-dim); }
 .tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; }
 .tool-output .output-text { display: block; max-height: 24em; overflow: auto; }
 .tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit;

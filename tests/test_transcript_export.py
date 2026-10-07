@@ -804,6 +804,32 @@ def test_a_very_long_failure_reason_is_capped_like_any_other_payload():
     assert "truncated" in out
 
 
+def test_an_undelivered_report_is_rendered_as_a_blockquote_naming_sender_and_selector():
+    """Like ``failure``'s notice, this is the turn reporting on itself rather than more of what it
+    produced, which is why it is a blockquote too. Unlike ``inbox``, this message never reached a
+    stored transcript message at all, so there is no provenance tag to read it off: the sender and
+    the selector come straight from the item, and both are named because neither alone tells a
+    reader anything to act on."""
+    item = {"type": "undelivered", "sender": "researcher#1", "to": "assistant", "text": "look at the index"}
+    lines = _render_item(item, None)
+    assert len(lines) == 1
+    assert lines[0].startswith("> ")
+    assert "researcher#1" in lines[0]
+    assert "assistant" in lines[0]
+    assert "look at the index" in lines[0]
+
+
+def test_an_undelivered_report_is_exported_end_to_end():
+    """Through ``replay_items`` and ``record_turn_provenance``'s own metadata shape, not a hand-built
+    item, so the export is pinned against the same ``undelivered`` map the turn actually writes."""
+    session = _session(
+        [{"role": "user", "content": "summarize the log"}, {"role": "assistant", "content": "done"}],
+        {"undelivered": {"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}},
+    )
+    out = render_markdown(session)
+    assert "researcher#1" in out and "look at the index" in out
+
+
 def test_a_scheduled_runs_task_is_named_in_the_header():
     session = _session([{"role": "user", "content": "run"}], {"task_id": "nightly-digest"})
     assert "nightly-digest" in render_markdown(session).split("## Turn")[0]

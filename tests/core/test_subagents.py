@@ -339,6 +339,34 @@ async def test_a_workers_inbox_chunk_is_recorded_on_its_card():
     assert events[-1] == {"id": "r-1", "append": entry}
 
 
+async def test_a_message_chunk_becomes_a_card_entry_naming_its_sender():
+    """The card entry carries whatever a real bus drain produced, not a hand-written stand-in for it.
+
+    A fixture that types the attributed text itself (``{"text": "researcher#1 said: use the index"}``)
+    would pass this test whether or not ``core/messaging.py`` ever composed that prefix at all, since
+    ``SubagentReporter.chunk`` only ever repeats the text it is given. So the input here is the real
+    output of :meth:`MessageBus.entry_reader`'s drain -- ``_for_model``'s own ``[message from {sender}]``
+    rendering of a worker's note to its parent -- and the assertion compares the card entry against
+    that same variable rather than against a second, independently typed copy of it. Whether that
+    rendering happens at all, which is the security property, is pinned separately in
+    ``tests/core/test_messaging.py``; what this test owns is narrower: the card shows the sender's
+    words unmodified, carrying whatever attribution the drain actually put there.
+    """
+    bus = MessageBus()
+    bus.send("use the index", sender="researcher#1", to="assistant")
+    delivered = bus.entry_reader("assistant")()
+    assert len(delivered) == 1  # one message sent, one line drained; see the drain call just above
+
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _inbox(delivered[0]))
+
+    entry = {"kind": "message", "text": delivered[0]}
+    assert channel.subagent_frames[-1] == {"id": "r-1", "append": entry}
+    assert events[-1] == {"id": "r-1", "append": entry}
+
+
 async def test_an_injected_round_starts_a_second_answer_entry():
     """The break is the point. A nudge fires on an empty turn, so nothing else sits between the two
     generations to close the block, and the card would otherwise show one uninterrupted answer."""

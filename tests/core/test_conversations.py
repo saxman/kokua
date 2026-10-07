@@ -500,6 +500,42 @@ async def test_record_turn_provenance_writes_nothing_when_there_is_nothing_to_wr
     assert "usage" not in assistant._store.get(assistant._active_id).metadata
 
 
+async def test_record_undelivered_persists_the_reports_under_the_turn_index(tmp_path):
+    """So a reload still shows what one of the turn's own agents sent and nobody read, the thing
+    `MessageBus.close()` only ever reports live otherwise."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(
+        assistant._active_id, 2, [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    )
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]["2"]
+    assert stored == [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+
+
+async def test_record_undelivered_writes_nothing_for_an_empty_report(tmp_path):
+    """Every turn's agents' messages landing is the common case, and it must not bloat every session
+    file the way a present-but-empty entry would."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(assistant._active_id, 2, [])
+
+    assert "undelivered" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_record_undelivered_writes_nothing_without_a_turn_to_key_it_under(tmp_path):
+    """A negative index means this turn committed no message of its own, so there is nowhere in the
+    transcript to anchor the report: the same guard `record_turn_provenance` applies to every entry
+    it writes."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_undelivered(
+        assistant._active_id, -1, [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    )
+
+    assert "undelivered" not in assistant._store.get(assistant._active_id).metadata
+
+
 async def test_a_turn_that_reasoned_at_no_configured_effort_records_no_thinking(tmp_path):
     """``None`` is the common case (AIMU's own default), so recording it would bloat every session file."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
@@ -1168,6 +1204,13 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
+        # Shaped like `usage`/`model` above, not `subagent`'s list-per-event map, but it rides the
+        # same TURN_KEYED_METADATA filter: a dict value, not an index, so it needs no further
+        # argument than the one every other entry here already makes (see that tuple's own comment).
+        undelivered={
+            "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}],
+            "5": [{"sender": "researcher#2", "to": "assistant", "text": "stale cache"}],
+        },
     )
 
     branch_id = assistant._book.branch(parent.key, 1)
@@ -1176,6 +1219,9 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
     assert branched.metadata["usage"] == {"1": {"calls": 1}}
     assert branched.metadata["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in branched.metadata
+    assert branched.metadata["undelivered"] == {
+        "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]
+    }
 
 
 async def test_branch_records_where_it_came_from(tmp_path):
@@ -1390,6 +1436,10 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
+        undelivered={
+            "1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}],
+            "5": [{"sender": "researcher#2", "to": "assistant", "text": "stale cache"}],
+        },
     )
 
     await assistant._book.truncate(parent.key, 5)
@@ -1399,6 +1449,7 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
     assert kept["usage"] == {"1": {"calls": 1}}
     assert kept["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in kept
+    assert kept["undelivered"] == {"1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}
 
 
 async def test_truncate_rebuilds_the_agent_from_the_shortened_transcript(tmp_path):

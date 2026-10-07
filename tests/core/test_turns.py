@@ -2149,6 +2149,32 @@ async def test_an_undelivered_agent_message_is_reported_and_not_rerun(assistant)
     assert any("researcher#1" in text and "look at the index" in text for text in sent)
 
 
+async def test_an_undelivered_agent_message_survives_a_reload(assistant):
+    """The live report above is sent, not stored: nothing in it ever reaches ``session.messages``,
+    so without a record of its own a reload shows no trace of a message that reached nobody. The
+    spec's own closing line for this ("undelivered-at-close goes into the turn record") is what this
+    pins, against the real stored metadata rather than a hand-built item.
+
+    The stub appends the turn's own user message itself, unlike the bare stand-ins above: this test
+    needs a real ``user_index`` to key the record under, which ``resolve_user_index`` finds by
+    scanning ``agent.model_client.messages`` for one -- the thing a stub replacing ``agent.run``
+    outright never writes there on its own.
+    """
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
 class _MutingAlertChannel(AlertCapturingChannel):
     """The web front end's shape: a card surface, and a viewed conversation to mute against.
 
@@ -2235,6 +2261,31 @@ async def test_a_firings_undeliverable_report_reaches_a_channel_with_no_conversa
     await assistant._turns.proactive("check the feeds")
 
     assert any("not delivered" in text and "researcher#1" in text for text in channel.sent)
+
+
+async def test_a_firings_undelivered_message_survives_a_reload(tmp_path):
+    """The same gap `test_an_undelivered_agent_message_survives_a_reload` closes on the reactive
+    path, on the path that discovers the turn's own index a different way: ``_unattended_body``
+    has to hand it back to ``_run_unattended`` across the child task boundary (see that body's own
+    ``return proactive_index``), since the caller that closes the bus never sees
+    ``agent.model_client`` to resolve it itself."""
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        # Appends the turn's own user message itself, for the reason the reactive test's stub does:
+        # `resolve_user_index` needs a real one in `agent.model_client.messages` to find.
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+    await assistant._turns.proactive("check the feeds")
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
 
 
 async def test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run(assistant):

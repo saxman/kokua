@@ -506,6 +506,7 @@ class WebChannel(BaseWebChannel):
             trace=meta.get("trace"),
             failure=meta.get("failure"),
             mid_turn=meta.get("messages"),
+            undelivered=meta.get("undelivered"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:

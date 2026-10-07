@@ -168,6 +168,7 @@ def render_markdown(
         trace=metadata.get("trace"),
         failure=metadata.get("failure"),
         mid_turn=metadata.get("messages"),
+        undelivered=metadata.get("undelivered"),
     )
     lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
@@ -539,6 +540,18 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         # before stopping, not as more of that output.
         text = _capped(item.get("text", ""), max_payload_chars)
         return [f"> {line}" for line in text.splitlines()] or ["> "]
+    if item_type == "undelivered":
+        # A blockquote, like `notice`: this is the turn reporting on itself, not more of what it
+        # produced. Unlike `inbox`, this message never reached a stored transcript message at all
+        # (``MessageBus.close()``'s own report, surfaced here through ``core/transcripts.py``'s
+        # ``undelivered`` metadata), so the sender and the selector are read straight off the item
+        # rather than off a provenance tag -- there is no message here for one to ride. Both are
+        # named because neither alone tells a reader anything to act on: who sent it, and who it
+        # never reached.
+        sender = item.get("sender", "")
+        to = item.get("to", "")
+        text = _capped(item.get("text", ""), max_payload_chars)
+        return [f"> **Undelivered:** {sender} -> {to}: {text}"]
     return [f"_(unrendered item type: {item_type})_"]
 
 

@@ -50,7 +50,9 @@ COPY_TITLE_PREFIX = "Copy of "
 # runs one step further than the argument for keys: every index a turn recorded sits below the *next*
 # turn's user message, so a key a prefix cut keeps brings values that are still inside the kept
 # transcript, and a key it drops takes its values with it. Nothing points across the cut either way.
-TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "messages")
+# `undelivered` does not share that further argument: its values are sender/selector/text dicts, not
+# indices, so it only needs the argument every other entry here already makes.
+TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "messages", "undelivered")
 
 
 class TurnNotFound(Exception):
@@ -776,6 +778,34 @@ class ConversationBook:
             session.metadata.setdefault("usage", {})[str(user_index)] = usage
         if messages:
             session.metadata.setdefault("messages", {})[str(user_index)] = list(messages)
+        self._store.save(session)
+
+    def record_undelivered(self, conversation_id: str, user_index: int, reports: list[dict]) -> None:
+        """Persist what one of this turn's own agents sent and no reader took, so a reload still says so.
+
+        A separate call rather than one more keyword on :meth:`record_turn_provenance`, because what it
+        records is discovered later than everything else that method writes: ``MessageBus.close()``
+        runs in the turn's own ``finally``, after every call this turn makes to that method has already
+        returned. ``reports`` is plain ``sender``/``to``/``text`` dicts rather than ``core.messaging``'s
+        ``Message`` objects, which is the caller's to build (``TurnRunner``, which already holds the
+        bus); this module has no reason to import that dataclass just to read three of its fields back
+        out again.
+
+        Keyed the same way every other turn-indexed record here is, ``str(user_index)``, which is what
+        lets it ride ``TURN_KEYED_METADATA``'s existing filter unchanged: a branch or a truncation that
+        keeps this turn keeps this list with it, and one that drops the turn drops the list too, with no
+        special case written for it.
+
+        An empty list stays out of the file, like every other optional entry :meth:`record_turn_provenance`
+        writes, so a turn whose agents' messages all landed reads as one with nothing to report. A
+        negative ``user_index`` means the turn committed no message of its own to key this under, so
+        there is nowhere to write it and this is a no-op, exactly as :meth:`record_turn_provenance`
+        treats the same case.
+        """
+        if user_index < 0 or not reports:
+            return
+        session = self._store.get(conversation_id)
+        session.metadata.setdefault("undelivered", {})[str(user_index)] = list(reports)
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

@@ -85,9 +85,19 @@ def _for_model(message: Message) -> str:
     message is prefixed with its own address instead. The envelope's ``sender`` already lets a stored
     message carry a ``PROVENANCE_*`` tag a transcript reader can check; that tag is metadata the model
     never reads, so this is the other half of the same defense, protecting the model that acts on the
-    message rather than the reader that looks at the record afterwards. ``[message from {sender}]``
-    matches the form the CLI's own mid-turn marker uses, so an agent's message reads the same way
-    whether a person or a model is looking at it.
+    message rather than the reader that looks at the record afterwards.
+
+    **This prefix is the one that survives where a channel's own phase marker would otherwise say the
+    same thing twice.** AIMU's CLI channel prints a line of its own ahead of whatever text a delivered
+    message carries (``[message] {text}``), and ``core/subagents.py``'s card does the same with a
+    ``message`` kind label; put beside this function's ``[message from {sender}]``, an agent's
+    delivery would read as attributed twice, once by a generic phase word and once by name. Only the
+    second is load-bearing: the phase word says "something was delivered here, not injected by the
+    loop", which is true of the user's words too and carries no claim about who sent them, while this
+    prefix is what a model reading the next round, or a person reading the terminal, actually learns
+    the sender from. So the marker is left exactly as it is on every surface (the CLI's line, the
+    card's label) and nothing here, or in ``core/subagents.py``, adds a second copy of the name beside
+    it: the fix is this prefix existing at all, not a change to what already announces the phase.
 
     **Only the leading marker is authentic, because this only ever prepends one.** The claim "the
     words alone tell the reader another agent wrote them" holds for that first line and no further:

@@ -892,8 +892,12 @@ function appendSubagentEntry(card, entry) {
   }
   if (entry.kind === "message") {
     // Its own branch rather than `loop`'s: `loop` is the agent loop injecting a round of its own,
-    // and this is the user's own words reaching a worker already running. Filing it under `loop`
-    // would show the card crediting the loop with what a person said.
+    // and this is somebody's own words (the user's, or one of the turn's own agents') reaching a
+    // worker already running. Filing it under `loop` would show the card crediting the loop with
+    // what a person, or another agent, said. No `from` here, unlike the main log's replayed `inbox`
+    // item: this is a live card entry, and an agent's words already carry their own
+    // `[message from ...]` attribution in `entry.text` (`core/messaging.py`), so the card needs no
+    // second field to say who sent it.
     card.answer = null;
     renderMidTurn(entry.text, undefined, { parent: card.body });
     return;
@@ -1501,12 +1505,31 @@ function renderLoop(text, ts, opts) {
   return f;
 }
 
-// A message the user sent into a turn already running. Its own foldable class, not `loop`'s: a
-// `loop` row is the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in
-// app.css), and this text is a person's words, so it keeps the card's ordinary foreground colour
+// Fold header word for a mid-turn message replayed from the stored record, by `opts.from`
+// (`core/transcripts.py`'s `replay_items`, the `inbox` item's own flag). Absent on every *live*
+// frame, which carries only `{"text": ...}` -- addressing stays out of the channel (see
+// `core/subagents.py` and `channels/web.py`), so the live case is always the plain "inbox" label and
+// the words carry whatever attribution `core/messaging.py` put in them. The other two states only
+// ever arrive on replay, where the stored provenance tag is the one honest source for "who", since a
+// mixed delivery's text does not reliably carry a marker at all (the user's half of it has none).
+const INBOX_LABELS = { agent: "agent", mixed: "mixed" };
+
+// A message sent into a turn already running. Its own foldable class, not `loop`'s: a `loop` row is
+// the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in app.css), and
+// the plain case here is a person's own words, which keeps the card's ordinary foreground colour
 // rather than reading as something the assistant did.
+//
+// Three states, not one, since a previous task's reader fix only carried the *user's* mid-turn
+// message this far: `opts.from` is absent for that case (and for every live frame), `"agent"` for a
+// delivery no reader of the record can mistake for the user's own, and `"mixed"` for a delivery that
+// joined the two into one message. An agent's note folds into the dimmed `.inbox.agent` treatment
+// below, since it really is a machine event; a mixed delivery keeps the undimmed default, since part
+// of it is still the user's own typed words and dimming the whole line would misrepresent that part.
 function renderMidTurn(text, ts, opts) {
-  const f = addFoldable("inbox", { kind: "inbox" }, { parent: opts && opts.parent }, ts);
+  const from = opts && opts.from;
+  const label = Object.prototype.hasOwnProperty.call(INBOX_LABELS, from) ? INBOX_LABELS[from] : "inbox";
+  const cls = from === "agent" ? "inbox agent" : from === "mixed" ? "inbox mixed" : "inbox";
+  const f = addFoldable(cls, { kind: label }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;
 }
@@ -1743,7 +1766,10 @@ function handleFrame(event) {
       // still in flight when the page connected, since the item carries nothing saying which. Rendered
       // as a collapsed row rather than the live view's marked user bubble (the `.mid-turn` class), a
       // deliberate divergence reasoned about in `replay_items`'s own docstring rather than here.
-      else if (item.type === "inbox") renderMidTurn(item.text, item.ts);
+      // `item.from` is absent for the user's own words and `"agent"` / `"mixed"` for the two cases
+      // `replay_items` tells apart from the stored provenance tag; see `renderMidTurn` for why those
+      // three states render differently.
+      else if (item.type === "inbox") renderMidTurn(item.text, item.ts, { from: item.from });
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
@@ -1751,6 +1777,13 @@ function handleFrame(event) {
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
+      // One of the turn's own agents sent this and no reader ever took it (`MessageBus.close()`'s
+      // report, see `core/transcripts.py`'s `undelivered` item). The live turn said so too
+      // (`TurnRunner._report_undeliverable`), as an ordinary send rather than a frame of its own, so
+      // without this branch a reload lost that account entirely. Named the same way the live sentence
+      // does: who sent it and who it never reached, since "undelivered" alone tells a reader nothing
+      // they can act on.
+      else if (item.type === "undelivered") addBubble("notice", `${item.sender} -> ${item.to}: ${item.text}`, item.ts);
     }
     autoscroll();
   } else if (frame.type === "ready") {

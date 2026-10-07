@@ -212,6 +212,78 @@ def test_replay_items_keeps_a_mid_turn_message_inside_its_hosts_failure_notice()
     assert items[-1] == {"type": "notice", "text": "failed: out of context"}
 
 
+def test_replay_items_renders_an_undelivered_report_naming_sender_and_selector():
+    """One of the turn's own agents sent this and nobody read it, so it never became a stored
+    message at all. Both the sender and the selector are named, since "undelivered" alone tells a
+    reader nothing they can act on, and carries no `message_index`: it has no turn of its own."""
+    items = replay_items(
+        _MID_TURN_TURN,
+        undelivered={"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]},
+    )
+
+    report = next(item for item in items if item["type"] == "undelivered")
+    assert report["sender"] == "researcher#1"
+    assert report["to"] == "assistant"
+    assert report["text"] == "look at the index"
+    assert "message_index" not in report
+
+
+def test_replay_items_renders_one_item_per_undelivered_report():
+    """A turn can carry several of these, one per agent message nothing answered to."""
+    items = replay_items(
+        _MID_TURN_TURN,
+        undelivered={
+            "0": [
+                {"sender": "researcher#1", "to": "assistant", "text": "a"},
+                {"sender": "researcher#2", "to": "everyone", "text": "b"},
+            ]
+        },
+    )
+
+    reports = [item for item in items if item["type"] == "undelivered"]
+    assert [(r["sender"], r["to"], r["text"]) for r in reports] == [
+        ("researcher#1", "assistant", "a"),
+        ("researcher#2", "everyone", "b"),
+    ]
+
+
+def test_replay_items_reports_a_turns_failure_before_its_undelivered_message():
+    """The order the live turn itself produces them in: `TurnRunner.reactive` sends the failure from
+    inside its own `except` branch, before its `finally` closes the bus that
+    `_report_undeliverable` reads afterwards. A replay that reversed the two would show a turn
+    explaining itself in the opposite order from the one it was watched in."""
+    items = replay_items(
+        _MID_TURN_TURN,
+        mid_turn={"0": [3]},
+        failure={"0": "failed: out of context"},
+        undelivered={"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]},
+    )
+
+    assert [item["type"] for item in items[-2:]] == ["notice", "undelivered"]
+
+
+# A second, ordinary turn appended after `_MID_TURN_TURN`, so a report attached to the *first* turn
+# has somewhere to flush ahead of rather than only at the end of the transcript.
+_TWO_TURN_TRANSCRIPT = _MID_TURN_TURN + [
+    {"role": "user", "content": "second question"},
+    {"role": "assistant", "content": "second answer"},
+]
+
+
+def test_replay_items_flushes_an_undelivered_report_at_the_end_of_its_own_turn():
+    """Discovered only when the first turn's bus closes, with nowhere earlier to attach to, so it must
+    not bleed into the turn that follows: a report sitting after the second turn's own items would
+    read as having happened during that turn instead of the one that actually produced it."""
+    items = replay_items(
+        _TWO_TURN_TRANSCRIPT,
+        undelivered={"0": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]},
+    )
+
+    undelivered_at = next(i for i, item in enumerate(items) if item["type"] == "undelivered")
+    second_turn_at = next(i for i, item in enumerate(items) if item.get("message_index") == 5)
+    assert undelivered_at < second_turn_at
+
+
 def test_replay_items_renders_an_unrecorded_message_as_the_turn_it_was():
     """Without a record saying otherwise, a later user message is a turn of its own: that is every
     transcript stored before a turn recorded which of its messages were sent mid-turn."""

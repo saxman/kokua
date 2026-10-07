@@ -155,9 +155,20 @@ class SubagentReporter:
                 }
             )
         elif chunk.phase == StreamingContentType.INBOX:
-            # The user sent a message while this worker was running, and the worker read it at
-            # its next round. Recorded as its own kind rather than as a `loop` entry, because the
-            # card's reader needs to see that a person said this, not the loop.
+            # A message reached this worker while it was running -- the user's, or one of the
+            # turn's own agents' (`core/messaging.py`'s `send_message`). Recorded as its own kind
+            # rather than as a `loop` entry, because the card's reader needs to see that somebody
+            # said this, not the loop.
+            #
+            # The text carries its own attribution and nothing here adds a second one. An agent's
+            # words arrive already prefixed `[message from {sender}]` by `core/messaging.py`'s
+            # `_for_model`, which is the drain, not this card: that prefix is what the *model*
+            # reading the next round sees, so it has to be in the text itself rather than a sibling
+            # field, and it is the one load-bearing copy. A CLI's own phase marker (AIMU's `[message]`
+            # line) or this card's own `message` label names the phase beside it, which is
+            # commentary, not a second attribution; a card or a terminal line that also stamped
+            # the sender would be repeating the same fact in two places; a field here would be
+            # the other way principle 1 forbids (addressing pushed into the channel).
             sent = chunk.content if isinstance(chunk.content, dict) else {}
             await self._report({"id": spawn_id, "append": {"kind": "message", "text": sent.get("text", "")}})
         elif chunk.phase == StreamingContentType.THINKING:

@@ -280,6 +280,7 @@ def replay_items(
     trace: Optional[dict] = None,
     failure: Optional[dict] = None,
     mid_turn: Optional[dict] = None,
+    undelivered: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
@@ -342,16 +343,28 @@ def replay_items(
     message, not only its text: a message sent with an image and no text yields no ``"user"`` item at
     all, and the Markdown export opens a turn's heading at whichever item carries this key first, so an
     image-only turn still needs one somewhere to anchor to.
+
+    ``undelivered`` is keyed the same way as ``failure`` (``str(user_index)``) and holds what
+    ``MessageBus.close()``'s second list reported for that turn: one of the turn's own agents sent a
+    message no reader took. It never became a message in ``messages`` at all -- that is the whole of
+    what "undelivered" means -- so unlike a mid-turn ``inbox`` item there is no stored message to read
+    this off; the record this function reads it from is the only place it exists. Rendered as its own
+    item type rather than folded into ``inbox``, because the two answer different questions a reader
+    asks ("did this reach anyone" rather than "did the user or an agent say this"), and flushed at the
+    same point ``failure`` is (the next turn, or the end of the transcript), since both are discovered
+    only when a turn ends and neither has anywhere earlier to attach to.
     """
     subagent = subagent or {}
     trace = trace or {}
     failure = failure or {}
+    undelivered = undelivered or {}
     # Flattened across turns: the question asked per message is "was this one mid-turn", and a
     # message belongs to at most one turn, so which turn recorded it adds nothing here.
     mid_turn_set = {index for indices in (mid_turn or {}).values() for index in indices}
     items: list[dict] = []
     results = _tool_results_by_call_id(messages)
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
+    pending_undelivered: Optional[tuple[list[dict], object]] = None  # (the turn's reports, its timestamp)
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -362,19 +375,37 @@ def replay_items(
             item["ts"] = timestamp
         items.append(item)
 
-    def flush_failure() -> None:
-        """Close the turn in progress with its recorded reason, if it had one.
+    def flush_turn_end() -> None:
+        """Close the turn in progress with its recorded failure and whatever it reported as
+        undelivered, if either survived to the end of the turn.
 
-        Held until the turn ends rather than emitted where it is read, because the reason belongs after
-        the output it cut short. A turn ends at the next user message or at the end of the transcript,
-        so this is called from both places; a conversation the user carried on in after a failed turn
-        therefore keeps the notice inside that turn instead of trailing it off the bottom.
+        Held until the turn ends rather than emitted where each is read, because both belong after the
+        output they are about. A turn ends at the next user message or at the end of the transcript,
+        so this is called from both places; a conversation the user carried on in after a failed or
+        incomplete turn therefore keeps both notices inside that turn instead of trailing them off the
+        bottom. Failure first, undelivered second, which is the order the live turn itself produces
+        them in (``TurnRunner.reactive`` sends the failure from inside its own ``except`` branch, before
+        its ``finally`` closes the bus that ``_report_undeliverable`` reads afterwards), so a replay
+        reads in the order it was watched in.
         """
-        nonlocal pending_failure
+        nonlocal pending_failure, pending_undelivered
         if pending_failure is not None:
             reason, turn_ts = pending_failure
             pending_failure = None
             add({"type": "notice", "text": reason}, turn_ts)
+        if pending_undelivered is not None:
+            reports, turn_ts = pending_undelivered
+            pending_undelivered = None
+            for report in reports:
+                add(
+                    {
+                        "type": "undelivered",
+                        "sender": report.get("sender", ""),
+                        "to": report.get("to", ""),
+                        "text": report.get("text", ""),
+                    },
+                    turn_ts,
+                )
 
     for index, message in enumerate(messages):
         role = message.get("role")
@@ -419,9 +450,11 @@ def replay_items(
                     item["from"] = "mixed"
                 add(item, ts)
                 continue
-            flush_failure()  # whatever turn was in progress ends where this one begins
+            flush_turn_end()  # whatever turn was in progress ends where this one begins
             if str(index) in failure:
                 pending_failure = (failure[str(index)], ts)
+            if str(index) in undelivered:
+                pending_undelivered = (undelivered[str(index)], ts)
             text = message_text(message.get("content"))
             if text:
                 # Stamped with this message's position in the transcript, the key record_turn_provenance
@@ -478,5 +511,5 @@ def replay_items(
             # reference the user asked to see, so surface it as an image of its own.
             for url in image_refs_of(message.get("content")):
                 add({"type": "image", "url": url, "from": "assistant"}, ts)
-    flush_failure()  # the last turn ends at the end of the transcript
+    flush_turn_end()  # the last turn ends at the end of the transcript
     return items

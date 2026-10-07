@@ -584,6 +584,10 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
+        # Recorded before it is reported, so a channel that fails to take the report (swallowed just
+        # below) still leaves a reload with something to show; the record does not depend on the
+        # report succeeding, nor the other way around.
+        self._record_undelivered(conversation_id, user_index, undeliverable)
         # Ahead of the re-submit, so the notice reads before the follow-up turn's own output rather
         # than after it. Safe in that order only because the report swallows what it can (see
         # `_report_undeliverable`): a channel failing here must not cost the user the turn below.
@@ -843,6 +847,24 @@ class TurnRunner:
             messages=message_indices,
         )
 
+    def _record_undelivered(self, conversation_id: str, user_index: int, messages: list[Message]) -> None:
+        """Persist what one of this turn's own agents sent and no reader took, so a reload still shows it.
+
+        A call of its own rather than one more keyword on :meth:`_record_provenance`, because what it
+        has to record does not exist yet when that one runs: ``messages`` here is ``MessageBus.close()``'s
+        second list, and ``close`` is only ever reached in the turn's own ``finally``, after every
+        ``_record_provenance`` call this turn makes has already returned.
+
+        Converts each ``Message`` to the plain dict :meth:`ConversationBook.record_undelivered` stores,
+        rather than handing the dataclass across: that module has no other reason to import
+        ``core.messaging``, and the record only ever needs the three fields a reader of it acts on.
+        """
+        self._book.record_undelivered(
+            conversation_id,
+            user_index,
+            [{"sender": message.sender, "to": message.to, "text": message.text} for message in messages],
+        )
+
     def _answering_model(self, conversation_id: str) -> str:
         """The model behind this conversation's agent, as a string for the stored record.
 
@@ -1000,6 +1022,11 @@ class TurnRunner:
         bus = MessageBus()
         bus_token = current_bus.set(bus)
         self._book.pin(conversation_id)  # invariant 2
+        # Where this firing's own user message landed, for `record_undelivered` below. -1 (no turn to
+        # key a report under) unless `_unattended_body` returns its own `proactive_index`, which it
+        # only does on the one path that reaches that call: a run that neither stopped nor raised (see
+        # the comment on `handle.result()` just below for why the other two paths never touch this).
+        user_index = -1
         try:
             # Held here rather than in the child so there is exactly one hold for the firing either way
             # (invariant 1). An asyncio lock has no owning task, so releasing it here is sound.
@@ -1025,7 +1052,13 @@ class TurnRunner:
                     ),
                 )
                 try:
-                    await handle.result()
+                    # `_unattended_body` returns its `proactive_index` only when it falls through to
+                    # the end of its own try (not stopped, no error raised), which is also the only
+                    # one of its three endings that lets execution reach this assignment: the other
+                    # two raise (`CancelledError` below, or the body's own re-raised failure), and an
+                    # exception carries no return value to assign. Harmless on those paths precisely
+                    # because nothing after them reads `user_index` either -- see its own comment above.
+                    user_index = await handle.result()
                 except asyncio.CancelledError:
                     # Two different cancellations land here and have to end differently: a stop, which
                     # cancels the child and is this firing's own ending, and a shutdown, which cancels
@@ -1052,6 +1085,9 @@ class TurnRunner:
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
+        # Recorded before it is reported, for the reason `reactive`'s own call to this gives: a
+        # channel that cannot take the report below should not be what costs a reload the record.
+        self._record_undelivered(conversation_id, user_index, undeliverable)
         # The same helper the reactive path uses, and it decides the same way: a firing is
         # backgrounded by construction (invariant 4 leaves the active pointer alone), so this alerts,
         # except on a channel with no conversation list, where the firing shares the viewed
@@ -1077,7 +1113,7 @@ class TurnRunner:
                 logger.warning("A message a scheduled firing never read could not be run", exc_info=True)
         return False
 
-    async def _unattended_body(self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus) -> None:
+    async def _unattended_body(self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus) -> int:
         """One unattended turn, inside its caller's gate hold. See the module's concurrency invariants.
 
         Ends cancelled when it was stopped, as a cancelled task should, having first recorded and
@@ -1088,6 +1124,13 @@ class TurnRunner:
         task this runs in does inherit it. The contextvar exists so a tool call anywhere inside the run
         can reach the bus without it being threaded through; this body is not that, it is the caller's
         own code, and a parameter leaves no absent case to guard against.
+
+        Returns ``proactive_index``, the turn's own user-message position, on the one ending that
+        falls through to it (not stopped, no error raised): ``_run_unattended`` is what ``close()``s
+        ``bus`` and discovers what went undelivered, but it is this body, not that caller, that knows
+        where this turn landed in the transcript, since the caller never sees ``agent.model_client``.
+        A caller reading this return value is only meaningful on that one ending; the other two raise
+        instead of returning, which is the caller's to handle, not this docstring's.
         """
         conversation_id = spec.conversation_id
         started = time.monotonic()
@@ -1185,6 +1228,7 @@ class TurnRunner:
                 raise asyncio.CancelledError
             if error is not None:
                 raise error
+            return proactive_index
         finally:
             current_metrics.reset(metrics_token)
 
