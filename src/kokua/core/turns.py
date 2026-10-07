@@ -1228,6 +1228,10 @@ class TurnRunner:
                 raise asyncio.CancelledError
             if error is not None:
                 raise error
+            # The caller assigns this and tags the firing's messages with it, so a fourth ending added
+            # here has to return the index too: an ending that returns None instead would reach the
+            # tagging with nothing to tag by. Safe today because this is the only ending that does not
+            # raise, which is the reasoning `proactive` states in full where it reads the result.
             return proactive_index
         finally:
             current_metrics.reset(metrics_token)
