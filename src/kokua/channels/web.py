@@ -542,6 +542,16 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "tasks", "items": items})
 
+    async def send_page_version(self, version: str) -> None:
+        """Tell the page which version of itself this server serves, so a tab still running an older
+        one reloads (see ``frontends/web.py``'s ``_page_version``).
+
+        Sent first on every connection, ahead of anything the connect sequence would otherwise paint
+        with the old script. Like ``send_ready``, a front-end concern rather than part of
+        ``RichChannel``: only a page loads code it can fall behind on.
+        """
+        await self.send_frame({"type": "page", "version": version})
+
     async def send_ready(self) -> None:
         """Say that this connection's assistant has finished starting.
 

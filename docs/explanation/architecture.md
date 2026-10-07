@@ -1617,6 +1617,17 @@ What a reconnect does *not* restore is a turn that was in flight when the socket
 constructs an `Assistant` per connection and `serve_connection` ties its serve loop to that connection's
 lifetime, so the page comes back to what the turn persisted, not to the stream it was watching.
 
+Nor does a reconnect reload the page's own code. A resync replaces the data, but the tab keeps the script
+it loaded, so a restart that changed `app.js` would leave an open tab drawing the new server's frames with
+the old one. So the page is told two versions and compares them. `_page_version` hashes `index.html` and
+every served asset; the hash is written into `index.html` as the page is served (the `kokua-page-version`
+meta tag), and it is the first frame on every connection (`page`, sent before `Assistant.create`, so a
+stale tab reloads before the connect sequence it would throw away). On a mismatch the page saves the
+composer's draft to `sessionStorage` and reloads, and restores the draft once the new page loads. A hash
+of the content rather than a per-process id, so a restart that left the page alone does not reload the
+tab and cost the reader their place. If the same version shows up mismatched a second time, the reload
+evidently cannot fix it, and the page stays put rather than reloading in a loop.
+
 Two of the ways a socket can close are not worth retrying, and the page tells them apart from a restart by
 whether anything arrived before the close. A server that is not up yet closes having sent nothing, which
 is the ordinary restart case and is exactly what the backoff is for. A server that answered and *refused*

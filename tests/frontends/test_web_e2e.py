@@ -2038,6 +2038,70 @@ def test_the_page_reconnects_after_the_server_restarts(page, restartable_server)
     expect(page.locator(".bubble.assistant", has_text=REPLY)).to_have_count(2, timeout=10_000)
 
 
+def _mark_this_page_load(page) -> None:
+    """Tag the current document, so a test can tell a reload (the tag is gone) from a reconnect."""
+    page.evaluate("window.__sameLoad = true")
+
+
+def _same_page_load(page) -> bool:
+    return page.evaluate("window.__sameLoad === true")
+
+
+def test_a_restart_that_changed_the_page_reloads_the_tab_keeping_its_draft(page, restartable_server, monkeypatch):
+    """Reconnecting resyncs the data but not the script, so a tab left open across a restart that
+    changed the page used to draw the new server's frames with the old code until someone reloaded it.
+    The draft in the composer survives the reload, since it is the one thing a reader would lose."""
+    from kokua.frontends import web as web_frontend
+
+    start, stop = restartable_server
+    _open(page, start())
+    _mark_this_page_load(page)
+    page.fill("#msg", "half-typed thought")
+
+    stop()
+    expect(page.locator(".bubble.notice", has_text="Reconnecting")).to_be_visible(timeout=10_000)
+    monkeypatch.setattr(web_frontend, "_page_version", lambda: "after-restart")
+    start()
+
+    expect(page.locator("#msg")).to_be_enabled(timeout=30_000)
+    expect(page.locator('meta[name="kokua-page-version"]')).to_have_attribute("content", "after-restart")
+    assert not _same_page_load(page)
+    expect(page.locator("#msg")).to_have_value("half-typed thought")
+
+
+def test_a_restart_that_left_the_page_alone_does_not_reload_the_tab(page, restartable_server):
+    start, stop = restartable_server
+    _open(page, start())
+    _mark_this_page_load(page)
+
+    stop()
+    expect(page.locator(".bubble.notice", has_text="Reconnecting")).to_be_visible(timeout=10_000)
+    start()
+
+    expect(page.locator("#msg")).to_be_enabled(timeout=30_000)
+    expect(page.locator(".bubble.notice", has_text="Reconnecting")).to_have_count(0)
+    assert _same_page_load(page)
+
+
+def test_a_version_the_reload_cannot_bring_in_reloads_once_rather_than_forever(page, live_server, monkeypatch):
+    """If the socket keeps naming a version the page route never serves, reloading cannot fix it. One
+    attempt, then the tab stays on the page it has, which still works."""
+    from kokua.channels.web import WebChannel
+
+    original = WebChannel.send_page_version
+
+    async def unreachable(self, version):
+        await original(self, "never-served")
+
+    monkeypatch.setattr(WebChannel, "send_page_version", unreachable)
+    loads = []
+    page.on("load", lambda _: loads.append(True))
+    _open(page, live_server())
+    page.wait_for_timeout(2000)
+    assert len(loads) == 2, "the first load, then exactly one reload"
+    expect(page.locator("#msg")).to_be_enabled()
+
+
 def test_the_reconnect_notice_counts_down_to_its_next_attempt(page, restartable_server):
     """A retry the reader can see coming, rather than an indefinite "Reconnecting...".
 
