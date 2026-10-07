@@ -2175,6 +2175,42 @@ async def test_an_undelivered_agent_message_survives_a_reload(assistant):
     assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
 
 
+async def test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation(assistant):
+    """`record_undelivered`'s write lands after both the gate and the pin have released (``reactive``'s
+    own ``finally`` unpins before this runs), in the same window ``_notify_if_backgrounded`` awaits in
+    just ahead of it. A ``delete_conversation`` landing there removes the session; without a guard,
+    ``record_undelivered`` would still call ``self._store.get(conversation_id)``, which
+    :meth:`ConversationBook.exists`'s own docstring already names the consequence of ("the store
+    returns an empty ``Session`` for a missing key"), and then save it right back -- a ghost "New
+    conversation" where the one just deleted used to be. Reproduced by standing in for
+    ``_notify_if_backgrounded``, the one real ``await`` already in that window, with the delete the
+    review's probe used.
+
+    The sibling resubmit path one line below this one does not share the exposure: it calls
+    ``self.reactive(...)`` again, which takes this conversation's gate (invariant 1) and so serializes
+    against ``delete``'s own hold of the identical lock, where this write took none at all.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    async def leave_one_undelivered(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    agent.run = leave_one_undelivered
+
+    async def delete_mid_window(*args, **kwargs):
+        # Stands in for the notification this turn would otherwise send, landing the delete in the
+        # exact window the review reproduced rather than guessing at the timing.
+        await assistant.delete_conversation(conversation_id)
+
+    assistant._turns._notify_if_backgrounded = delete_mid_window
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    assert conversation_id not in assistant._store.list_keys()
+
+
 class _MutingAlertChannel(AlertCapturingChannel):
     """The web front end's shape: a card surface, and a viewed conversation to mute against.
 

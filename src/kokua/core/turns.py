@@ -227,12 +227,37 @@ Every rule here was learned from a bug. Read them before changing anything in th
     so it is reported here like any other undeliverable one. Refusing it at send time would serve the
     sender better, and the roster can answer that much without tracking liveness, but it belongs with
     whatever lets a sender write an address rather than here.
+    **The live report above is not the only one: ``_record_undelivered`` persists the same list
+    (``ConversationBook.record_undelivered``) so a reload shows what the live sentence otherwise loses
+    the moment it scrolls off. It is called from the same place in both ``reactive`` and
+    ``_run_unattended``, right beside ``_report_undeliverable`` and for the identical reason the
+    ordering comment there gives: after the outer ``finally`` has already released this conversation's
+    pin and gate (``bus.close()`` runs in that same ``finally``, which is what makes ``undeliverable``
+    available at all). That makes it, as far as this module goes, the first store write a turn makes
+    from outside both -- ``_record_provenance`` and every call it makes into
+    ``record_turn_provenance`` run from inside the gate hold, before the ``finally`` that releases it,
+    which is why that call never had this exposure. A ``delete_conversation`` landing in the same
+    window ``_notify_if_backgrounded`` awaits in removes the session out from under a write with no
+    hold of its own: :meth:`ConversationBook.record_undelivered`'s own guard (checking
+    :meth:`ConversationBook.exists` before reading) is what closes that window, not a second gate hold
+    taken here -- the store is synchronous throughout (by ``aimu.sessions``'s own contract), so the
+    check and the write that follows it cannot be interleaved by anything else on the event loop, and
+    a hold would only re-open a second way of saying the same thing. Contrast the resubmit call two
+    lines below in ``reactive``: that one *does* re-take this conversation's gate, because it calls
+    ``self.reactive(...)`` again, a whole new turn rather than one store write, and a second,
+    sequential ``gate.turn`` taken only after the first has fully released is not the nested case
+    invariant 1 forbids (``_prune_task_conversations`` taking ``delete``'s own hold, sequentially,
+    after ``_run_unattended`` has returned, is the same shape). So the two awaits sitting one line
+    apart in this same window are safe for two different reasons, and neither reason transfers to the
+    other: the resubmit's safety is mutual exclusion, and the record's is a single-shot check on an
+    already-atomic write.**
     (Regressions: ``test_close_reports_an_undelivered_agent_message_rather_than_resubmitting_it``,
     ``test_a_message_every_cursor_passed_over_is_reported_rather_than_lost``,
     ``test_a_bare_label_one_of_two_readers_drained_is_delivered_not_reported``,
     ``test_an_undelivered_agent_message_is_reported_and_not_rerun``,
     ``test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation``,
-    ``test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run``.)
+    ``test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run``,
+    ``test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation``.)
 """
 
 from __future__ import annotations

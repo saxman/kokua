@@ -801,8 +801,31 @@ class ConversationBook:
         negative ``user_index`` means the turn committed no message of its own to key this under, so
         there is nowhere to write it and this is a no-op, exactly as :meth:`record_turn_provenance`
         treats the same case.
+
+        **Checked against :meth:`exists` before the read, which is the one guard
+        :meth:`record_turn_provenance` has never needed.** Every other write in this class runs from
+        inside a caller already holding this conversation's ``gate.turn`` (a turn's own record calls,
+        made before its ``finally`` releases the gate; ``retitle``/``truncate``/``delete`` taking that
+        hold directly), so a concurrent ``delete`` is already excluded by the time any of them touches
+        the store. This one is not: ``TurnRunner`` only learns what to write here from
+        ``MessageBus.close()``, which by design runs in the turn's own outer ``finally`` *after* that
+        hold -- and after the pin -- have already released (see ``core/turns.py``'s invariant 10 and
+        its own note on this call), so nothing stands between this write and a ``delete_conversation``
+        racing it. Without the guard, ``get`` on a key a concurrent delete just removed hands back a
+        fresh empty ``Session`` (exactly the hazard this method's own sibling warns about), and
+        ``save`` would write that straight back, resurrecting a conversation someone just deleted as a
+        blank "New conversation". The check and the write that follows it share one synchronous call
+        (this class's store is sync throughout, by the ABC's own contract -- see ``aimu.sessions``),
+        so nothing else on the event loop can run a delete in between them: either the conversation
+        is already gone by the time this call starts, and it stays gone, or it is not, and nothing can
+        remove it before ``save`` lands. A hold of this conversation's own gate would close the same
+        window (and is how every *other* writer here closes it), but would do so by re-opening one
+        this call does not otherwise need, just to serialize against a delete that a plain existence
+        check already rules out cheaply.
         """
         if user_index < 0 or not reports:
+            return
+        if not self.exists(conversation_id):
             return
         session = self._store.get(conversation_id)
         session.metadata.setdefault("undelivered", {})[str(user_index)] = list(reports)
