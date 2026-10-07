@@ -3767,6 +3767,16 @@ neither typing nor sending a message ever depended on the assistant having finis
 <p>What a reconnect does <em>not</em> restore is a turn that was in flight when the socket dropped. <code>build_app</code>
 constructs an <code>Assistant</code> per connection and <code>serve_connection</code> ties its serve loop to that connection's
 lifetime, so the page comes back to what the turn persisted, not to the stream it was watching.</p>
+<p>Nor does a reconnect reload the page's own code. A resync replaces the data, but the tab keeps the script
+it loaded, so a restart that changed <code>app.js</code> would leave an open tab drawing the new server's frames with
+the old one. So the page is told two versions and compares them. <code>_page_version</code> hashes <code>index.html</code> and
+every served asset; the hash is written into <code>index.html</code> as the page is served (the <code>kokua-page-version</code>
+meta tag), and it is the first frame on every connection (<code>page</code>, sent before <code>Assistant.create</code>, so a
+stale tab reloads before the connect sequence it would throw away). On a mismatch the page saves the
+composer's draft to <code>sessionStorage</code> and reloads, and restores the draft once the new page loads. A hash
+of the content rather than a per-process id, so a restart that left the page alone does not reload the
+tab and cost the reader their place. If the same version shows up mismatched a second time, the reload
+evidently cannot fix it, and the page stays put rather than reloading in a loop.</p>
 <p>Two of the ways a socket can close are not worth retrying, and the page tells them apart from a restart by
 whether anything arrived before the close. A server that is not up yet closes having sent nothing, which
 is the ordinary restart case and is exactly what the backoff is for. A server that answered and <em>refused</em>
