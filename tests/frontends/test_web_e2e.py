@@ -951,6 +951,65 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
 
 
+def _solid_png(width: int, height: int) -> bytes:
+    """A single-colour PNG of the given size, built by hand so the suite needs no imaging library."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    row = b"\x00" + b"\xcc\x44\x44" * width
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(row * height))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_images_keep_their_full_height_in_a_transcript_taller_than_the_window(page, live_server):
+    """The transcript is a scrolling flex column, and an image block clips its overflow. A clipping
+    flex item may shrink to nothing, so once the transcript outgrew the window every image was squeezed:
+    only its top showed, and with enough other content (an expanded sub-agent card) none of it did."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    names = [f"generated-{i}.png" for i in range(3)]
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (config.images_path / name).write_bytes(_solid_png(400, 300))
+        messages = [{"role": "user", "content": "draw three cats"}]
+        for i, name in enumerate(names):
+            call = {"id": str(i), "type": "function", "function": {"name": "generate_image", "arguments": "{}"}}
+            messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
+            messages.append({"role": "tool", "tool_call_id": str(i), "content": f"Generated (/images/{name})."})
+        messages.append({"role": "assistant", "content": "\n\n".join(f"Paragraph {i}." for i in range(40))})
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=messages,
+                metadata={"title": "seeded", "created_at": "2026-10-08T00:00:00", "updated_at": "2026-10-08T00:00:00"},
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    images = page.locator(".bubble.image img")
+    expect(images).to_have_count(3)
+    page.wait_for_function("[...document.querySelectorAll('.bubble.image img')].every((img) => img.complete)")
+    heights = page.eval_on_selector_all(
+        ".bubble.image",
+        "blocks => blocks.map((block) => [block.getBoundingClientRect().height,"
+        " block.querySelector('img').getBoundingClientRect().height])",
+    )
+    for block_height, image_height in heights:
+        assert image_height == 300
+        assert block_height >= image_height
+
+
 def test_a_composed_card_replays_in_place_of_its_call_naming_the_tool_and_capabilities(page, live_server):
     """A card stands in for the call that opened it, where that call was made: after the reasoning
     that led to it, not straight under the user's message, and with no tool block beside it. It names

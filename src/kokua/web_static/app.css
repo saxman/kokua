@@ -239,6 +239,9 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    per-row margins rather than a flex gap, so the space between two turns can be wider than the space
    between one turn's own blocks. */
 #log { flex: 1; overflow-y: auto; padding: 20px 16px 8px; display: flex; flex-direction: column; }
+/* The log scrolls; its blocks never shrink to fit it. A flex item that clips its overflow (an image
+   block does) may otherwise shrink to nothing once the transcript outgrows the window. */
+#log > * { flex: none; }
 .bubble { max-width: none; padding: 0; border: none; border-radius: 0; background: none;
   white-space: pre-wrap; line-height: 1.55; margin: 2px 0; }
 
