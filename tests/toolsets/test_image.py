@@ -1,11 +1,9 @@
-"""The image toolset: the env gate and the generator's saved-reference return.
-
-The generator path was previously untested -- only the gate was, and the module named `images.py`
-(the on-disk store) has a similar test module name, which made the gap easy to miss.
-"""
+"""The image toolset: the env gate and the generator that publishes its image to the turn."""
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import sys
 import types
 from pathlib import Path
@@ -23,18 +21,13 @@ class _Chunk:
         self.content = content
 
 
-def _drain(generator):
-    """Run a tool generator to completion, returning (yielded chunks, the tool's return value).
+def _drain(agen):
+    """Run an async tool generator to completion, returning its chunks' contents."""
 
-    The tool yields progress chunks and *returns* its result, so the result arrives as
-    StopIteration.value -- it is not the last yielded item.
-    """
-    chunks = []
-    while True:
-        try:
-            chunks.append(next(generator))
-        except StopIteration as done:
-            return chunks, done.value
+    async def go():
+        return [chunk.content async for chunk in agen]
+
+    return asyncio.run(go())
 
 
 def _install_fake_aimu(monkeypatch, generate):
@@ -54,26 +47,36 @@ def test_tool_offered_when_an_image_model_is_configured(tmp_path, monkeypatch):
     assert [fn.__name__ for fn in build(_config(tmp_path))] == ["generate_image"]
 
 
-def test_generate_image_streams_progress_and_returns_a_servable_reference(tmp_path, monkeypatch):
+def test_generate_image_publishes_the_image_and_tells_the_model(tmp_path, monkeypatch):
     monkeypatch.setenv("AIMU_IMAGE_MODEL", "gemini:nano-banana")
     config = _config(tmp_path)
-    written = config.images_path / "out.png"
+    written = config.images_path / "20261008-143424-874c499c.png"
 
     def generate(prompt, *, format, output_dir, stream):
-        assert prompt == "a cat" and format == "path" and stream is True
+        assert format == "path" and stream is True
         assert Path(output_dir) == config.images_path  # saved where the web server can serve it
         written.parent.mkdir(parents=True, exist_ok=True)
         written.write_bytes(b"png")
         yield _Chunk({"progress": 0.5})
         yield _Chunk({"final": True, "result": str(written)})
 
+    published = []
+
+    async def fake_publish(url, *, filename, mime, path):
+        published.append((url, filename, mime, path))
+        return True
+
     _install_fake_aimu(monkeypatch, generate)
+    monkeypatch.setattr("kokua.core.artifacts.publish", fake_publish)
     (generate_image,) = build(config)
 
-    chunks, result = _drain(generate_image("a cat"))
-    # The denoising chunks flow through to the UI; the reference is the tool's return value.
-    assert [chunk.content for chunk in chunks] == [{"progress": 0.5}, {"final": True, "result": str(written)}]
-    assert result == "Generated image, shown to the user inline (/images/out.png)."
+    contents = _drain(generate_image("A photorealistic cat, sitting"))
+    reference = "/images/" + hashlib.sha256(b"png").hexdigest() + ".png"
+    assert published == [
+        (reference, "a-photorealistic-cat-sitting.png", "image/png", config.images_path / reference.rsplit("/", 1)[1])
+    ]
+    assert contents[0] == {"progress": 0.5}
+    assert contents[-1] == {"final": True, "result": f"Generated image, shown to the user ({reference})."}
 
 
 def test_generate_image_reports_no_output(tmp_path, monkeypatch):
@@ -84,7 +87,7 @@ def test_generate_image_reports_no_output(tmp_path, monkeypatch):
 
     _install_fake_aimu(monkeypatch, generate)
     (generate_image,) = build(_config(tmp_path))
-    assert _drain(generate_image("a cat"))[1] == "Image generation produced no output."
+    assert _drain(generate_image("a cat"))[-1] == {"final": True, "result": "Image generation produced no output."}
 
 
 def test_generate_image_reports_an_unbuildable_client(tmp_path, monkeypatch):
@@ -99,6 +102,6 @@ def test_generate_image_reports_an_unbuildable_client(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "aimu", fake)
 
     (generate_image,) = build(_config(tmp_path))
-    chunks, result = _drain(generate_image("a cat"))
-    assert chunks == []  # it never reaches the generator loop
-    assert "unavailable" in result and "AIMU_IMAGE_MODEL" in result
+    contents = _drain(generate_image("a cat"))
+    assert len(contents) == 1  # it never reaches the generator loop
+    assert "unavailable" in contents[0]["result"] and "AIMU_IMAGE_MODEL" in contents[0]["result"]
