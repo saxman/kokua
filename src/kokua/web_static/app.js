@@ -1257,6 +1257,27 @@ function addImageBubble(src, cls, ts) {
   return el;
 }
 
+// A file a tool made for the user (see core/artifacts.py), live or replayed. An image is drawn
+// inline; anything else is a link that saves under the artifact's own filename.
+function renderArtifact(item, ts) {
+  if ((item.mime || "").startsWith("image/")) {
+    const bubble = addImageBubble(item.url, "assistant", ts);
+    bubble.querySelector("img").alt = item.filename || "image";
+    return bubble;
+  }
+  const el = document.createElement("div");
+  el.className = "bubble assistant";
+  const link = document.createElement("a");
+  link.href = item.url;
+  link.download = item.filename || "";
+  link.textContent = item.filename || item.url;
+  bubbleBody(el).appendChild(link);
+  stampBubble(el, ts);
+  appendToLog(el);
+  autoscroll();
+  return el;
+}
+
 // --- Markdown rendering (vendored marked + DOMPurify) -------------------------------------
 // marked parses full GFM (incl. tables); DOMPurify sanitizes its HTML, since the assistant and
 // tool output are untrusted. Force links to open safely. If the libs failed to load, fall back
@@ -1635,11 +1656,11 @@ function handleFrame(event) {
     // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
     finalizeStreaming();
     renderPhase(frame.label, frame.detail, new Date());
-  } else if (frame.type === "image") {
-    // A generated image finished (or the assistant surfaced one). It lands below the answer so far, and
-    // closes it: whatever the assistant writes about the image belongs under the image.
+  } else if (frame.type === "artifact") {
+    // A tool published a file (a generated image, say). It lands below the answer so far, and
+    // closes it: whatever the assistant writes about it belongs under it.
     thinkingBlock = null;
-    addImageBubble(frame.url, "assistant", new Date());
+    renderArtifact(frame, new Date());
   } else if (frame.type === "message") {
     addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
     // A reactive message ends the turn (e.g. "(stopped)" / an error) and takes the indicator with it.
@@ -1787,6 +1808,7 @@ function handleFrame(event) {
         // "user" item at all); one the assistant generated is mid-turn and never opens it.
         if (item.from !== "assistant") stampTurnStart(bubble);
       }
+      else if (item.type === "artifact") renderArtifact(item, item.ts);
       else if (item.type === "thinking") {
         const f = addFoldable("thinking", { kind: "thinking" }, undefined, item.ts);
         f.body.textContent = item.text || "";

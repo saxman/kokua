@@ -969,6 +969,62 @@ def _solid_png(width: int, height: int) -> bytes:
     )
 
 
+def test_a_workers_image_replays_in_the_main_log_right_after_its_card(page, live_server):
+    """A composed worker's image is recorded on the turn, not the card, so it shows without opening
+    the card, directly below it."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    name = hashlib.sha256(_solid_png(40, 30)).hexdigest() + ".png"
+    arguments = {"name": "cat-image-maker", "tools": ["image"], "instructions": "Make images.", "task": "draw a cat"}
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        (config.images_path / name).write_bytes(_solid_png(40, 30))
+        call = {
+            "id": "1",
+            "type": "function",
+            "function": {"name": "compose_subagent", "arguments": json.dumps(arguments)},
+        }
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[
+                    {"role": "user", "content": "generate an image of a cat"},
+                    {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "1", "content": "Done."},
+                    {"role": "assistant", "content": "Here's your cat."},
+                ],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-10-08T00:00:00",
+                    "updated_at": "2026-10-08T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "c-1", "role": "cat-image-maker", "task": "draw a cat", "status": "running"},
+                            {"id": "c-1", "status": "done", "append": {"kind": "answer", "text": "Done."}},
+                        ]
+                    },
+                    "artifacts": {
+                        "0": [{"url": f"/images/{name}", "filename": "a-cat.png", "mime": "image/png", "after": 1}]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    image = page.locator("#log > .bubble.image img")
+    expect(image).to_have_count(1)
+    expect(image).to_have_attribute("src", f"/images/{name}")
+    expect(image).to_have_attribute("alt", "a-cat.png")
+    order = page.eval_on_selector_all(
+        "#log > .bubble",
+        "blocks => blocks.map((b) => b.classList.contains('subagent') ? 'card' : "
+        "b.classList.contains('image') ? 'image' : 'other')",
+    )
+    assert order.index("image") == order.index("card") + 1
+
+
 def test_images_keep_their_full_height_in_a_transcript_taller_than_the_window(page, live_server):
     """The transcript is a scrolling flex column, and an image block clips its overflow. A clipping
     flex item may shrink to nothing, so once the transcript outgrew the window every image was squeezed:
