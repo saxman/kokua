@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import mimetypes
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -54,6 +55,24 @@ def save_data_url(images_path: Path, data_url: str) -> Optional[str]:
     path = images_path / name
     if not path.exists():
         path.write_bytes(raw)
+    return ROUTE_PREFIX + name
+
+
+def adopt_file(images_path: Path, source: Path) -> str:
+    """Move a file a tool wrote under ``images_path`` to its content-addressed name; return its reference.
+
+    An image client names its output itself (AIMU's uses a timestamp), so without this a generated
+    image would be the one kind of image here not stored by content. A duplicate of bytes already
+    stored is deleted rather than kept twice.
+    """
+    raw = source.read_bytes()
+    name = hashlib.sha256(raw).hexdigest() + (source.suffix or ".png")
+    target = images_path / name
+    if source.resolve() != target.resolve():
+        if target.exists():
+            source.unlink()
+        else:
+            os.replace(source, target)
     return ROUTE_PREFIX + name
 
 

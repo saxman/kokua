@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 
@@ -222,3 +223,31 @@ def test_cli_attach_stages_image_onto_next_message(tmp_path, monkeypatch):
     assert len(messages) == 1
     assert messages[0].text == "what is this?"
     assert messages[0].images == [str(img)]
+
+
+def test_adopt_file_renames_a_written_file_to_its_content_address(tmp_path):
+    source = tmp_path / "20261008-143424-874c499c.png"
+    source.write_bytes(b"cat")
+    reference = images.adopt_file(tmp_path, source)
+    expected = hashlib.sha256(b"cat").hexdigest() + ".png"
+    assert reference == "/images/" + expected
+    assert (tmp_path / expected).read_bytes() == b"cat"
+    assert not source.exists()
+
+
+def test_adopt_file_drops_a_duplicate_and_keeps_the_stored_copy(tmp_path):
+    first = tmp_path / "a.png"
+    first.write_bytes(b"cat")
+    images.adopt_file(tmp_path, first)
+    second = tmp_path / "b.png"
+    second.write_bytes(b"cat")
+    reference = images.adopt_file(tmp_path, second)
+    assert reference == "/images/" + hashlib.sha256(b"cat").hexdigest() + ".png"
+    assert not second.exists()
+
+
+def test_adopt_file_is_a_no_op_on_a_file_already_at_its_address(tmp_path):
+    name = hashlib.sha256(b"cat").hexdigest() + ".png"
+    (tmp_path / name).write_bytes(b"cat")
+    assert images.adopt_file(tmp_path, tmp_path / name) == "/images/" + name
+    assert (tmp_path / name).read_bytes() == b"cat"
