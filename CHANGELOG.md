@@ -477,7 +477,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     reload never shows a card shaped differently than the one shown live. The card renders the preview
     plus a "Show full response" control naming the size in KB or MB; activating it fetches the
     reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
-    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    cleared by hand; payloads are never garbage collected, see
+    [#15](https://github.com/saxman/kokua/issues/15)) leaves the preview in place with a short
     note instead of a control that would only fail again. The row's own collapsed header states
     `response_bytes` when the response was spilled, not the preview's own length, so a 7.8 MB result
     reads as its real size before the card is even opened rather than as "4,000 chars" until it is
