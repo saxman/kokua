@@ -223,3 +223,23 @@ Approving from the card itself was considered and rejected in the same discussio
 `execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread.
 
+## 22. Say in `list_capabilities` whether a capability can be used right now
+`list_capabilities` (`toolsets/capabilities.py`'s `_catalogue`) lists every installed toolset, including
+one that would build no tools on this machine: `image` without `AIMU_IMAGE_MODEL`, `github_backup`
+without its token. Discovery never calls `Toolset.build`, deliberately (building `memory` loads an
+embedding model, an MCP toolset touches live connections), so it cannot tell "installed" from "usable".
+The only hint is prose in the description ("needs the AIMU_IMAGE_MODEL environment variable set"),
+which the model reads as a requirement but not as a verdict.
+
+Low priority since 2026-10-07, when `compose_subagent` began refusing a capability that builds no tools
+and naming it with its description. Before that, a recorded image request went seven workers deep, each
+composing another for the same missing tool, and the innermost one fabricated a success with a file path.
+Now the model tries once and gets a reason back, so the cost of the gap is one wasted call.
+
+Fix direction: an optional cheap availability check on `Toolset` (say `available: Callable[[ToolsetContext],
+Optional[str]]`, returning why not, or None), which `_catalogue` reports per line ("unavailable: ...")
+and which a toolset gated on configuration implements in a line. It must stay cheaper than `build` and
+side-effect free, or it reintroduces what discovery avoids. The same check could also power a startup
+warning for an agent whose own `tools` list names a capability that builds nothing, which today fails
+silently: the agent simply lacks the tool.
+
