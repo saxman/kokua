@@ -2282,7 +2282,8 @@ The pre-release development history is in the git log.</p>
     reload never shows a card shaped differently than the one shown live. The card renders the preview
     plus a "Show full response" control naming the size in KB or MB; activating it fetches the
     reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
-    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    cleared by hand; payloads are never garbage collected, see
+    <a href="https://github.com/saxman/kokua/issues/15">#15</a>) leaves the preview in place with a short
     note instead of a control that would only fail again. The row's own collapsed header states
     <code>response_bytes</code> when the response was spilled, not the preview's own length, so a 7.8 MB result
     reads as its real size before the card is even opened rather than as "4,000 chars" until it is
@@ -3157,7 +3158,8 @@ alone. The case that does cost something is a configured MCP server, which conne
   <code>max_iterations</code> are refused by name with the reason, rather than accepted and ignored: a reviewer's
   tools are fixed in code by whatever consumes it and this table has no key to change them (the
   approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
-  <code>workflows/critics.py</code>), nothing delegates to it, and it runs no tool loop. The approval reviewer's
+  <code>workflows/critics.py</code>), nothing delegates to it, and it runs no tool loop (not so for a plan critic,
+  which loops up to a fixed 6 rounds: see <a href="https://github.com/saxman/kokua/issues/4">#4</a>). The approval reviewer's
   own tool-less call is also why it cannot recurse into itself. <code>model</code>, <code>thinking</code>, and
   <code>generation</code> resolve against the <code>[assistant]</code> tiers exactly as an agent's do; <code>system_message</code> is
   the one field with no <code>[assistant]</code> tier, because what an undeclared standard means is the consumer's
@@ -3544,7 +3546,9 @@ notice on startup.</p>
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
-  calling a gated tool every firing would otherwise raise a card every firing.
+  calling a gated tool every firing would otherwise raise a card every firing. Parking a backgrounded
+  call for the user to answer later, instead of denying it, is
+  <a href="https://github.com/saxman/kokua/issues/7">#7</a>.
   The reply is routed through the single channel reader, so it is safe alongside
   <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.</li>
@@ -3814,22 +3818,25 @@ notice on startup.</p>
 </ul>
 <h3 id="known-limitations">Known limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>A gated tool call inside a sub-agent prompts at the top level</strong>, not inside its card.</li>
+<li><strong>A gated tool call inside a sub-agent prompts at the top level</strong>, not inside its card
+  (<a href="https://github.com/saxman/kokua/issues/20">#20</a>).</li>
 <li><strong>A tool result travels whole and only the DOM clamps it</strong>, so the web <code>history</code> frame grows by every
   tool result in the conversation and is re-sent on every conversation switch, not only on reload. A
   conversation with dozens of large results (PDF extractions, email fetches, big MCP responses) makes
-  that frame correspondingly large.</li>
+  that frame correspondingly large (<a href="https://github.com/saxman/kokua/issues/19">#19</a>).</li>
 <li><strong>A message can bind to the wrong conversation if you switch immediately after sending.</strong> A reactive
   turn binds to a conversation when the serve loop dequeues its message, while the web front end applies
   new / select / delete in a task of its own, so a control applied in that sub-millisecond window sends
   the reply to the conversation switched <em>to</em>. Not reachable by hand; surfaced deterministically by the
-  Playwright suite, which waits for the turn to be observably running before switching.</li>
+  Playwright suite, which waits for the turn to be observably running before switching
+  (<a href="https://github.com/saxman/kokua/issues/3">#3</a>).</li>
 <li><strong>A slow control still delays the controls behind it, <code>/stop</code> included.</strong> The web front end applies
   frames in one ordered task, because selecting a conversation and then sending a message has to bind the
   message to the conversation just selected, and ordering is what buys that. So a control that waits on
   the turn gate holds up whatever follows it, and <code>/diag</code>'s claim to answer past a held gate does not
   extend to that case: it arrives behind the control. This is a delay rather than a wedge, though.
-  Reloading the page always works, and the reload tears the blocked handler down with the connection.</li>
+  Reloading the page always works, and the reload tears the blocked handler down with the connection
+  (<a href="https://github.com/saxman/kokua/issues/18">#18</a>).</li>
 </ul>
 <h3 id="internals-and-development">Internals and development<a class="headerlink" href="#internals-and-development" title="Permanent link">&para;</a></h3>
 <ul>

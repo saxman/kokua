@@ -2429,7 +2429,8 @@ after it, so a multi-round spawn gets one answer entry per round for free: the r
 sits in between. And a turn's spawn cards replay grouped right after its user bubble on reload, not at
 the exact point mid-turn where they appeared live. Separately, a gated tool
 call inside a sub-agent (e.g. <code>execute_python</code>) still prompts at the top level, not inside its card: the
-approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card.</p>
+approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card
+(<a href="https://github.com/saxman/kokua/issues/20">#20</a>).</p>
 <h3 id="what-a-turn-cost">What a turn cost<a class="headerlink" href="#what-a-turn-cost" title="Permanent link">&para;</a></h3>
 <p><code>core/metrics.py</code>'s <code>TurnMetrics</code> accumulates what a turn's model calls cost: how many, which models,
 how many seconds of model time, and (when a provider reports them) input and output tokens. It is

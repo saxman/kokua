@@ -1991,10 +1991,15 @@ here:</p>
 </ul>
 <p>If you cannot tell which principle applies, the principles are not doing their job; open a discussion.</p>
 <h2 id="not-yet-a-principle">Not (yet) a principle<a class="headerlink" href="#not-yet-a-principle" title="Permanent link">&para;</a></h2>
-<p><strong>"Failures reach the user, not just the log."</strong> This is a goal, not a description: today a bad model
-string or a malformed config can still surface as a stack trace or a silent failure rather than a
-message in the chat. It is on the <a href="https://github.com/saxman/kokua/issues/17">backlog</a> rather than in the code, which is why it is
-here and not above: six honest principles beat seven with one aspirational. It matters more than a
+<p><strong>"Failures reach the user, not just the log."</strong> This is a goal, not a description. The startup
+failures it was first written about now hold to it: a malformed <code>config.toml</code>, a model string naming an
+unknown provider, or a model the provider does not have each stop Kokua with one line naming the
+problem and what is available instead. What nobody has established is that everything <em>after</em> startup
+does the same, and at least one case does not: an agent whose <code>tools</code> list names a capability that
+builds no tools on this machine simply runs without it, with nothing said anywhere
+(<a href="https://github.com/saxman/kokua/issues/16">#16</a>). Auditing the rest is on the
+<a href="https://github.com/saxman/kokua/issues/17">backlog</a> rather than done, which is why it is here and not
+above: six honest principles beat seven with one aspirational. It matters more than a
 polish item under the vision at the top of this page, since a failure you cannot see is a failure you
 cannot learn from. When it lands, it becomes the seventh.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
