@@ -3107,7 +3107,7 @@ taking a turn that arrived in between, and one piece of correctness the hold mis
 <code>TurnRunner.reactive</code> fetches its agent <em>before</em> taking the gate, so a turn queued behind a truncation
 would run to completion on the agent the truncation dropped and have its answer discarded by <code>persist</code>,
 which re-fetches the agent and snapshots the rebuilt one. Refusing keeps such a turn from starting behind
-a cut; <code>TODO.md</code> carries the deeper fix, which belongs to the turn runner. The refusal is asked twice,
+a cut; <a href="https://github.com/saxman/kokua/issues/1">issue #1</a> carries the deeper fix, which belongs to the turn runner. The refusal is asked twice,
 once by <code>Assistant.truncate_conversation</code> before it awaits anything and once inside the book's hold
 through a <code>turn_running</code> predicate that method injects, so a turn already in flight cannot slip through
 the window between the check and the gate. It is injected rather than looked up because the book holds
