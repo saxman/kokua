@@ -37,7 +37,7 @@ wheels = [
 
 [[package]]
 name = "aimu"
-version = "0.34.0"
+version = "0.35.0"
 source = { editable = "../aimu" }
 dependencies = [
     { name = "fastmcp" },
@@ -83,11 +83,11 @@ openai-compat = [
 requires-dist = [
     { name = "a2a-sdk", marker = "extra == 'a2a'", specifier = ">=0.3.24,<0.4" },
     { name = "accelerate", marker = "extra == 'hf'" },
-    { name = "aimu", extras = ["ollama", "anthropic", "openai-compat", "google", "llamacpp", "hf", "web", "tuning", "evals", "a2a", "memory", "prompts"], marker = "extra == 'all'" },
+    { name = "aimu", extras = ["ollama", "anthropic", "openai-compat", "google", "llamacpp", "hf", "web", "tuning", "a2a", "memory", "prompts"], marker = "extra == 'all'" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1,<2" },
     { name = "bitsandbytes", marker = "extra == 'hf'" },
     { name = "chromadb", marker = "extra == 'memory'" },
-    { name = "deepeval", marker = "extra == 'evals'" },
+    { name = "deepeval", marker = "extra == 'evals'", specifier = ">=4" },
     { name = "diffusers", marker = "extra == 'hf'", specifier = ">=0.30" },
     { name = "fastmcp" },
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.0" },
@@ -114,7 +114,7 @@ requires-dist = [
     { name = "requests" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15,<0.16" },
     { name = "safetensors", marker = "extra == 'hf'" },
-    { name = "sentence-transformers", marker = "extra == 'hf'", specifier = ">=3" },
+    { name = "sentence-transformers", marker = "extra == 'hf'", specifier = ">=6.1" },
     { name = "sentencepiece", marker = "extra == 'hf'" },
     { name = "soundfile", marker = "extra == 'hf'" },
     { name = "sqlalchemy", marker = "extra == 'prompts'" },
@@ -124,7 +124,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'hf'" },
     { name = "torchvision", marker = "extra == 'hf'" },
     { name = "tqdm", marker = "extra == 'tuning'" },
-    { name = "transformers", marker = "extra == 'hf'", specifier = ">=5,<6" },
+    { name = "transformers", marker = "extra == 'hf'", specifier = ">=5.19,<6" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", marker = "extra == 'a2a'", specifier = ">=0.30" },
     { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.30" },
