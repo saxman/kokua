@@ -349,10 +349,15 @@ If you cannot tell which principle applies, the principles are not doing their j
 
 ## Not (yet) a principle
 
-**"Failures reach the user, not just the log."** This is a goal, not a description: today a bad model
-string or a malformed config can still surface as a stack trace or a silent failure rather than a
-message in the chat. It is on the [backlog](https://github.com/saxman/kokua/issues/17) rather than in the code, which is why it is
-here and not above: six honest principles beat seven with one aspirational. It matters more than a
+**"Failures reach the user, not just the log."** This is a goal, not a description. The startup
+failures it was first written about now hold to it: a malformed `config.toml`, a model string naming an
+unknown provider, or a model the provider does not have each stop Kokua with one line naming the
+problem and what is available instead. What nobody has established is that everything *after* startup
+does the same, and at least one case does not: an agent whose `tools` list names a capability that
+builds no tools on this machine simply runs without it, with nothing said anywhere
+([#16](https://github.com/saxman/kokua/issues/16)). Auditing the rest is on the
+[backlog](https://github.com/saxman/kokua/issues/17) rather than done, which is why it is here and not
+above: six honest principles beat seven with one aspirational. It matters more than a
 polish item under the vision at the top of this page, since a failure you cannot see is a failure you
 cannot learn from. When it lands, it becomes the seventh.
 

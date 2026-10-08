@@ -477,7 +477,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     reload never shows a card shaped differently than the one shown live. The card renders the preview
     plus a "Show full response" control naming the size in KB or MB; activating it fetches the
     reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
-    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    cleared by hand; payloads are never garbage collected, see
+    [#15](https://github.com/saxman/kokua/issues/15)) leaves the preview in place with a short
     note instead of a control that would only fail again. The row's own collapsed header states
     `response_bytes` when the response was spilled, not the preview's own length, so a 7.8 MB result
     reads as its real size before the card is even opened rather than as "4,000 chars" until it is
@@ -1342,7 +1343,8 @@ alone. The case that does cost something is a configured MCP server, which conne
   `max_iterations` are refused by name with the reason, rather than accepted and ignored: a reviewer's
   tools are fixed in code by whatever consumes it and this table has no key to change them (the
   approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
-  `workflows/critics.py`), nothing delegates to it, and it runs no tool loop. The approval reviewer's
+  `workflows/critics.py`), nothing delegates to it, and it runs no tool loop (not so for a plan critic,
+  which loops up to a fixed 6 rounds: see [#4](https://github.com/saxman/kokua/issues/4)). The approval reviewer's
   own tool-less call is also why it cannot recurse into itself. `model`, `thinking`, and
   `generation` resolve against the `[assistant]` tiers exactly as an agent's do; `system_message` is
   the one field with no `[assistant]` tier, because what an undeclared standard means is the consumer's
@@ -1731,7 +1733,9 @@ notice on startup.
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
-  calling a gated tool every firing would otherwise raise a card every firing.
+  calling a gated tool every firing would otherwise raise a card every firing. Parking a backgrounded
+  call for the user to answer later, instead of denying it, is
+  [#7](https://github.com/saxman/kokua/issues/7).
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.
@@ -2001,22 +2005,25 @@ notice on startup.
 
 ### Known limitations
 
-- **A gated tool call inside a sub-agent prompts at the top level**, not inside its card.
+- **A gated tool call inside a sub-agent prompts at the top level**, not inside its card
+  ([#20](https://github.com/saxman/kokua/issues/20)).
 - **A tool result travels whole and only the DOM clamps it**, so the web `history` frame grows by every
   tool result in the conversation and is re-sent on every conversation switch, not only on reload. A
   conversation with dozens of large results (PDF extractions, email fetches, big MCP responses) makes
-  that frame correspondingly large.
+  that frame correspondingly large ([#19](https://github.com/saxman/kokua/issues/19)).
 - **A message can bind to the wrong conversation if you switch immediately after sending.** A reactive
   turn binds to a conversation when the serve loop dequeues its message, while the web front end applies
   new / select / delete in a task of its own, so a control applied in that sub-millisecond window sends
   the reply to the conversation switched *to*. Not reachable by hand; surfaced deterministically by the
-  Playwright suite, which waits for the turn to be observably running before switching.
+  Playwright suite, which waits for the turn to be observably running before switching
+  ([#3](https://github.com/saxman/kokua/issues/3)).
 - **A slow control still delays the controls behind it, `/stop` included.** The web front end applies
   frames in one ordered task, because selecting a conversation and then sending a message has to bind the
   message to the conversation just selected, and ordering is what buys that. So a control that waits on
   the turn gate holds up whatever follows it, and `/diag`'s claim to answer past a held gate does not
   extend to that case: it arrives behind the control. This is a delay rather than a wedge, though.
-  Reloading the page always works, and the reload tears the blocked handler down with the connection.
+  Reloading the page always works, and the reload tears the blocked handler down with the connection
+  ([#18](https://github.com/saxman/kokua/issues/18)).
 
 ### Internals and development
 
