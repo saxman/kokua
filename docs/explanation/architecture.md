@@ -1358,6 +1358,17 @@ persisted session must stay small and a localhost URL is not fetchable by the pr
 `core/messages.py` rewrites data URLs to references on persist and re-inlines them before each
 `agent.restore`.
 
+A generated image reaches the user by being *published*, not returned. A tool result has two
+audiences: the model reads the text the tool returns, and the person wants the file. `core/artifacts.py`
+is the second half: the running turn's `ArtifactSink`, bound through a ContextVar like
+`subagent_events`, records the file and shows it through `ChannelUI.show_artifact` (an `artifact` frame
+on the web, a "saved:" line in the terminal). Because a spawned worker inherits the turn's context, a
+worker's image reaches the page with no plumbing through the spawn, which is what its own stream could
+not do: that stream ends at its card. The turn persists the records under
+`metadata["artifacts"][<user index>]`, each with the message it was published after, and replay places
+it there. The image toolset moves AIMU's timestamp-named output to its content address
+(`images.adopt_file`) before publishing, so generated images are stored by content like uploads.
+
 ## Payloads
 
 `payloads.py` solves the same problem `images.py` does, for oversized text instead of image bytes:

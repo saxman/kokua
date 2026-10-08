@@ -485,6 +485,7 @@ src/kokua/
   cli.py  plugins.py  images.py  payloads.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 auto_approval (the optional model reviewer over the approval gate, and `decide`),
+                artifacts (files a tool publishes for the user, per turn),
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
                 errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events),
