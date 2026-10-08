@@ -44,9 +44,12 @@ Every rule here was learned from a bug. Read them before changing anything in th
    be set before a turn's first ``await`` and reset only in the ``finally`` alongside
    ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
    (or into no list at all) instead of the turn that owns it. ``current_metrics`` (``core/metrics.py``)
-   and ``current_artifacts`` (``core/artifacts.py``) follow the identical discipline for the same reason: set before the first ``await``, reset only in
+   follows the identical discipline for the same reason: set before the first ``await``, reset only in
    the ``finally``, so a model call racing the window is never attributed to a finished turn's record or
-   to no turn at all. An unattended run cannot share the reactive path's ``finally`` (it runs in a child
+   to no turn at all. ``current_artifacts`` (``core/artifacts.py``) is set and reset beside
+   ``subagent_events`` in both paths (on the unattended one that is ``_run_unattended``, not
+   ``_unattended_body``), and what races its window is a tool's publish rather than a model call.
+   An unattended run cannot share the reactive path's ``finally`` (it runs in a child
    task with no such block of its own), so ``_unattended_body`` opens and resets its own
    ``current_metrics`` scope around its whole body, the same way it opens its own catch-up record rather
    than reusing the caller's. The channel's catch-up record is opened

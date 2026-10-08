@@ -3173,9 +3173,11 @@ class _PublishingClient(MockAsyncModelClient):
     def __init__(self, url: str, reply: str = "made."):
         super().__init__([reply])
         self._url = url
+        self._published = False
 
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
-        if not stream:
+        if not stream and not self._published:
+            self._published = True
             from kokua.core.artifacts import publish
 
             await publish(self._url, filename="a.png", mime="image/png", path=Path("a.png"))
