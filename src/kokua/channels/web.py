@@ -465,6 +465,7 @@ class WebChannel(BaseWebChannel):
             failure=meta.get("failure"),
             mid_turn=meta.get("messages"),
             undelivered=meta.get("undelivered"),
+            artifacts=meta.get("artifacts"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:

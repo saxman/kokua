@@ -169,6 +169,7 @@ def render_markdown(
         failure=metadata.get("failure"),
         mid_turn=metadata.get("messages"),
         undelivered=metadata.get("undelivered"),
+        artifacts=metadata.get("artifacts"),
     )
     lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
@@ -545,6 +546,9 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
     if item_type == "image":
         url = item.get("url", "")
         return [f"_[image: {url}]_" if url else "_[image]_"]
+    if item_type == "artifact":
+        kind = "image" if (item.get("mime") or "").startswith("image/") else "file"
+        return [f"_[{kind}: {item.get('filename', '')} ({item.get('url', '')})]_"]
     if item_type == "loop":
         return [_loop_line(item, max_payload_chars)]
     if item_type == "inbox":
