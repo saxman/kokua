@@ -180,7 +180,8 @@ after it, so a multi-round spawn gets one answer entry per round for free: the r
 sits in between. And a turn's spawn cards replay grouped right after its user bubble on reload, not at
 the exact point mid-turn where they appeared live. Separately, a gated tool
 call inside a sub-agent (e.g. `execute_python`) still prompts at the top level, not inside its card: the
-approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card.
+approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card
+([#20](https://github.com/saxman/kokua/issues/20)).
 
 ### What a turn cost
 
