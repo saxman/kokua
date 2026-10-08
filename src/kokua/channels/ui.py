@@ -24,6 +24,7 @@ are not "call it if present" -- they change what the core *does*:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
 from aimu.aio import Channel
@@ -49,6 +50,7 @@ class ChannelUI:
         self._phase = getattr(channel, "send_phase", None)
         self._done = getattr(channel, "send_done", None)
         self._subagent = getattr(channel, "send_subagent", None)
+        self._artifact = getattr(channel, "send_artifact", None)
         self._stream_activity = getattr(channel, "stream_activity", None)
         self._begin_catch_up = getattr(channel, "begin_catch_up", None)
         self._end_catch_up = getattr(channel, "end_catch_up", None)
@@ -313,6 +315,19 @@ class ChannelUI:
         """
         if self._subagent is not None:
             await self._subagent(event)
+
+    async def show_artifact(self, record: dict, path: Path) -> None:
+        """Show a file a tool made for the user, or say where it was saved.
+
+        ``record`` is what the turn persists (``url``, ``filename``, ``mime``, ``after``). ``path`` is
+        the file on disk and is never persisted: it is only what a channel with no way to show the
+        file can still tell its reader.
+        """
+        if self._artifact is not None:
+            await self._artifact(record)
+            return
+        kind = "Image" if record.get("mime", "").startswith("image/") else "File"
+        await self._channel.send(f"{kind} saved: {path}")
 
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream an agentic loop live and return its generated text.

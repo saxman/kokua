@@ -7,6 +7,7 @@ call sites: every optional frame has exactly one documented fallback, asserted h
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from kokua.channels.ui import ChannelUI
@@ -72,6 +73,9 @@ class RichChannelDouble(BareChannel):
 
     async def send_subagent(self, event: dict) -> None:
         self.calls.append(("subagent", (event,)))
+
+    async def send_artifact(self, record: dict) -> None:
+        self.calls.append(("artifact", (record,)))
 
     async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
         self.calls.append(("message_frame", (text, token)))
@@ -364,3 +368,18 @@ async def test_an_escalation_says_it_is_going_to_the_user():
         "run_command", {"command": "ls"}, approved=False, reason="cannot be undone", model="ollama:b"
     )
     assert "asking you" in channel.sent[0]
+
+
+async def test_show_artifact_uses_the_rich_frame_when_the_channel_has_one():
+    rich = RichChannelDouble()
+    record = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png", "after": 1}
+    await ChannelUI(rich).show_artifact(record, Path("/data/images/a.png"))
+    assert rich.calls == [("artifact", (record,))]
+    assert rich.sent == []
+
+
+async def test_show_artifact_degrades_to_a_line_naming_the_file_on_disk():
+    bare = BareChannel()
+    record = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png", "after": 1}
+    await ChannelUI(bare).show_artifact(record, Path("/data/images/a.png"))
+    assert bare.sent == ["Image saved: /data/images/a.png"]
