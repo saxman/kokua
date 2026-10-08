@@ -35,7 +35,7 @@ from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Optional
 
 from aimu.aio.channels.base import ChannelMessage
 from aimu.aio.channels.web import WebChannel as BaseWebChannel
@@ -79,7 +79,7 @@ _TURN_FRAMES = frozenset(
         "done",
         "loop",
         "inbox",
-        "image",
+        "artifact",
         "plan",
         "phase",
         "subagent",
@@ -90,22 +90,6 @@ _TURN_FRAMES = frozenset(
 def _now() -> str:
     """Now, in the ISO form the page's timestamp captions parse (the same form persisted messages use)."""
     return datetime.now().isoformat()
-
-
-def _image_frame_for(chunk: StreamChunk) -> Optional[dict]:
-    """Return an ``image`` frame for a final IMAGE_GENERATING chunk, else None.
-
-    The chunk's ``result`` is the absolute path the image client wrote (the image toolset directs it into
-    ``images_path``); the page loads it by its /images/<name> reference."""
-    if chunk.phase != StreamingContentType.IMAGE_GENERATING:
-        return None
-    content = chunk.content if isinstance(chunk.content, dict) else {}
-    if not content.get("final"):
-        return None
-    result = content.get("result")
-    if not isinstance(result, str):
-        return None
-    return {"type": "image", "url": ROUTE_PREFIX + Path(result).name}
 
 
 class _CatchUpRecord:
@@ -169,8 +153,6 @@ class _CatchUpRecord:
         if kind == "done":
             return  # a terminator has no rendered form to replay
         item = {**frame, "ts": ts}
-        if kind == "image":
-            item["from"] = "assistant"  # a live image frame is always generated; replay aligns on this
         self._items.append(item)
 
     def _close_partial(self, ts: str) -> None:
@@ -405,25 +387,6 @@ class WebChannel(BaseWebChannel):
             else:
                 yield ChannelMessage(text=item, sender="web", channel=self.name)
 
-    async def send(
-        self,
-        content: Union[str, AsyncIterator[StreamChunk]],
-        *,
-        reply_to: Optional[ChannelMessage] = None,
-    ) -> None:
-        """Stream a reply, forwarding an ``image`` frame for each image-progress chunk along the way.
-
-        Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
-        hook for image progress); strings (including proactive pushes) pass straight through. A
-        background turn needs no special path here: the base loop drains the whole stream either way
-        (so the agent run completes and its state persists), and each frame it produces is muted or not
-        on its own, as the view stands when that frame is sent (see the module docstring).
-        """
-        if isinstance(content, str):
-            await super().send(content, reply_to=reply_to)
-            return
-        await super().send(self._forward_image_frames(content), reply_to=reply_to)
-
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream the agentic loop live and return the accumulated GENERATING text.
 
@@ -468,25 +431,7 @@ class WebChannel(BaseWebChannel):
                 # so a planned turn's delivery frame and a plain turn's are one type for one handler.
                 sent = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "inbox", "text": sent.get("text", "")})
-            else:
-                image = _image_frame_for(chunk)
-                if image is not None:
-                    await self.send_frame(image)
         return "".join(parts)
-
-    async def _forward_image_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
-        """Yield ``chunks`` unchanged, sending an ``image`` frame for each image-progress chunk.
-
-        The base ``send`` loop has no branch for image progress and no per-chunk hook, so this wrapper
-        is how those frames reach the page. Loop boundaries used to be inferred here from a rise in
-        ``StreamChunk.iteration``; AIMU now yields a ``CONTINUING`` chunk carrying the injected prompt
-        itself, which the base loop maps, so nothing is guessed on this path any more.
-        """
-        async for chunk in chunks:
-            image = _image_frame_for(chunk)
-            if image is not None:
-                await self.send_frame(image)
-            yield chunk
 
     async def send_conversations(self, items: list[dict]) -> None:
         """Send the conversation list so the page can render the sidebar."""
@@ -659,6 +604,14 @@ class WebChannel(BaseWebChannel):
 
         Muted for a background turn (see the module docstring)."""
         await self.send_frame({"type": "subagent", **event})
+
+    async def send_artifact(self, record: dict) -> None:
+        """Show a file a tool made for the user. ``after`` stays behind: it is how replay places a
+        stored artifact, and a live frame is already in place by arriving when it does.
+
+        Muted for a background turn (see the module docstring)."""
+        frame = {key: record[key] for key in ("url", "filename", "mime")}
+        await self.send_frame({"type": "artifact", **frame})
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'
