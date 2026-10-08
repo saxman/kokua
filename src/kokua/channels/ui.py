@@ -12,7 +12,7 @@ are not "call it if present" -- they change what the core *does*:
     Whether a scheduled task may run in its own conversation. A channel that pushes no conversation
     list has no way to show one appearing, so such a task runs in the viewed conversation instead.
     (It used to be that a user could not *reach* one either; the terminal's ``/conversations`` and
-    ``/switch`` ended that, and finishing the job is TODO 12.)
+    ``/switch`` ended that, and finishing the job is GitHub issue #9.)
 ``supports_phases``
     Whether a planned turn can show its work as a verbose trace, or must fall back to summary cards.
 ``supports_streamed_activity``

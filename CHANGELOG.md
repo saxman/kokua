@@ -277,7 +277,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   original untouched in the sidebar. The fork carries the turn's recorded sub-agent cards, models,
   and costs, is titled "Branch of <the original>", and never inherits a scheduled task's ownership,
   so branching a task's run does not enter it into that task's retention. A terminal `/branch` is
-  not part of this (see `TODO.md`).
+  not part of this (see [#13](https://github.com/saxman/kokua/issues/13)).
 - **Duplicate a whole conversation.** Every row in the web UI's sidebar carries a duplicate control,
   beside export and delete: it copies that conversation, with its recorded sub-agent cards, models, and
   costs, into a new one titled "Copy of <the original>". Unlike a branch it does not move the view, so a
@@ -290,7 +290,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   the model's context too, along with their recorded cards, traces, and costs. Deleting from the first
   turn empties the conversation and returns it to "New conversation" rather than leaving it named after
   a turn that is gone. A conversation with a turn still running is refused rather than queued behind
-  it, and says so. There is no undo, and no terminal command or agent tool for it (see `TODO.md`).
+  it, and says so. There is no undo, and no terminal command or agent tool for it (see [#13](https://github.com/saxman/kokua/issues/13) and [#14](https://github.com/saxman/kokua/issues/14)).
 
 ### Front ends
 
@@ -1203,8 +1203,7 @@ alone. The case that does cost something is a configured MCP server, which conne
   conversation tools still see every conversation. A conversation whose task has been deleted falls back
   into the chat list rather than becoming unreachable. Each nested row carries its own delete, like a
   chat row: a task that mints a conversation per firing accumulates them here, and the run being viewed
-  is deletable too. Deleting the conversation a `target="task"` record remembers is safe -- its next
-  firing mints a fresh one rather than failing.
+  is deletable too.
 - **Breaking, and with no migration.** Scheduled tasks used to persist as JSON records in
   `data/scheduled_tasks.json`, keyed by an internal uuid; they now live in `config.toml` as
   `[scheduling.task.<name>]` tables, keyed by name. An existing `data/scheduled_tasks.json` is ignored
@@ -1517,9 +1516,8 @@ alone. The case that does cost something is a configured MCP server, which conne
   per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
   `tests/core/test_delegation.py` pins the asymmetry. Needs `aimu>=0.31.0`, which added the `compaction`
   factory argument and the matching `"compaction"` entry in `SUBAGENT_SPEC_KEYS`; it is also the surface
-  the startup preflight's capability probe now grips. `TODO.md` item 8, bounding a `target="task"`
-  conversation, is *not* settled by this: a task conversation is stored and readable, so trimming it is
-  the product question that item still owes an answer to.
+  the startup preflight's capability probe now grips. A stored conversation,
+  a scheduled task's included, is never compacted: the user can still open and read it.
   Two things worth knowing about the parameters themselves: `max_tokens` caps *generated* tokens while
   `context_length` sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
   leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
@@ -2003,10 +2001,6 @@ notice on startup.
 
 ### Known limitations
 
-- **A `target="task"` scheduled conversation grows without bound.** Reusing one conversation across
-  every firing is the intended continuity tradeoff, but each firing replays the full, growing transcript
-  to the model, so a high-frequency or long-lived task means steadily rising token cost and eventually
-  the context window. There is no cap yet.
 - **A gated tool call inside a sub-agent prompts at the top level**, not inside its card.
 - **A tool result travels whole and only the DOM clamps it**, so the web `history` frame grows by every
   tool result in the conversation and is re-sent on every conversation switch, not only on reload. A

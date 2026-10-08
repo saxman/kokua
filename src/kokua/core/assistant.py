@@ -501,7 +501,7 @@ class Assistant:
         queued behind a truncation holds a reference to the agent the truncation then drops. It runs to
         completion on that orphaned agent and streams an answer that ``ConversationBook.persist``
         discards, because persist re-fetches the agent and snapshots the rebuilt one. Refusing keeps that
-        turn from being started behind a cut in the first place. See ``TODO.md`` for the deeper fix,
+        turn from being started behind a cut in the first place. See GitHub issue #1 for the deeper fix,
         which belongs to the turn runner rather than here.
 
         ``turn_running`` is handed to the book so the same question is re-asked inside the gate hold: the

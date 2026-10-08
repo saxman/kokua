@@ -22,7 +22,7 @@ Every rule here was learned from a bug. Read them before changing anything in th
    a turn may still hold a reference to it, since ``reactive`` fetches its agent before taking the gate,
    so a turn queued behind a truncation finishes on an agent the registry has replaced and has its output
    discarded by ``persist``. That is what the running-turn refusal in ``Assistant.truncate_conversation``
-   keeps out of reach, and ``TODO.md`` carries the deeper fix.
+   keeps out of reach, and GitHub issue #1 carries the deeper fix.
    (Regressions: ``test_proactive_new_session_holds_at_most_one_gate_turn``,
    ``test_delete_does_not_wait_for_a_turn_on_another_conversation``.)
 
@@ -119,7 +119,7 @@ Every rule here was learned from a bug. Read them before changing anything in th
    moved to, and since nothing is muted on that channel the firing keeps printing wherever the user
    went rather than into the conversation it started in. Both of these come from one cause, a channel
    whose ``supports_conversations`` is false sharing the viewed conversation with a scheduled run,
-   which is the flag ``_resolve_target`` reads and the follow-up in TODO 12 is about.
+   which is the flag ``_resolve_target`` reads and the follow-up in GitHub issue #9 is about.
 
    Shutdown is the one reader that must not follow that rule, because it closes the session store.
    Replacing an entry does not end the turn it replaced, so the per-conversation entries are not the
@@ -1106,7 +1106,7 @@ class TurnRunner:
         conversation with nothing but a sentence, and a firing given its own would print into whatever
         the user is reading anyway. Flipping the flag is real work rather than a one-line change (``/stop``
         reaches only the viewed conversation, and a firing's frames are not muted there), and it is
-        deliberate follow-up: see TODO 12.
+        deliberate follow-up: see GitHub issue #9.
         """
         if not self._ui.supports_conversations:
             return ProactiveTarget(conversation_id=self._book.active_id, echo_reply=True, task_id=task_id)
