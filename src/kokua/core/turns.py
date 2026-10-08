@@ -44,7 +44,7 @@ Every rule here was learned from a bug. Read them before changing anything in th
    be set before a turn's first ``await`` and reset only in the ``finally`` alongside
    ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
    (or into no list at all) instead of the turn that owns it. ``current_metrics`` (``core/metrics.py``)
-   follows the identical discipline for the same reason: set before the first ``await``, reset only in
+   and ``current_artifacts`` (``core/artifacts.py``) follow the identical discipline for the same reason: set before the first ``await``, reset only in
    the ``finally``, so a model call racing the window is never attributed to a finished turn's record or
    to no turn at all. An unattended run cannot share the reactive path's ``finally`` (it runs in a child
    task with no such block of its own), so ``_unattended_body`` opens and resets its own
@@ -301,7 +301,14 @@ from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
-from kokua.core.messages import PROVENANCE_MIXED, derive_title, resolve_message_indices, resolve_user_index
+from kokua.core.artifacts import ArtifactSink, current_artifacts
+from kokua.core.messages import (
+    PROVENANCE_MIXED,
+    derive_title,
+    last_assistant_index,
+    resolve_message_indices,
+    resolve_user_index,
+)
 from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
 from kokua.core.subagents import subagent_events
@@ -486,6 +493,7 @@ class TurnRunner:
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
+        artifacts_token = current_artifacts.set(self._artifact_sink(conversation_id))
         metrics = TurnMetrics()
         metrics_token = current_metrics.set(metrics)
         # The turn's auto-approval budget and request text, opened here so a gated tool call reached
@@ -691,6 +699,7 @@ class TurnRunner:
             except Exception:
                 logger.warning("A message no run read could not be recorded", exc_info=True)
             subagent_events.reset(collector_token)
+            current_artifacts.reset(artifacts_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
             # whose record would otherwise linger and replay a phantom user bubble on the next switch-in.
@@ -951,6 +960,7 @@ class TurnRunner:
         usage = None
         if metrics is not None and started is not None:
             usage = metrics.record(wall_seconds=time.monotonic() - started)
+        sink = current_artifacts.get()
         self._book.record_turn_provenance(
             subagent_events.get() or [],
             self._answering_model(conversation_id),
@@ -960,6 +970,18 @@ class TurnRunner:
             failure=failure,
             usage=usage,
             messages=message_indices,
+            artifacts=sink.items if sink is not None else [],
+        )
+
+    def _artifact_sink(self, conversation_id: str) -> ArtifactSink:
+        """A turn's sink, placing each artifact by the conversation's newest assistant message.
+
+        The agent is looked up when an artifact arrives rather than captured here, because the
+        registry may rebuild a conversation's agent between the turn opening and a tool publishing.
+        """
+        return ArtifactSink(
+            self._ui,
+            position=lambda: last_assistant_index(self._book.agent_for(conversation_id).model_client.messages),
         )
 
     def _record_undelivered(self, conversation_id: str, user_index: int, messages: list[Message]) -> None:
@@ -1133,6 +1155,7 @@ class TurnRunner:
         conversation_id = spec.conversation_id
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
+        artifacts_token = current_artifacts.set(self._artifact_sink(conversation_id))
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
         # This firing's message bus, opened here rather than inside the body as `current_metrics`
         # is, for two reasons that scope does not have. The child task copies this context when it
@@ -1209,6 +1232,7 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
+            current_artifacts.reset(artifacts_token)
             streaming_conversation.reset(token)
         # These messages are already recorded, in the `finally` above and for the reason it gives.
         # Reached only by a firing that finished: a stop returns before this line and a failure raises

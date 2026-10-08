@@ -1846,3 +1846,19 @@ async def test_a_turn_that_only_has_messages_to_record_is_still_recorded(tmp_pat
     assistant._book.record_turn_provenance([], "", 0, assistant._active_id, messages=[3])
 
     assert assistant._store.get(assistant._active_id).metadata["messages"] == {"0": [3]}
+
+
+async def test_record_turn_provenance_keeps_a_turns_artifacts(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    conversation_id = assistant._active_id
+    record = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png", "after": 2}
+
+    assistant._book.record_turn_provenance([], "", 1, conversation_id, artifacts=[record])
+
+    assert assistant._store.get(conversation_id).metadata["artifacts"] == {"1": [record]}
+
+
+def test_artifacts_are_turn_keyed_so_a_branch_keeps_them():
+    from kokua.core.conversations import TURN_KEYED_METADATA
+
+    assert "artifacts" in TURN_KEYED_METADATA
