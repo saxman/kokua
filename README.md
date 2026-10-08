@@ -314,7 +314,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - ⚙️ [Configuration reference](docs/reference/configuration.md): every `config.toml` key, what it accepts, which apply live, and who may write each. Short form: [`config.example.toml`](src/kokua/config.example.toml).
 - 🧩 [`toolsets/image.py`](src/kokua/toolsets/image.py): the toolset template.
 - 🧩 [`skills/dice-roller/`](skills/dice-roller/): the skill template, for capability that needs no packaging.
-- 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.
+- 📋 [CHANGELOG](CHANGELOG.md): what changed. [Issues](https://github.com/saxman/kokua/issues): what's known but not yet scheduled.
 
 ### AIMU
 

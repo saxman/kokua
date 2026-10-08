@@ -351,7 +351,7 @@ If you cannot tell which principle applies, the principles are not doing their j
 
 **"Failures reach the user, not just the log."** This is a goal, not a description: today a bad model
 string or a malformed config can still surface as a stack trace or a silent failure rather than a
-message in the chat. It is on the [backlog](https://github.com/saxman/kokua/blob/main/TODO.md) rather than in the code, which is why it is
+message in the chat. It is on the [backlog](https://github.com/saxman/kokua/issues/17) rather than in the code, which is why it is
 here and not above: six honest principles beat seven with one aspirational. It matters more than a
 polish item under the vision at the top of this page, since a failure you cannot see is a failure you
 cannot learn from. When it lands, it becomes the seventh.
