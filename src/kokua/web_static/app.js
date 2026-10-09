@@ -1263,6 +1263,15 @@ function renderArtifact(item, ts) {
   if ((item.mime || "").startsWith("image/")) {
     const bubble = addImageBubble(item.url, "assistant", ts);
     bubble.querySelector("img").alt = item.filename || "image";
+    // Same-origin, so the `download` attribute alone saves the file under its readable name; the
+    // stored name is a content hash nobody would recognize in a downloads folder.
+    const save = document.createElement("a");
+    save.className = "image-download";
+    save.href = item.url;
+    save.download = item.filename || "";
+    save.textContent = "Download";
+    save.title = `Download ${item.filename || "image"}`;
+    bubbleBody(bubble).appendChild(save);
     return bubble;
   }
   const el = document.createElement("div");

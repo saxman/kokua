@@ -516,6 +516,14 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
 .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden;
   width: fit-content; align-items: flex-start; }
 .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
+/* The download control rides the picture's corner and shows on hover, like the timestamp caption. It is
+   `opacity` for the same reason that caption is, and :focus-visible reveals it for a keyboard user. The
+   body is the positioning box so the corner is the picture's, not the row's. */
+.bubble.image .bubble-body { position: relative; }
+.bubble.image .image-download { position: absolute; top: 8px; right: 8px; opacity: 0;
+  padding: 2px 8px; border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 0.8em;
+  transition: opacity 0.12s; }
+.bubble.image:hover .image-download, .bubble.image .image-download:focus-visible { opacity: 1; }
 /* Append-time datetime caption, revealed on hover rather than printed under every block. Every kind of
    block carries it on its first line at the row's right edge: a foldable's rides the always-visible
    header (so it shows whether the block is collapsed or expanded), and a regular bubble's rides the

@@ -974,12 +974,12 @@ def test_a_workers_image_replays_in_the_main_log_right_after_its_card(page, live
     the card, directly below it."""
     from aimu.sessions import Session, TinyDBSessionStore
 
-    name = hashlib.sha256(_solid_png(40, 30)).hexdigest() + ".png"
+    name = hashlib.sha256(_solid_png(240, 160)).hexdigest() + ".png"
     arguments = {"name": "cat-image-maker", "tools": ["image"], "instructions": "Make images.", "task": "draw a cat"}
 
     def seed(config):
         config.images_path.mkdir(parents=True, exist_ok=True)
-        (config.images_path / name).write_bytes(_solid_png(40, 30))
+        (config.images_path / name).write_bytes(_solid_png(240, 160))
         call = {
             "id": "1",
             "type": "function",
@@ -1023,6 +1023,16 @@ def test_a_workers_image_replays_in_the_main_log_right_after_its_card(page, live
         "b.classList.contains('image') ? 'image' : 'other')",
     )
     assert order.index("image") == order.index("card") + 1
+
+    bubble = page.locator("#log > .bubble.image")
+    bubble.hover()
+    link = bubble.locator("a.image-download")
+    expect(link).to_be_visible()
+    expect(link).to_have_attribute("download", "a-cat.png")
+    expect(link).to_have_attribute("href", f"/images/{name}")
+    with page.expect_download() as info:
+        link.click()
+    assert info.value.suggested_filename == "a-cat.png"
 
 
 def test_images_keep_their_full_height_in_a_transcript_taller_than_the_window(page, live_server):
