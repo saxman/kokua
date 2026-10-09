@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -88,6 +89,28 @@ def test_generate_image_reports_no_output(tmp_path, monkeypatch):
     _install_fake_aimu(monkeypatch, generate)
     (generate_image,) = build(_config(tmp_path))
     assert _drain(generate_image("a cat"))[-1] == {"final": True, "result": "Image generation produced no output."}
+
+
+def test_generate_image_builds_the_client_off_the_event_loop_thread(tmp_path, monkeypatch):
+    """Building a client can import torch and load weights; on the loop thread it would stall every conversation."""
+    monkeypatch.setenv("AIMU_IMAGE_MODEL", "gemini:nano-banana")
+    built_on_main_thread = []
+
+    def generate(prompt, *, format, output_dir, stream):
+        yield _Chunk({"progress": 1.0})
+
+    fake = types.ModuleType("aimu")
+
+    def image_client():
+        built_on_main_thread.append(threading.current_thread() is threading.main_thread())
+        return types.SimpleNamespace(generate=generate)
+
+    fake.image_client = image_client
+    monkeypatch.setitem(sys.modules, "aimu", fake)
+
+    (generate_image,) = build(_config(tmp_path))
+    _drain(generate_image("a cat"))
+    assert built_on_main_thread == [False]
 
 
 def test_generate_image_reports_an_unbuildable_client(tmp_path, monkeypatch):

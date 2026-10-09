@@ -1,14 +1,14 @@
 """Files a tool made for the user, as opposed to text it returned to the model.
 
 A tool result has two audiences. The model reads the text the tool returns; a person wants the file
-(an image, today). Publishing is the second half, done on its own: the tool hands the file's
+(an image, for instance). Publishing is the second half, done on its own: the tool hands the file's
 reference to the running turn's sink, which records it for replay and shows it on the channel.
 
 The sink is per turn and reached through a ContextVar, for the reason ``subagent_events`` is (see
 ``core/subagents.py``): turns on different conversations run concurrently, and a contextvar copy into
 a spawned worker's task copies the reference, so a worker's image reaches the turn that spawned it
-with no plumbing through the spawn. That is the whole reason a worker's image now shows live: the
-worker's own stream never reaches the page, but its context does.
+with no plumbing through the spawn. That is why a worker's image shows live: the worker's own
+stream never reaches the page, but its context does.
 """
 
 from __future__ import annotations
@@ -45,7 +45,8 @@ class ArtifactSink:
         try:
             await self._ui.show_artifact(record, path)
         except Exception:
-            logger.debug("An artifact could not be shown; it is still recorded.", exc_info=True)
+            # A closed socket is absorbed inside the channel's own send, so reaching here is a channel bug.
+            logger.warning("An artifact could not be shown; it is still recorded.", exc_info=True)
 
 
 # The running turn's sink, set by TurnRunner for the turn's duration and None outside one.

@@ -1904,7 +1904,7 @@ export renders the same items as prose instead.
 
 Muting a background turn happens per frame, in `WebChannel.send_frame`, which every live frame passes
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
-thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
+thinking, tool calls, the message, `done`, loop markers, artifacts, plan bubbles, phases, sub-agent cards)
 and is dropped when `streaming_conversation` names a conversation other than the one being viewed;
 everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out

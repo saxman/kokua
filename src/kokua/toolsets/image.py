@@ -85,8 +85,11 @@ def build(config: AssistantConfig) -> list:
         from kokua.core.artifacts import publish
 
         config.images_path.mkdir(parents=True, exist_ok=True)
+        # The body of an async tool runs on the loop that serves every conversation, so the blocking work
+        # (building a client can import torch and load weights; adopting a file reads and hashes it) goes
+        # to a thread, as a sync tool's whole body would have in AIMU's dispatch.
         try:
-            client = _client()
+            client = await asyncio.to_thread(_client)
         except Exception as exc:
             yield _final(f"Image generation is unavailable: {exc}. Check the AIMU_IMAGE_MODEL environment variable.")
             return
@@ -104,7 +107,7 @@ def build(config: AssistantConfig) -> list:
         if not written:
             yield _final("Image generation produced no output.")
             return
-        reference = images.adopt_file(config.images_path, Path(written))
+        reference = await asyncio.to_thread(images.adopt_file, config.images_path, Path(written))
         stored = config.images_path / reference.rsplit("/", 1)[1]
         mime = mimetypes.guess_type(stored.name)[0] or "image/png"
         await publish(reference, filename=_filename_for(prompt, stored.suffix), mime=mime, path=stored)
