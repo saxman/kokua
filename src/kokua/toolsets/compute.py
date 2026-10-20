@@ -5,7 +5,9 @@ with the privileges of the Kokua process, which is why the shipped ``[assistant.
 both by name (``compute.execute_python`` and ``compute.run_command``) rather than leaving the agent's
 declaration as the only control. It gates the two rather than the whole toolset, deliberately:
 ``calculate`` runs no code of the model's and a prompt before every sum would train the reflex the other
-two need intact. A bare ``compute`` there is the stricter choice, and it is one line. Neither offers
+two need intact. That premise is AIMU 0.38.0's, and part of why it is the floor: ``calculate`` used to be
+``eval`` with an empty builtins dict, which any expression could climb out of to reach ``os``, and it now
+evaluates an allowlisted syntax tree. A bare ``compute`` there is the stricter choice, and it is one line. Neither offers
 containment, and ``run_command`` offers one step less of it: a shell string reaches a credential sitting
 in a file with no code for anyone to read first, and process signalling is unconfined, so Kokua's own
 process is reachable from a command it ran.

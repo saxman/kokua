@@ -1300,7 +1300,15 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.37.0`**: a spawned worker's spec carries a `"tool_approval"` key, which is
+The floor is now **`aimu>=0.38.0`**, for two capabilities. `calculate` evaluates an allowlisted syntax
+tree instead of `eval` with an empty builtins dict, which any expression could climb out of to reach
+`os`, and the shipped approval policy leaves `compute.calculate` ungated on the premise that it runs no
+code of the model's. And a spawn leads a worker's result with a note when its round cap ended it, which
+is how the delegating agent learns the answer is partial. Neither has a symbol, parameter, or set member
+to probe, so the probe stays on `RunEvent.run_id` and the floor covers both, pinned by behavior in
+`tests/test_aimu_compat.py`.
+
+Before it, the floor was `aimu>=0.37.0`: a spawned worker's spec carries a `"tool_approval"` key, which is
 what lets each agent's tool calls be judged by its own approval policy. The probe did not move: that key
 set is closed, so an older AIMU raises `ValueError` naming the key when the factory is called, and the one
 probe slot stays on a capability whose absence is silent. Residency rides the same release's

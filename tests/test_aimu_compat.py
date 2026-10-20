@@ -510,10 +510,35 @@ def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
     assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_37_0():
+def test_the_floor_is_0_38_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 37, 0)
+    assert MINIMUM_AIMU == (0, 38, 0)
+
+
+def test_the_floor_covers_a_calculate_that_runs_no_code():
+    """The shipped policy leaves ``compute.calculate`` ungated because it runs no code of the model's,
+    which was false while it was ``eval`` with an empty builtins dict: the first expression here walked
+    from a tuple to ``os``. No symbol dates the fix, so it is pinned by behavior instead of probed."""
+    from aimu.tools.builtin import calculate
+
+    assert calculate("().__class__.__base__.__subclasses__()").startswith("Error:")
+    assert calculate("2^10").startswith("Error:")
+    assert calculate("2**10") == "1024"
+
+
+def test_the_floor_covers_the_note_on_a_worker_cut_off_at_its_cap():
+    """How a delegating agent learns a worker's answer is partial. A private helper and a string, so it
+    is pinned here by behavior rather than probed."""
+    from aimu.events import RunFinished
+    from aimu.tools.builtin import _RunEndingWatch, _subagent_result
+
+    watch = _RunEndingWatch(None, "run-1")
+    watch(RunFinished(run_id="run-1", ended_by="wrap_up", max_iterations=25))
+    result = _subagent_result("researcher", "partial findings", watch)
+
+    assert result.startswith("[The sub-agent 'researcher' reached its tool-use limit of 25 rounds")
+    assert result.endswith("partial findings")
 
 
 def test_the_floor_covers_the_per_worker_gate_the_probe_does_not_grip():

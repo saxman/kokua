@@ -51,7 +51,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.37.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.38.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -60,7 +60,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.37.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.38.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -381,7 +381,7 @@ Consequences for working in this repo:
   `tool_calls` / `thinking`, `RunFinished.ended_by` / `max_iterations`, the spawn tools passing
   `parent_run_id`, and `Runner.as_tool()` parenting the runs it starts. `aimu.agents.Inbox` is the
   floor's job now, in its turn.
-  **AIMU 0.37.0 is the current floor, and it is another release whose capability did not get the probe.**
+  **AIMU 0.37.0 was the floor until 0.38.0, and it is another release whose capability did not get the probe.**
   The capability Kokua depends on is the `"tool_approval"` entry in `SUBAGENT_SPEC_KEYS`: the spec key
   `build_agent_specs` writes so each worker's calls reach the gate bound to its own name, and so are
   judged by that agent's approval policy instead of its delegator's. The probe stays on `RunEvent.run_id`,
@@ -393,7 +393,20 @@ Consequences for working in this repo:
   `available_tools` / `load_tools` for the deferred ones). It still does not get the probe, on that same
   0.28.0 reasoning: `core/build.py` imports `ToolGroup` at module scope, so a checkout without it raises
   `ImportError` the moment a front end or `kokua agents` imports the core, after the preflight and before
-  any conversation exists. Loud, so the floor covers it. `tests/test_aimu_compat.py` pins both. `RunEvent.run_id` is the floor's job now, in its turn.
+  any conversation exists. Loud, so the floor covers it. `tests/test_aimu_compat.py` pins both.
+  **AIMU 0.38.0 is the current floor, and it is the first release where the probe stayed put because
+  neither capability had any handle at all.** Both are silent when missing. `calculate` evaluates an
+  allowlisted syntax tree instead of `eval()` with an empty builtins dict, which any expression could
+  climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves `compute.calculate` ungated on
+  the premise that it runs no code of the model's, which only 0.38.0 makes true, and an older `calculate`
+  still answers every sum, so nothing would ever show the difference. And the spawn tools lead a worker's
+  result with a note when its round cap ended it, which is how a delegating agent learns the answer is
+  partial; an older spawn still returns the worker's text. The first is a function body and the second a
+  private helper and a string, so no name, parameter, or set member dates either. 0.37.0's case was
+  different: its capability had a handle and was loud. This is the rule's other branch, a release that
+  "genuinely offers no handle": the probe stays on `RunEvent.run_id`, `aimu_compat` says what that leaves
+  uncovered (a checkout claiming 0.38.0 without either change passes), and `tests/test_aimu_compat.py`
+  pins both by behavior, which a test may do and a preflight may not.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

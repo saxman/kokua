@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.37.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -763,9 +763,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.37.0 or newer
   channel that does not show who is asking can accept and ignore it, which is what adding `agent=None`
   to the signature does. It is keyword-only for the reason `send_turn_saved`'s `token`
   is.
-- **The AIMU floor is 0.37.0**, for the spawn spec's `"tool_approval"` key and for `ToolGroup`, which
-  residency rides. See the floor history under
+- **The AIMU floor is 0.38.0**, for a `calculate` that evaluates arithmetic and nothing else (it was an
+  escapable `eval`, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
+  of a worker cut off at its round cap. Before it the floor was 0.37.0, for the spawn spec's
+  `"tool_approval"` key and for `ToolGroup`, which residency rides. See the floor history under
   "Diagnostics and error reporting" below.
+- **A delegating agent hears when its worker ran out of rounds.** A worker's forced wrap-up answer
+  read like a finished one, and the assistant learned it was partial only if the worker said so. AIMU
+  0.38.0's wrap-up prompt asks the worker to name what it did not finish, and its spawn tool leads a
+  capped worker's result with a note naming the cap, so the assistant can say which part is missing
+  instead of relaying partial work as the whole answer.
 - **`available = "all"`: every installed toolset, still a declaration.** An agent's
   `[agents.<name>.tools].available` takes the string `"all"` in place of a list. It expands, wherever
   availability is read (`core/agents.py`'s `available_for`), to every registered toolset in trust order:
@@ -2142,7 +2149,10 @@ notice on startup.
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
-  Today the floor is **0.37.0**: a spawned worker's spec carries a `"tool_approval"` key, which is what lets
+  Today the floor is **0.38.0**: `calculate` evaluates an allowlisted syntax tree rather than an escapable
+  `eval`, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
+  symbol for the startup check to look for, so the check stays where it was and the floor alone covers
+  both. Before it the floor was **0.37.0**: a spawned worker's spec carries a `"tool_approval"` key, which is what lets
   each agent's tool calls be judged by its own approval policy; its absence raises loudly, so the startup
   check stays where it was. Residency rides the same release's `ToolGroup`, and the check skips it for the
   same reason: the core imports it at module scope, so an AIMU without it fails at import, after the

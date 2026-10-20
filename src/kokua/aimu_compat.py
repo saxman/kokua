@@ -354,9 +354,20 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 37, 0)
+MINIMUM_AIMU = (0, 38, 0)
 
-# 0.37.0 raised the floor without moving the probe. The capability Kokua uses from it is the
+# 0.38.0 raised the floor for two capabilities, neither with a handle, so the probe stays where it is.
+# `calculate` evaluates an allowlisted syntax tree instead of `eval()` with an empty builtins dict, which
+# any expression could climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves
+# `compute.calculate` ungated on the premise that it runs no code of the model's, and only 0.38.0 makes
+# that true. And the spawn tools put a note in front of a worker's result when its round cap ended it,
+# which is how a delegating agent learns the work is partial. Both are silent when missing (an older
+# `calculate` still answers sums, an older spawn still returns text), but the first is a function body and
+# the second a private helper and a string: no name, parameter, or set member dates either one. By the
+# rule for that case, the probe stays on `RunEvent.run_id` and this says what it leaves uncovered: a
+# checkout claiming 0.38.0 without either change passes. `tests/test_aimu_compat.py` pins both behaviors.
+#
+# 0.37.0 raised the floor before that, also without moving the probe. The capability Kokua uses from it is the
 # `"tool_approval"` member of `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes so each worker's
 # calls are judged by its own approval policy. That key set is closed, so an AIMU predating it raises
 # `ValueError` naming the key when the spawn factory is called, which `wire_agent` reaches while building
