@@ -92,6 +92,7 @@ locked_config_keys = [
     "email.to",
     "paths.data_dir",
     "agents.*",
+    "assistant.tools.*",
     "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
@@ -723,10 +724,12 @@ keeps the default's context length.
 description = "Research specialist: gather and verify information from the web."
 model = "ollama:qwen3:32b"     # this worker alone runs on a bigger model
 thinking = "high"              # ...and reasons harder than the rest
-tools = ["web", "misc", "time"]
 system_message = "You are a research sub-agent. ..."
 
-[agents.researcher.generation]  # last in the table, like [assistant.generation]
+[agents.researcher.tools]
+available = ["web", "misc", "time"]
+
+[agents.researcher.generation]  # sub-tables after the plain keys, like [assistant.generation]
 temperature = 0.2
 context_length = 131072
 ```
@@ -1115,7 +1118,7 @@ after the fact. It is also where a dropped generation parameter reports itself. 
 
 Lets the assistant email information to you (digests, summaries, reports) over SMTP, through the
 `email-report` skill. Install it with `kokua skills install email-report`, then name it in an agent's
-`tools` alongside `fs` and `compute` so that agent can run its script.
+`available` list alongside `fs` and `compute` so that agent can run its script.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -1386,7 +1389,7 @@ kokua agents              # each declared agent's availability, residency, and a
 
 - [`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml): the same keys, one line each, and what
   `kokua config init` writes.
-- [Set up a toolset](../how-to/set-up-toolsets.md): declaring `tools` and `delegates_to`, and writing a
+- [Set up a toolset](../how-to/set-up-toolsets.md): declaring `available` and `delegates_to`, and writing a
   toolset of your own.
 - [Add a skill](../how-to/add-skills.md), [add an MCP service](../how-to/add-mcp-services.md).
 - [Design principles](../explanation/design-principles.md): why the config layer is shaped this way,
