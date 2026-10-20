@@ -913,10 +913,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.37.0 or newer
   (could the answer have moved since training, could the user check it against a source: current events,
   prices, releases, published figures, who holds a role, what a page says today) rather than as the
   model's own confidence, which is the signal it is worst at reporting. A delegating agent is told to
-  delegate those "even when you think you know"; the `web` toolset, the one AIMU group carrying guidance
-  of its own, tells whoever holds the tools to look it up rather than recall it and to say where the
-  answer came from. The two reach different agents: the shipped `[agents.assistant]` holds no web tools
-  and gets the first, `[agents.researcher]` does not delegate and gets the second.
+  delegate those "even when you think you know"; the `web` toolset's guidance tells whoever holds the
+  tools to look it up rather than recall it and to say where the answer came from. The two reach
+  different agents: the shipped `[agents.assistant]` holds no web tools and gets the first,
+  `[agents.researcher]` does not delegate and gets the second.
+- **Figures and dates are computed, not written.** The `compute` toolset's guidance tells whoever holds
+  it to work out every figure that matters with `calculate` or `execute_python` rather than in prose,
+  converting mixed units to one base unit and reporting what it converted between. A lean delegator,
+  which never holds `compute`, is told instead that arithmetic (a currency or unit conversion, a
+  percentage, a span between dates) is work to delegate with the raw figures and their units. The `time`
+  toolset's guidance tells whoever holds the clock that its sense of the date comes from training: read
+  `get_current_date_and_time` before anything depending on the present, and convert timezones with
+  `convert_time` rather than by adding an offset. These replace directives a user had been writing into
+  their own agents' openers.
 - **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
   `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
   talking to is a prompt, not the capability `[agents.*]` is the single source of. A worker's own

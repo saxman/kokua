@@ -217,3 +217,36 @@ def test_an_agent_holding_web_itself_is_told_to_retrieve_rather_than_recall():
     message = _assemble(agents)
     assert "look it up" in message
     assert "spawn_subagent" not in message
+
+
+def test_an_agent_holding_compute_is_told_to_calculate_rather_than_estimate():
+    agents = {"assistant": AgentConfig(system_message="Opener.", available=["compute"])}
+    assert "rather than in prose" in _assemble(agents)
+
+
+def test_an_agent_holding_the_clock_is_told_not_to_trust_its_own():
+    agents = {"assistant": AgentConfig(system_message="Opener.", available=["time"])}
+    message = _assemble(agents)
+    assert "`get_current_date_and_time` before anything" in message
+    assert "rather than adding or subtracting an offset" in message
+
+
+def test_a_lean_delegator_is_told_to_delegate_arithmetic():
+    """The delegating half of `compute`'s guidance: "running code" does not reach a model writing a
+    conversion into its reply, since it does not think of that as running code."""
+    agents = {
+        "assistant": AgentConfig(system_message="Opener.", available=["time", "memory"], delegates_to=["c"]),
+        "c": AgentConfig(available=["compute"]),
+    }
+    assert "That includes arithmetic" in _assemble(agents)
+
+
+def test_a_delegator_holding_compute_is_not_told_to_delegate_arithmetic():
+    """It holds the tools, so its own `compute` guidance applies, and the two must not contradict."""
+    agents = {
+        "assistant": AgentConfig(system_message="Opener.", available=["time", "compute"], delegates_to=["c"]),
+        "c": AgentConfig(available=["compute"]),
+    }
+    message = _assemble(agents)
+    assert "rather than in prose" in message
+    assert "That includes arithmetic" not in message

@@ -17,14 +17,15 @@ def test_it_builds_exactly_aimus_tools(tmp_path):
     assert TOOLSET.build(ctx) == list(aimu_builtin.web)
 
 
-def test_it_is_the_one_aimu_group_carrying_guidance():
+def test_guidance_goes_to_the_aimu_groups_whose_trigger_is_epistemic():
     """A tool schema says what `web_search` does, never when to prefer it over the model's own memory,
     which is the whole failure: a model that believes it knows the answer never reaches for the tool.
-    `web` is the one AIMU group whose trigger is epistemic rather than obvious from its name, so it is
-    the one that earns the prompt tokens; `fs` and `compute` are reached for when a task plainly needs
-    them."""
-    from kokua.toolsets import compute, fs
+    `compute` and `time` share it (a model believes it knows the figure, or the date), so they earn the
+    prompt tokens too; `fs` does not, since a model asked about a file has nothing to answer from but
+    the file."""
+    from kokua.toolsets import compute, fs, time
 
     assert "look it up" in TOOLSET.guidance
+    assert "rather than in prose" in compute.TOOLSET.guidance
+    assert "`get_current_date_and_time`" in time.TOOLSET.guidance
     assert fs.TOOLSET.guidance == ""
-    assert compute.TOOLSET.guidance == ""

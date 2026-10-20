@@ -613,10 +613,19 @@ DELEGATION_GUIDANCE = (
 # subject. Both halves are derived from the declaration rather than asserted unconditionally: an agent
 # holding a domain toolset is neither a lean supervisor nor genuinely short on direct tools, so granting
 # it one removes both claims instead of leaving the prompt contradicting the advertised tools.
+#
+# The arithmetic sentence is the delegating half of `compute`'s guidance, split the way the web pair is:
+# that guidance reaches whoever holds the tools, and this reaches an agent that must hand the work on.
+# "Running code" alone does not reach it, because a model writing a conversion into its reply does not
+# think of itself as running code. It lives here rather than in DELEGATION_GUIDANCE because only here is
+# the agent certain to hold no `compute`: that toolset is not cross_cutting, so a lean agent never has
+# it, and the instruction cannot contradict the tool guidance of an agent that does.
 LEAN_DELEGATION_GUIDANCE = (
     " You are a lean supervisor. For any specialized work, web research, reading or writing files, "
     "running code, or anything needing a domain tool, you have almost no direct tools, so you MUST "
-    "delegate."
+    "delegate. That includes arithmetic: a figure worked out in your reply (a currency or unit "
+    "conversion, a percentage, a span between dates) is an estimate, so delegate the calculation with "
+    "the raw figures and their units, and relay the units the result comes back in."
 )
 
 

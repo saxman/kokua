@@ -3,10 +3,11 @@
 This defines no tools of its own. It hands an agent the callables AIMU's ``builtin.web`` group already
 provides, which is why a wrapper file is all there is to read here.
 
-The one AIMU group that carries ``guidance``, and the reason is a failure mode a schema cannot fix: a
-tool schema says what ``web_search`` does but never when to prefer it over the model's own memory, and a
-model answering from recall does not reach for the tool at all. The other groups are reached for when a
-task plainly needs them (a file, a calculation), so a sentence there would only cost prompt tokens.
+It carries ``guidance`` for a failure mode a schema cannot fix: a tool schema says what ``web_search``
+does but never when to prefer it over the model's own memory, and a model answering from recall does not
+reach for the tool at all. ``compute`` and ``time`` carry guidance for the same failure in another form
+(a figure worked out in prose, a date assumed from training). ``fs`` carries none, because a model asked
+about a file has nothing to answer from but the file.
 """
 
 from __future__ import annotations

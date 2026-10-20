@@ -15,6 +15,11 @@ environment allowlist with no API keys in it, which is what stops ``run_command(
 credential into the model's context, and which also makes ``gh``, ``ssh``, and ``git push`` over ssh
 fail. Naming a variable in ``command_env_passthrough`` is how a user grants one of those back: the
 capability stays real and the control stays theirs.
+
+It carries guidance because a model does arithmetic in prose rather than reaching for a tool it holds:
+a conversion or a percentage looks easy enough to write down, and the figure it writes reads exactly
+like a computed one. The schema says what ``calculate`` does, never that a figure worked out in the
+reply is the thing to avoid.
 """
 
 from __future__ import annotations
@@ -55,6 +60,14 @@ def _env_passthrough(ctx: "ToolsetContext") -> tuple[str, ...]:
     return tuple(name.strip() for name in raw.split(",") if name.strip())
 
 
+GUIDANCE = (
+    " Work out every figure that matters with `calculate` or `execute_python` rather than in prose: a sum, "
+    "a percentage, a currency or unit conversion, a span between dates. Convert mixed units to one base "
+    "unit before combining them, and report the result with its unit and what you converted between, so "
+    "whoever reads it can check it."
+)
+
+
 TOOLSET = Toolset(
     name=TOOLSET_NAME,
     description="Run Python, shell commands, and calculations.",
@@ -63,5 +76,6 @@ TOOLSET = Toolset(
         builtin.execute_python,
         builtin.make_command_tool(env_passthrough=_env_passthrough(ctx)),
     ],
+    guidance=GUIDANCE,
     settings=COMPUTE_SETTINGS,
 )

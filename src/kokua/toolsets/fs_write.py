@@ -25,9 +25,9 @@ No ``guidance``, and the foot-gun here is real enough to say why not. Replacing 
 one line destroys everything the model did not include, which is exactly the kind of trigger guidance
 exists for -- except that AIMU's own ``write_file`` schema already carries it ("This replaces the whole
 file. To change part of one, use edit_file"), and a second copy in the system prompt would be paid for
-on every request to say what the tool says when the model reads it. ``web`` remains the one AIMU group
-Kokua adds guidance to, because its trigger is epistemic (a model that believes it knows the answer
-never reaches for a search tool) rather than written on the tool.
+on every request to say what the tool says when the model reads it. ``web``, ``compute``, and ``time``
+are the AIMU groups Kokua adds guidance to, because their trigger is epistemic (a model that believes it
+knows the answer, the figure, or the date never reaches for the tool) rather than written on the tool.
 """
 
 from __future__ import annotations

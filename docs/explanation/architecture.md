@@ -622,6 +622,15 @@ already named the *activity* ("web research"), and naming an activity only helps
 decided the question needs the web. `wire_agent` selects and splits once and passes the same halves to
 both the message and the tools, so the two cannot resolve different toolsets for the same names.
 
+Arithmetic is split the same way, for the same failure in another form: a figure worked out in the reply
+reads exactly like a computed one. The `compute` toolset's guidance tells whoever holds the tools to
+calculate rather than estimate in prose; `LEAN_DELEGATION_GUIDANCE` tells a lean delegator that its
+arithmetic is delegated work, because "running code" does not reach a model writing a conversion into its
+reply. That sentence lives in the lean clause rather than in `DELEGATION_GUIDANCE` because only there is
+the agent certain to hold no `compute`, which is not `cross_cutting`, so the two can never contradict
+each other in one prompt. The `time` toolset's guidance covers the clock: a model's sense of today's date
+comes from training, so it is told to read the clock and to convert timezones with `convert_time`.
+
 **A rebuilt agent preloads what its conversation loaded.** The agent builder `make_agent_builder` hands
 `wire_agent` a `preloaded` list, read by `build.loaded_toolsets_in` from the stored transcript's
 `load_tools` calls in the order each name first loaded successfully, so an agent rebuilt on restart, after LRU

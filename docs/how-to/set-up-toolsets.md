@@ -151,11 +151,15 @@ declares that toolset. Declaring `memory` therefore brings the paragraph that te
 `store_memory` for durable facts; undeclaring it takes that paragraph away. There is no prompt constant
 listing capabilities that has to be kept in step by hand.
 
-Among AIMU's built-in groups, `web` is the only one carrying guidance: it tells whoever declares it to
-look an answer up rather than recall it whenever that answer could have moved since training or you
-could check it against a source. `fs` and `compute` carry none, because a model reaches for a file or a
-calculation when the task plainly needs one, where a model that believes it already knows a fact never
-reaches for the web at all.
+Three of the toolsets wrapping AIMU's built-in groups carry guidance, and all three exist for one
+failure: a model answering from itself when it holds a tool that would answer better. `web` tells whoever
+declares it to look an answer up rather than recall it whenever that answer could have moved since
+training or you could check it against a source. `compute` tells it to work out every figure that
+matters with a tool rather than in prose, since a conversion written into a reply reads exactly like a
+computed one. `time` tells it that its sense of today's date comes from training, so it should read the
+clock before anything depending on the present and convert timezones with `convert_time` rather than by
+adding an offset. `fs` carries none, because a model asked about a file has nothing to answer from but
+the file.
 
 An agent's full system message is: its own opener, then its toolsets' guidance in declared order, then
 the delegation instructions if `delegates_to` is non-empty, and finally a "you are a lean supervisor,
