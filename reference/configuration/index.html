@@ -2910,10 +2910,11 @@ by a tool outlives the conversation that wrote it.</p>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="s2">"email.to"</span><span class="p">,</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="s2">"paths.data_dir"</span><span class="p">,</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="s2">"agents.*"</span><span class="p">,</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="s2">"reviewers.*"</span><span class="p">,</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="p">]</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="s2">"assistant.tools.*"</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"reviewers.*"</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="p">]</span>
 </span></code></pre></div>
 <p>A pattern takes one of three forms:</p>
 <table>
@@ -3668,12 +3669,14 @@ keeps the default's context length.</p>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
-</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="k">[agents.researcher.tools]</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># sub-tables after the plain keys, like [assistant.generation]</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
 </span></code></pre></div>
 <p>A model string AIMU cannot resolve fails startup naming the table it came from.</p>
 <p><code>max_iterations</code> follows that rule too, and it is worth spelling out. An assistant that declares
@@ -4152,7 +4155,7 @@ after the fact. It is also where a dropped generation parameter reports itself. 
 <h2 id="email"><code>[email]</code><a class="headerlink" href="#email" title="Permanent link">&para;</a></h2>
 <p>Lets the assistant email information to you (digests, summaries, reports) over SMTP, through the
 <code>email-report</code> skill. Install it with <code>kokua skills install email-report</code>, then name it in an agent's
-<code>tools</code> alongside <code>fs</code> and <code>compute</code> so that agent can run its script.</p>
+<code>available</code> list alongside <code>fs</code> and <code>compute</code> so that agent can run its script.</p>
 <table>
 <thead>
 <tr>
@@ -4573,7 +4576,7 @@ reference, not inline data.</p>
 <ul>
 <li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml"><code>config.example.toml</code></a>: the same keys, one line each, and what
   <code>kokua config init</code> writes.</li>
-<li><a href="../../how-to/set-up-toolsets/">Set up a toolset</a>: declaring <code>tools</code> and <code>delegates_to</code>, and writing a
+<li><a href="../../how-to/set-up-toolsets/">Set up a toolset</a>: declaring <code>available</code> and <code>delegates_to</code>, and writing a
   toolset of your own.</li>
 <li><a href="../../how-to/add-skills/">Add a skill</a>, <a href="../../how-to/add-mcp-services/">add an MCP service</a>.</li>
 <li><a href="../../explanation/design-principles/">Design principles</a>: why the config layer is shaped this way,
