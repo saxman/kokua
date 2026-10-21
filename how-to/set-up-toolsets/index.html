@@ -1877,11 +1877,15 @@ access</a>.</p>
 declares that toolset. Declaring <code>memory</code> therefore brings the paragraph that tells the model to call
 <code>store_memory</code> for durable facts; undeclaring it takes that paragraph away. There is no prompt constant
 listing capabilities that has to be kept in step by hand.</p>
-<p>Among AIMU's built-in groups, <code>web</code> is the only one carrying guidance: it tells whoever declares it to
-look an answer up rather than recall it whenever that answer could have moved since training or you
-could check it against a source. <code>fs</code> and <code>compute</code> carry none, because a model reaches for a file or a
-calculation when the task plainly needs one, where a model that believes it already knows a fact never
-reaches for the web at all.</p>
+<p>Three of the toolsets wrapping AIMU's built-in groups carry guidance, and all three exist for one
+failure: a model answering from itself when it holds a tool that would answer better. <code>web</code> tells whoever
+declares it to look an answer up rather than recall it whenever that answer could have moved since
+training or you could check it against a source. <code>compute</code> tells it to work out every figure that
+matters with a tool rather than in prose, since a conversion written into a reply reads exactly like a
+computed one. <code>time</code> tells it that its sense of today's date comes from training, so it should read the
+clock before anything depending on the present and convert timezones with <code>convert_time</code> rather than by
+adding an offset. <code>fs</code> carries none, because a model asked about a file has nothing to answer from but
+the file.</p>
 <p>An agent's full system message is: its own opener, then its toolsets' guidance in declared order, then
 the delegation instructions if <code>delegates_to</code> is non-empty, and finally a "you are a lean supervisor,
 you MUST delegate" clause only when <em>every</em> toolset it declares is marked cross-cutting (something an

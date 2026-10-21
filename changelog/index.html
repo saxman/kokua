@@ -1840,7 +1840,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.37.0 or newer. Apache-2.0.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.38.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -2614,9 +2614,16 @@ The pre-release development history is in the git log.</p>
   channel that does not show who is asking can accept and ignore it, which is what adding <code>agent=None</code>
   to the signature does. It is keyword-only for the reason <code>send_turn_saved</code>'s <code>token</code>
   is.
-- <strong>The AIMU floor is 0.37.0</strong>, for the spawn spec's <code>"tool_approval"</code> key and for <code>ToolGroup</code>, which
-  residency rides. See the floor history under
+- <strong>The AIMU floor is 0.38.0</strong>, for a <code>calculate</code> that evaluates arithmetic and nothing else (it was an
+  escapable <code>eval</code>, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
+  of a worker cut off at its round cap. Before it the floor was 0.37.0, for the spawn spec's
+  <code>"tool_approval"</code> key and for <code>ToolGroup</code>, which residency rides. See the floor history under
   "Diagnostics and error reporting" below.
+- <strong>A delegating agent hears when its worker ran out of rounds.</strong> A worker's forced wrap-up answer
+  read like a finished one, and the assistant learned it was partial only if the worker said so. AIMU
+  0.38.0's wrap-up prompt asks the worker to name what it did not finish, and its spawn tool leads a
+  capped worker's result with a note naming the cap, so the assistant can say which part is missing
+  instead of relaying partial work as the whole answer.
 - <strong><code>available = "all"</code>: every installed toolset, still a declaration.</strong> An agent's
   <code>[agents.&lt;name&gt;.tools].available</code> takes the string <code>"all"</code> in place of a list. It expands, wherever
   availability is read (<code>core/agents.py</code>'s <code>available_for</code>), to every registered toolset in trust order:
@@ -2767,10 +2774,19 @@ The pre-release development history is in the git log.</p>
   (could the answer have moved since training, could the user check it against a source: current events,
   prices, releases, published figures, who holds a role, what a page says today) rather than as the
   model's own confidence, which is the signal it is worst at reporting. A delegating agent is told to
-  delegate those "even when you think you know"; the <code>web</code> toolset, the one AIMU group carrying guidance
-  of its own, tells whoever holds the tools to look it up rather than recall it and to say where the
-  answer came from. The two reach different agents: the shipped <code>[agents.assistant]</code> holds no web tools
-  and gets the first, <code>[agents.researcher]</code> does not delegate and gets the second.</li>
+  delegate those "even when you think you know"; the <code>web</code> toolset's guidance tells whoever holds the
+  tools to look it up rather than recall it and to say where the answer came from. The two reach
+  different agents: the shipped <code>[agents.assistant]</code> holds no web tools and gets the first,
+  <code>[agents.researcher]</code> does not delegate and gets the second.</li>
+<li><strong>Figures and dates are computed, not written.</strong> The <code>compute</code> toolset's guidance tells whoever holds
+  it to work out every figure that matters with <code>calculate</code> or <code>execute_python</code> rather than in prose,
+  converting mixed units to one base unit and reporting what it converted between. A lean delegator,
+  which never holds <code>compute</code>, is told instead that arithmetic (a currency or unit conversion, a
+  percentage, a span between dates) is work to delegate with the raw figures and their units. The <code>time</code>
+  toolset's guidance tells whoever holds the clock that its sense of the date comes from training: read
+  <code>get_current_date_and_time</code> before anything depending on the present, and convert timezones with
+  <code>convert_time</code> rather than by adding an offset. These replace directives a user had been writing into
+  their own agents' openers.</li>
 <li><strong><code>--system</code> overrides the entry agent's opener for that run</strong>, winning outright over its declared
   <code>system_message</code> (and over the <code>[assistant].system_message</code> fallback), since the message a person is
   talking to is a prompt, not the capability <code>[agents.*]</code> is the single source of. A worker's own
@@ -3992,7 +4008,10 @@ notice on startup.</p>
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. <code>Inbox</code> joins the probe's job.
-  Today the floor is <strong>0.37.0</strong>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is what lets
+  Today the floor is <strong>0.38.0</strong>: <code>calculate</code> evaluates an allowlisted syntax tree rather than an escapable
+  <code>eval</code>, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
+  symbol for the startup check to look for, so the check stays where it was and the floor alone covers
+  both. Before it the floor was <strong>0.37.0</strong>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is what lets
   each agent's tool calls be judged by its own approval policy; its absence raises loudly, so the startup
   check stays where it was. Residency rides the same release's <code>ToolGroup</code>, and the check skips it for the
   same reason: the core imports it at module scope, so an AIMU without it fails at import, after the

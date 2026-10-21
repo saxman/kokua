@@ -1737,6 +1737,11 @@ endings that are not routine (the cap and an error). A worker's boundary is draw
 carrying which injection it was and the exact words the worker was given (see
 <a href="../delegation/">Delegation</a>). Either way the record says why the answer is thinner rather than reading
 as one that simply ran short.
+The delegating model is told as well, not just you. AIMU's wrap-up prompt asks the worker to name what it
+did not finish, keeping what it checked and found nothing on apart from what it never reached, and the
+spawn tool puts a note in front of a capped worker's answer (<code>[The sub-agent 'researcher' reached its
+tool-use limit of 25 rounds before it finished, ...]</code>), so the assistant reads that the work is partial
+before it reads the work. Before AIMU 0.38.0 the assistant learned this only if the worker chose to say so.
 That edge is real enough to have moved this project's AIMU floor: before AIMU 0.26.0, hitting the cap
 with a call still pending produced a provider rejection instead of a wrap-up, and Kokua saw it as
 sub-agents failing rather than answering. The whole story is in <a href="../../explanation/architecture/#generation-parameters">the architecture doc's account of the

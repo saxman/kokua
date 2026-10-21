@@ -2875,6 +2875,14 @@ as the model's own confidence, which is the signal a model is worst at reporting
 already named the <em>activity</em> ("web research"), and naming an activity only helps once the model has
 decided the question needs the web. <code>wire_agent</code> selects and splits once and passes the same halves to
 both the message and the tools, so the two cannot resolve different toolsets for the same names.</p>
+<p>Arithmetic is split the same way, for the same failure in another form: a figure worked out in the reply
+reads exactly like a computed one. The <code>compute</code> toolset's guidance tells whoever holds the tools to
+calculate rather than estimate in prose; <code>LEAN_DELEGATION_GUIDANCE</code> tells a lean delegator that its
+arithmetic is delegated work, because "running code" does not reach a model writing a conversion into its
+reply. That sentence lives in the lean clause rather than in <code>DELEGATION_GUIDANCE</code> because only there is
+the agent certain to hold no <code>compute</code>, which is not <code>cross_cutting</code>, so the two can never contradict
+each other in one prompt. The <code>time</code> toolset's guidance covers the clock: a model's sense of today's date
+comes from training, so it is told to read the clock and to convert timezones with <code>convert_time</code>.</p>
 <p><strong>A rebuilt agent preloads what its conversation loaded.</strong> The agent builder <code>make_agent_builder</code> hands
 <code>wire_agent</code> a <code>preloaded</code> list, read by <code>build.loaded_toolsets_in</code> from the stored transcript's
 <code>load_tools</code> calls in the order each name first loaded successfully, so an agent rebuilt on restart, after LRU
@@ -3534,7 +3542,14 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.37.0</code></strong>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is
+<p>The floor is now <strong><code>aimu&gt;=0.38.0</code></strong>, for two capabilities. <code>calculate</code> evaluates an allowlisted syntax
+tree instead of <code>eval</code> with an empty builtins dict, which any expression could climb out of to reach
+<code>os</code>, and the shipped approval policy leaves <code>compute.calculate</code> ungated on the premise that it runs no
+code of the model's. And a spawn leads a worker's result with a note when its round cap ended it, which
+is how the delegating agent learns the answer is partial. Neither has a symbol, parameter, or set member
+to probe, so the probe stays on <code>RunEvent.run_id</code> and the floor covers both, pinned by behavior in
+<code>tests/test_aimu_compat.py</code>.</p>
+<p>Before it, the floor was <code>aimu&gt;=0.37.0</code>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is
 what lets each agent's tool calls be judged by its own approval policy. The probe did not move: that key
 set is closed, so an older AIMU raises <code>ValueError</code> naming the key when the factory is called, and the one
 probe slot stays on a capability whose absence is silent. Residency rides the same release's
