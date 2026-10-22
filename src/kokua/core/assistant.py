@@ -370,10 +370,14 @@ class Assistant:
         # scheduled tasks unarmed with a retry of `start` a no-op. A notice is never worth that.
         for shadow in shadowed_tools(config, state.registry, state.tools_by_toolset):
             try:
-                await self._ui.alert(
-                    f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} is shadowed by {shadow.kept!r} "
-                    "(the earlier resident toolset keeps the name)."
-                )
+                if shadow.core:
+                    message = f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} is shadowed by a core tool."
+                else:
+                    message = (
+                        f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} is shadowed by {shadow.kept!r} "
+                        "(the earlier resident toolset keeps the name)."
+                    )
+                await self._ui.alert(message)
             except Exception:
                 logger.warning("Could not raise the shadowed-tool notice for %s.", shadow, exc_info=True)
 

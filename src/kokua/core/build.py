@@ -185,7 +185,12 @@ def wire_agent(
     """
     # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
     # runs through kokua.core.agents.
-    from kokua.core.agents import available_for, split_by_residency, without_skill_names
+    from kokua.core.agents import (
+        available_for,
+        split_by_residency,
+        without_core_tool_collisions,
+        without_skill_names,
+    )
 
     resolvable = without_skill_names(available_for(config, state.registry, agent_name), state.registry)
     toolsets = select(resolvable, state.registry, agent=agent_name, entry_point=config.entry_agent)
@@ -223,7 +228,7 @@ def wire_agent(
                 context,
             ),
         )
-        agent.tools = build_tools(resident, context())
+        agent.tools = without_core_tool_collisions(config, state.registry, agent_name, build_tools(resident, context()))
         failed = _append_preloads(config, state, agent, loaded, context)
         if not failed:
             break
@@ -258,7 +263,14 @@ def _append_preloads(
     agent was constructed with these toolsets marked resident, so leaving one out means constructing it
     again.
     """
-    taken = {getattr(fn, "__name__", None) for fn in agent.tools} | set(CORE_TOOL_NAMES)
+    from kokua.core.agents import core_tool_names_for_agent
+
+    agent_name = agent.name or config.entry_agent
+    taken = (
+        {getattr(fn, "__name__", None) for fn in agent.tools}
+        | set(CORE_TOOL_NAMES)
+        | core_tool_names_for_agent(config, state.registry, agent_name)
+    )
     failed = []
     for toolset in preloads:
         try:

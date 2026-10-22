@@ -35,6 +35,7 @@ from kokua.core.agents import (
     available_for,
     built_toolsets,
     certain_overlap,
+    core_tool_names_for_agent,
     deferred_for,
     gateable_tools,
     pending_gate_entries,
@@ -155,7 +156,12 @@ def _vocabulary_for(
     reachable = set(available_for(config, state.registry, name)) | {RESERVED_GATE_NAMESPACE}
     if name == config.entry_agent:
         reachable |= {skill.name for skill in state.skill_manager.skills.values()}
-    return {toolset: tools for toolset, tools in full.items() if toolset in reachable}
+    core_names = core_tool_names_for_agent(config, state.registry, name)
+    return {
+        toolset: tools & core_names if toolset == RESERVED_GATE_NAMESPACE else tools - core_names
+        for toolset, tools in full.items()
+        if toolset in reachable
+    }
 
 
 def _resolve_pair(

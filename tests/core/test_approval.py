@@ -1320,6 +1320,80 @@ def test_core_namespace_gains_the_group_tools_when_something_is_deferred(tmp_pat
     assert not core_tools(["memory", "mcp"]) & {"available_tools", "load_tools"}
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "mode"),
+    [
+        ("available_tools", "deferred"),
+        ("load_tools", "deferred"),
+        ("spawn_subagent", "delegator"),
+        ("activate_skill", "skill"),
+    ],
+)
+def test_a_resident_core_name_collision_is_gateable_only_under_core(tmp_path, tool_name, mode):
+    from types import SimpleNamespace
+
+    from kokua.config import MCPServerConfig
+    from kokua.config.schema import AgentConfig
+    from kokua.core.approval import _vocabulary_for
+    from kokua.core.agents import build_registry, gateable_tools
+    from kokua.registry.context import LiveState
+    from tests.core.test_skill_toolsets import write_skill
+
+    assistant_config = AgentConfig(available=["stocks", "time"], resident=["stocks", "time"])
+    agents = {"assistant": assistant_config}
+    if mode == "deferred":
+        assistant_config.available = ["stocks", "time", "web"]
+    elif mode == "delegator":
+        assistant_config.delegates_to = ["worker"]
+        agents["worker"] = AgentConfig(available=["time"])
+    elif mode == "skill":
+        assistant_config.available.append("weekly-digest")
+
+    config = _config(
+        tmp_path,
+        agents=agents,
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
+    )
+    if mode == "skill":
+        write_skill(config, "weekly-digest", "Digest the week.")
+    state = LiveState(config=config, registry=build_registry(config))
+    state.tools_by_toolset["stocks"] = {tool_name, "get_quote"}
+
+    entry_tools = []
+    if mode == "delegator":
+
+        def spawn_subagent():
+            pass
+
+        entry_tools.append(spawn_subagent)
+    full = gateable_tools(state, SimpleNamespace(tools=entry_tools))
+    vocabulary = _vocabulary_for("assistant", config, state, full)
+    assert tool_name not in vocabulary["stocks"]
+    assert tool_name in vocabulary["core"]
+    assert "get_quote" in vocabulary["stocks"]
+
+
+def test_core_gate_vocabulary_is_scoped_to_each_agent(tmp_path):
+    from types import SimpleNamespace
+
+    from kokua.config.schema import AgentConfig
+    from kokua.core.approval import _vocabulary_for
+    from kokua.core.agents import build_registry, gateable_tools
+    from kokua.registry.context import LiveState
+
+    agents = {
+        "assistant": AgentConfig(available=["time"]),
+        "worker": AgentConfig(available=["time"], delegates_to=["nested"]),
+        "nested": AgentConfig(available=["time"]),
+    }
+    config = _config(tmp_path, agents=agents)
+    state = LiveState(config=config, registry=build_registry(config))
+    full = gateable_tools(state, SimpleNamespace(tools=[]))
+
+    assert "spawn_subagent" not in _vocabulary_for("assistant", config, state, full)["core"]
+    assert "spawn_subagent" in _vocabulary_for("worker", config, state, full)["core"]
+
+
 async def test_assistant_hook_is_a_no_op_before_policies_exist_and_replaces_them_after(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assistant._human.policies = None

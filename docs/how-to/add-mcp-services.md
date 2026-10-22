@@ -57,6 +57,12 @@ exception is a server the agent loads on demand (left out of its `resident` list
 load while it is disconnected, and stays loadable, because a load is recorded as done and an empty one
 would stay empty after the server came back.
 
+A resident server tool cannot replace a name the agent already owns. Kokua drops that tool and raises a
+startup alert naming the tool and server; the rest of the server's tools remain available. Core names
+include `available_tools` and `load_tools` when the agent has deferred groups, `spawn_subagent` on an agent
+that delegates, and `activate_skill` on the entry agent when it has skills. A deferred server tool that
+reuses a held name is reported in the `load_tools` result instead.
+
 ## Authentication
 
 Three modes, chosen automatically:

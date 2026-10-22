@@ -36,6 +36,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer
   section whose owning toolset no agent declares is unaffected.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
+- **Resident tool names cannot replace an agent's core tools.** A resident tool that reuses a name the
+  agent already owns is omitted, and the startup alert identifies the source and name. The server's
+  non-colliding tools remain available; deferred groups continue to report skipped names when loaded.
 - **The `web` extra's two dependencies are capped below their next major**: `starlette>=1.0,<2` and
   `uvicorn>=0.30,<1`. Nothing else in a resolved install bounds either one, since `mcp`,
   `sse-starlette`, and `fastmcp-slim` all depend on a bare `starlette`, so these are the only bounds

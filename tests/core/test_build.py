@@ -1325,6 +1325,127 @@ async def test_a_resident_mcp_server_that_is_not_connected_still_builds_empty(tm
     assert "load_tools" not in _tool_names(agent)
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "mode"),
+    [
+        ("available_tools", "deferred"),
+        ("load_tools", "deferred"),
+        ("spawn_subagent", "delegator"),
+        ("activate_skill", "skill"),
+    ],
+)
+async def test_a_resident_mcp_tool_cannot_shadow_agent_core_tools(tmp_path, monkeypatch, tool_name, mode):
+    from types import SimpleNamespace
+
+    from tests.core.test_skill_toolsets import write_skill
+
+    async def skip_mcp_reconnect(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr("kokua.core.assistant.reconnect_mcp_servers", skip_mcp_reconnect)
+    assistant_config = AgentConfig(available=["stocks", "time"], resident=["stocks", "time"])
+    agents = {"assistant": assistant_config}
+    if mode == "deferred":
+        assistant_config.available = ["stocks", "time", "web"]
+    elif mode == "delegator":
+        assistant_config.delegates_to = ["worker"]
+        agents["worker"] = AgentConfig(available=["time"])
+    elif mode == "skill":
+        assistant_config.available.append("weekly-digest")
+
+    url = "https://broker/mcp"
+    config = _config(
+        tmp_path,
+        agents=agents,
+        mcp_servers=[MCPServerConfig(url=url, name="stocks")],
+        default_confirm=[],
+        default_review=[],
+    )
+    if mode == "skill":
+        write_skill(config, "weekly-digest", "Digest the week.")
+
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    mcp_tool = _fake_mcp_tool(tool_name)
+    assistant._state.connections.append(SimpleNamespace(url=url, callables=[mcp_tool]))
+    try:
+        await assistant.start()
+        if mode == "skill":
+            await assistant._agent._setup_skills_async()
+
+        matches = [tool for tool in assistant._agent._effective_tools(None) if tool.__name__ == tool_name]
+        assert len(matches) == 1
+        assert matches[0] is not mcp_tool
+        assert any(
+            f"{tool_name} from 'stocks'" in alert and "core tool" in alert.lower() for alert, *_ in channel.alerts
+        )
+    finally:
+        if mode == "skill" and assistant._started:
+            skill_client = assistant._agent._skills_mcp_client
+            if skill_client is not None:
+                await skill_client.aclose()
+        assistant._state.close()
+
+
+async def test_an_all_available_agent_filters_a_resident_loader_collision(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    async def skip_mcp_reconnect(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr("kokua.core.assistant.reconnect_mcp_servers", skip_mcp_reconnect)
+    url = "https://broker/mcp"
+    config = _config(
+        tmp_path,
+        agents={"assistant": AgentConfig(available=ALL_TOOLSETS, resident=["stocks", "time"])},
+        mcp_servers=[MCPServerConfig(url=url, name="stocks")],
+    )
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    mcp_tool = _fake_mcp_tool("load_tools")
+    assistant._state.connections.append(SimpleNamespace(url=url, callables=[mcp_tool, _fake_mcp_tool("get_quote")]))
+    try:
+        await assistant.start()
+        matches = [tool for tool in assistant._agent._effective_tools(None) if tool.__name__ == "load_tools"]
+
+        assert len(matches) == 1
+        assert matches[0] is not mcp_tool
+        assert "get_quote" in {tool.__name__ for tool in assistant._agent._effective_tools(None)}
+        assert any("load_tools from 'stocks'" in alert and "core tool" in alert.lower() for alert, *_ in channel.alerts)
+    finally:
+        assistant._state.close()
+
+
+def test_a_worker_spec_keeps_its_core_delegation_tool_over_a_resident_mcp_tool(tmp_path):
+    from types import SimpleNamespace
+
+    from kokua.core.agents import shadowed_tools
+
+    url = "https://broker/mcp"
+    config = _config(
+        tmp_path,
+        agents={
+            "assistant": AgentConfig(available=["time"], delegates_to=["worker"]),
+            "worker": AgentConfig(available=["stocks", "time"], resident=["stocks", "time"], delegates_to=["leaf"]),
+            "leaf": AgentConfig(available=["time"]),
+        },
+        mcp_servers=[MCPServerConfig(url=url, name="stocks")],
+    )
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    mcp_tool = _fake_mcp_tool("spawn_subagent")
+    state.connections.append(SimpleNamespace(url=url, callables=[mcp_tool]))
+
+    worker_tools = _specs(config, state)["worker"]["tools"]
+    matches = [tool for tool in worker_tools if tool.__name__ == "spawn_subagent"]
+
+    assert len(matches) == 1
+    assert matches[0] is not mcp_tool
+    assert any(
+        shadow.agent == "worker" and shadow.tool == "spawn_subagent" and shadow.shadowed == "stocks" and shadow.core
+        for shadow in shadowed_tools(config, state.registry, state.tools_by_toolset)
+    )
+
+
 def test_the_prompt_wire_agent_builds_for_itself_names_deferred_toolsets_only(tmp_path, monkeypatch):
     captured: list[str] = []
 

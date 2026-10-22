@@ -197,12 +197,13 @@ def resident_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name:
 
 @dataclass(frozen=True)
 class ShadowedTool:
-    """A resident tool one agent never sees because an earlier resident toolset offers the same name."""
+    """A resident tool one agent never sees because a core tool or earlier toolset keeps its name."""
 
     agent: str
     tool: str
     kept: str
     shadowed: str
+    core: bool = False
 
 
 def shadowed_tools(
@@ -229,6 +230,7 @@ def shadowed_tools(
         resident = resident_for(config, registry, agent_name)
         if agent_name == config.entry_agent:
             resident = without_skill_names(resident, registry)
+        core_tools = core_tool_names_for_agent(config, registry, agent_name)
         unbuilt = [toolset for toolset in resident if toolset not in tools_by_toolset]
         if unbuilt:
             logger.info("Not checking %s for shadowed tools: %s not built at startup.", agent_name, unbuilt)
@@ -239,7 +241,9 @@ def shadowed_tools(
             if is_skill(toolset, registry):
                 tools.discard(_ACTIVATE_SKILL)
             for tool in sorted(tools):
-                if tool in holder:
+                if tool in core_tools:
+                    shadows.append(ShadowedTool(agent_name, tool, "core", toolset, core=True))
+                elif tool in holder:
                     shadows.append(ShadowedTool(agent_name, tool, holder[tool], toolset))
                 else:
                     holder[tool] = toolset
@@ -267,6 +271,31 @@ def loadable_toolsets(config: AssistantConfig, registry: ToolsetRegistry, agent_
     if agent_name == config.entry_agent:
         return without_skill_names(deferred, registry)
     return deferred
+
+
+def core_tool_names_for_agent(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> set[str]:
+    """Names the agent itself owns, conditional on the groups and capabilities it actually carries."""
+    agent = config.agents.get(agent_name)
+    if agent is None:
+        return set()
+
+    available = available_for(config, registry, agent_name)
+    names = set(CORE_TOOL_NAMES) if loadable_toolsets(config, registry, agent_name) else set()
+    if agent.delegates_to:
+        names.add("spawn_subagent")
+    if agent_name == config.entry_agent and (
+        "skills" in available or any(is_skill(name, registry) for name in available)
+    ):
+        names.add(_ACTIVATE_SKILL)
+    return names
+
+
+def without_core_tool_collisions(
+    config: AssistantConfig, registry: ToolsetRegistry, agent_name: str, tools: Sequence[Callable]
+) -> list[Callable]:
+    """Keep resident toolset tools whose names are not already owned by this concrete agent."""
+    core_names = core_tool_names_for_agent(config, registry, agent_name)
+    return [tool for tool in tools if getattr(tool, "__name__", None) not in core_names]
 
 
 def build_registry(config: AssistantConfig) -> ToolsetRegistry:
@@ -776,7 +805,7 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # Only the resident toolsets are built here. A deferred one is built by its group, when the
         # worker loads it, and that build goes through `build_tools` too, so recording and approval
         # cover it exactly as they cover a toolset built now.
-        tools = build_tools(resident, make_context())
+        tools = without_core_tool_collisions(config, state.registry, name, build_tools(resident, make_context()))
         if agent.delegates_to:
             tools = tools + [_spawn_tool(config, state, name)]
         # AIMU reads the first line of a spec's system_message as that agent_type's menu label (see
@@ -986,7 +1015,11 @@ def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
         by_toolset.setdefault(skill.name, set()).update(skill.script_tool_names())
     for tools in by_toolset.values():
         tools.discard(_ACTIVATE_SKILL)
-    reserved = {_ACTIVATE_SKILL} if skills else set()
+    reserved: set[str] = set()
+    for agent_name in state.config.agents:
+        reserved.update(core_tool_names_for_agent(state.config, state.registry, agent_name))
+    if skills:
+        reserved.add(_ACTIVATE_SKILL)
     owned = {tool for tools in by_toolset.values() for tool in tools}
     for fn in entry_agent.tools:
         name = getattr(fn, "__name__", None)
