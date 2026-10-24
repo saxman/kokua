@@ -2236,6 +2236,17 @@ notice on startup.
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
   `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines, level set by `[logging] level`.
   `faulthandler` is enabled, so `kill -USR1 <pid>` dumps all thread stacks.
+- **The MCP SDK's own errors are logged where they can be read.** The `mcp` SDK logger has no handler of
+  its own and propagates, so every `logger.exception` it raised fell through to `logging.lastResort`,
+  which writes to stderr at WARNING+ with no timestamp, no logger name, and no server URL. Reconnecting
+  several servers at boot runs their OAuth flows one at a time behind a single callback port, so a
+  failed client registration on one server printed a bare traceback to the terminal directly beneath a
+  *different* server's authorization URL, reading as that flow having failed when it had in fact
+  succeeded. `logging_setup` now attaches the rotating file handler to `mcp` alongside `kokua` and
+  `aimu`, which suppresses `lastResort`, and nothing is lost from the console: `kokua.mcp.servers`
+  already logs the same failure to that file with the server URL and the full traceback. `fastmcp` is
+  deliberately left alone, since it configures its own stderr handler at import, sets
+  `propagate = False`, and removes whatever handlers are already on the logger.
 - **A slow control cannot wedge the web UI.** `frontends/web.py`'s `pump` is two tasks over one queue:
   one reads the WebSocket, one applies frames in arrival order. Reading has to continue regardless of how
   long a control takes, because a disconnect *is* a read and that reader is the only task positioned to

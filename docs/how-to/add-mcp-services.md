@@ -74,6 +74,12 @@ Some servers require authentication but cannot use the automatic OAuth flow, bec
 dynamic client registration. `add_mcp_server` detects this and returns a message asking for a token
 rather than failing opaquely; the assistant relays that request to you.
 
+A server already on file at startup has no chat turn to relay that into, so it reports to the log
+instead: `Could not connect MCP server <url>; continuing without it`, with the underlying failure
+beneath it, in `data/logs/kokua.log`. Look there when a server you configured turns up with no tools.
+The MCP SDK's own traceback for the same failure goes to that file too, rather than to the terminal,
+where it used to arrive with no server name attached to say which connection it belonged to.
+
 ### Authorizing when Kokua runs on another machine
 
 The OAuth handshake ends with the provider redirecting *your browser* to a callback address that Kokua

@@ -1110,7 +1110,10 @@ startup also prints each agent's access summary (the lines `kokua agents` expand
 level it is written to the log.
 
 The log records the turn lifecycle (submitted, lock acquired, done, error), so a hung turn is visible
-after the fact. It is also where a dropped generation parameter reports itself. For live state, the
+after the fact. It is also where a dropped generation parameter reports itself, and where the MCP SDK's
+own failures land: a server whose OAuth client registration fails used to print an unattributed
+traceback to the terminal instead, carrying no timestamp and no server URL to say which server it came
+from. At `DEBUG` that same capture includes the SDK's protocol-level chatter. For live state, the
 `/diag` chat command reports turn and lock state and dumps a wedged turn's async stack, and
 `kill -USR1 <pid>` dumps all thread stacks.
 
