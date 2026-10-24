@@ -27,15 +27,17 @@ def format_task_stack(task) -> str:
         return ""
 
 
-def _model_line(config: AssistantConfig, entry_model: str) -> str:
+def _model_line(models: dict) -> str:
     """The models this session is running on: the entry agent's, then each worker that overrides it.
 
     Worth a line because the model is read only at startup and is not a runtime setting, so a running
-    session would otherwise not say which one it is. Only agents that declare their own appear after the first:
-    listing every agent would repeat the default once per table and bury the exception among them.
+    session would otherwise not say which one it is. Which agents count as overrides is
+    ``build.model_record``'s answer rather than one worked out again here, because the web page's
+    header label asks the same question and the two must not drift; the words are this module's, since
+    a record is not a sentence.
     """
-    overrides = [f"{name}: {agent.model}" for name, agent in sorted(config.agents.items()) if agent.model]
-    return " | ".join([f"- model: {entry_model or 'unresolved'}", *overrides])
+    overrides = [f"{name}: {model}" for name, model in models["overrides"].items()]
+    return " | ".join([f"- model: {models['model'] or 'unresolved'}", *overrides])
 
 
 def _render_thinking(value) -> str:
@@ -96,21 +98,21 @@ def diag_report(
     gate: TurnGate,
     *,
     config: AssistantConfig,
-    entry_model: str,
+    models: dict,
     pending_approval: bool,
     pending_decision: bool,
 ) -> str:
     """The `/diag` text: the models, reasoning effort, and generation parameters in play, in-flight
     turns, gate depth, pending human decisions, and stuck-turn stacks.
 
-    ``entry_model`` is passed in rather than derived here because the caller already holds it: it is
-    what ``build.model_label`` renders, and this module reports what the assistant is running rather
-    than working it out a second time. It was once passed for a stronger reason, that with nothing
-    declared the answer existed only on the live client; ``AssistantConfig.default_model`` answers it
-    now, so this is plumbing rather than the only route.
+    ``models`` is passed in rather than derived here because the caller already holds it: it is
+    ``build.model_record``, which the web page's header label reads too, and this module reports what
+    the assistant is running rather than working it out a second time. It was once passed for a stronger
+    reason, that with nothing declared the answer existed only on the live client;
+    ``AssistantConfig.default_model`` answers it now, so this is plumbing rather than the only route.
     """
     turns = tracker.all()
-    lines = ["Diagnostics:", _model_line(config, entry_model)]
+    lines = ["Diagnostics:", _model_line(models)]
     thinking = _thinking_line(config)
     if thinking is not None:
         lines.append(thinking)

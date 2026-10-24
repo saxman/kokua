@@ -20,6 +20,7 @@ const tasksCount = document.getElementById("tasks-count");
 const taskList = document.getElementById("task-list");
 const alertLayer = document.getElementById("alerts");
 const convHeading = document.getElementById("conv-heading");
+const modelLabel = document.getElementById("model-label");
 
 // Alert cards ("notification" frames): work the user is not watching, raised over the page instead of
 // written into the transcript, because none of it is about the conversation on screen. Three things
@@ -2221,6 +2222,8 @@ function handleFrame(event) {
   } else if (frame.type === "tasks") {
     lastTasks = frame.items;
     renderSidebar();
+  } else if (frame.type === "models") {
+    renderModels(frame);
   } else if (frame.type === "download") {
     // A synthetic anchor rather than location.href. Today /download/{name} answers as an attachment
     // (Content-Disposition, from FileResponse(path, filename=name) on the server), so Chromium never
@@ -2382,6 +2385,27 @@ function handleFrame(event) {
     document.body.classList.remove("booting");
     synced = true;
   }
+}
+
+// Which model is answering, in the header. Painted once per connection and never updated, because the
+// server cannot tell it anything newer: a model is read as the agents are built and is not a runtime
+// setting, so it holds for the life of the process that sent this frame. The label is the entry agent's
+// model and the tooltip is the whole record, each agent that declares its own on a line of its own,
+// which is what `/diag` prints as prose in the terminal.
+//
+// textContent and `title` throughout, never markup: the strings are config.toml's, and `update_config`
+// is a tool the assistant holds, so they are no more trusted here than a tool result is.
+function renderModels(frame) {
+  const model = typeof frame.model === "string" ? frame.model : "";
+  modelLabel.textContent = model;
+  const lines = model ? [`${frame.agent}: ${model}`] : [];
+  const overrides = frame.overrides && typeof frame.overrides === "object" ? frame.overrides : {};
+  for (const [agent, declared] of Object.entries(overrides)) {
+    // The entry agent appears in both halves when its own table names a model, and the label above is
+    // already that string; the record stays faithful to what the config declares, so the skip is here.
+    if (agent !== frame.agent) lines.push(`${agent}: ${declared}`);
+  }
+  modelLabel.title = lines.join("\n");
 }
 
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain

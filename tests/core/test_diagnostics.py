@@ -78,8 +78,9 @@ async def test_diag_reports_wedged_turn_with_stack(tmp_path):
 
 
 async def test_diag_reports_the_model_each_agent_runs_on(tmp_path):
-    """The model is read once at startup and shown nowhere in the UI, so /diag is where a running session
-    says which one it is -- and with per-agent overrides, one line for the default is not the whole answer."""
+    """The model is read once at startup, so /diag is where a terminal session says which one it is (the
+    web header is the page's answer to the same question, off the same `build.model_record`) -- and with
+    per-agent overrides, one line for the default is not the whole answer."""
     from tests.channels import FakeChannel, example_agents
 
     agents = example_agents()
@@ -106,8 +107,8 @@ async def test_diag_names_the_model_aimu_resolved_when_the_config_declares_none(
 
 
 async def test_diag_reports_the_thinking_each_agent_runs_at(tmp_path):
-    """Reasoning effort is startup-only with no panel field, exactly like the model, so /diag is the
-    only place a running session says what it resolved to."""
+    """Reasoning effort is startup-only with no panel field, exactly like the model, and unlike the model
+    it has no header label either, so /diag is the only place a running session says what it resolved to."""
     from tests.channels import FakeChannel, example_agents
 
     agents = example_agents()

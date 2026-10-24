@@ -545,6 +545,25 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "settings", "values": values})
 
+    async def send_models(self, models: dict) -> None:
+        """Say which models this session runs on, so the page can show the one answering.
+
+        One frame per connection, sent once the assistant has started, because the answer is
+        startup-only: ``[assistant].model`` and each ``[agents.<name>].model`` are read as the agents
+        are built, so nothing during the session can change it and nothing has to refresh it. That is
+        exactly why the page needs telling at all: a running session otherwise cannot say which model
+        it is talking to, which is the question ``/diag`` answers in the terminal.
+
+        ``models`` reaches the wire as the fields ``build.model_record`` returned, not as a sentence:
+        the page writes its own words for them (a header label from ``model``, the whole record in its
+        tooltip), the way the sidebar words a task's status for a person.
+
+        Like ``send_settings`` and ``send_tasks``, a front-end concern rather than part of
+        ``RichChannel``: the core never sends it, so there is no capability for ``ChannelUI`` to
+        degrade. A terminal asks the same question with ``/diag`` and gets prose back.
+        """
+        await self.send_frame({"type": "models", **models})
+
     async def send_tasks(self, items: list[dict]) -> None:
         """Send the scheduled tasks so the page can populate its sidebar task section.
 

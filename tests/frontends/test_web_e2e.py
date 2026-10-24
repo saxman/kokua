@@ -795,6 +795,22 @@ def test_theme_button_cycles_and_persists(page, live_server):
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
 
 
+def test_header_names_the_model_answering(page, live_server):
+    """The header label is the page's answer to "which model is this", and the `models` frame is the
+    only place it can come from: a model is read as the agents are built, so nothing the page already
+    holds knows it. This config declares none, so the label is what AIMU's default resolved to
+    (`AIMU_LANGUAGE_MODEL`, pinned by the test suite), endpoint included, which is the form you could
+    type back into config.toml. The tooltip names the agent it belongs to, since a session can run
+    several models at once.
+    """
+    _open(page, live_server(delay=0.0))
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    label = page.locator("#model-label")
+    expect(label).to_have_text(TEST_DEFAULT_MODEL)
+    expect(label).to_have_attribute("title", f"assistant: {TEST_DEFAULT_MODEL}")
+
+
 def test_working_indicator_on_switch_into_running(page, live_server):
     """Switching back into a conversation whose turn is still running shows the inline 'working'
     indicator at the foot of the replayed transcript, which clears once that turn completes."""

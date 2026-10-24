@@ -374,6 +374,16 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
+async def test_web_channel_send_models_emits_frame():
+    """The record reaches the page as fields, which is what lets the header label be the entry agent's
+    model while the tooltip carries every agent that declares its own."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    record = {"agent": "assistant", "model": "ollama:qwen3:8b", "overrides": {"researcher": "ollama:qwen3:32b"}}
+    await channel.send_models(record)
+    assert ws.frames == [{"type": "models", **record}]
+
+
 async def test_web_channel_send_ready_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -1399,6 +1409,7 @@ def test_ws_connect_ends_with_ready_after_the_sidebar(tmp_path):
     assert seen.index("conversations") < seen.index("ready")
     assert seen.index("history") < seen.index("ready")
     assert seen.index("settings") < seen.index("ready")
+    assert seen.index("models") < seen.index("ready")
     assert seen.index("tasks") < seen.index("ready")
 
 

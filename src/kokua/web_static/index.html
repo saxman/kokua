@@ -82,6 +82,10 @@
       <header>
         <span id="conv-heading">Kokua</span>
         <span class="header-actions">
+          <!-- Which model is answering, filled in by app.js from the `models` frame at the end of the
+               connect sequence. Startup-only, so it is painted once and never refreshed; empty (and
+               hidden by app.css) until it lands, since a label that guessed would be worse than none. -->
+          <span id="model-label" title=""></span>
           <!-- Glyph, title, and aria-label are set by app.js from the stored choice; the markup
                starts on the "auto" default the pre-paint script above assumes. -->
           <button id="theme-btn" type="button" title="Theme: auto (system)"

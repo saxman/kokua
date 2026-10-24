@@ -108,6 +108,38 @@ def test_a_worker_resolves_a_group_an_mcp_server_and_a_plugin_from_one_list(tmp_
     assert "calculate" in names  # the built-in compute group's tool
 
 
+def test_model_record_names_the_entry_agent_and_only_the_agents_that_override_it(tmp_path):
+    """One answer to "which models is this session running", read by `/diag` and by the web header.
+
+    Only declared models are overrides: an agent that names none runs on the entry agent's own model,
+    and listing it would repeat the default once per table and bury the exception among them.
+    """
+    from kokua.core.build import model_record
+
+    agents = example_agents()
+    agents["researcher"].model = "ollama:qwen3:32b"
+    config = _config(tmp_path, model="ollama:qwen3:8b", agents=agents)
+
+    assert model_record(config) == {
+        "agent": "assistant",
+        "model": "ollama:qwen3:8b",
+        "overrides": {"researcher": "ollama:qwen3:32b"},
+    }
+
+
+def test_model_record_falls_back_to_the_model_aimu_resolved(tmp_path):
+    """With nothing declared the label is still a string a user recognizes, endpoint included, because
+    it is the one `AssistantConfig.default_model` resolved rather than anything read off a client."""
+    from kokua.core.build import model_record
+
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    record = model_record(_config(tmp_path, model=None))
+
+    assert record["model"] == TEST_DEFAULT_MODEL
+    assert record["overrides"] == {}
+
+
 # --- Startup validation: every invalid config fails here, naming the offending value ----------
 
 

@@ -384,6 +384,11 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             await channel.send(str(e))
             await websocket.close()
             return
+        # After `start()` too, and for a sharper reason than the tasks below: resolving the entry
+        # agent's model asks AIMU what is locally available when no table names one, which raises when
+        # the answer is nothing. `start()` has just built a client on that same answer, so by here it is
+        # cached and the failure has already been reported above as the message it is.
+        await channel.send_models(assistant.current_models())
         # After `start()`, and one frame rather than two: `arm_all` retires a past-due one-shot as it
         # arms, so a list sent before it can be wrong with nothing to correct it. Unguarded, because
         # `arm_all` just read the same file successfully.

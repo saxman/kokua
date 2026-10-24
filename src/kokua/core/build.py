@@ -109,6 +109,29 @@ def model_label(config: AssistantConfig, agent_name: str) -> str:
     return str(config.model_for(agent_name))
 
 
+def model_record(config: AssistantConfig) -> dict:
+    """Which models this session runs on: the entry agent's, and each worker that overrides it.
+
+    A record rather than a sentence, because two readers want different words for the same answer:
+    ``/diag`` prints one line of prose (``core/diagnostics.py``) and the web page paints a header label
+    with the overrides in its tooltip (``channels/web.py``'s ``send_models``). Keyed rather than
+    ordered, so neither reader has to know that the entry agent is the first item.
+
+    Only agents declaring their own model appear in ``overrides``; listing every agent would repeat the
+    default once per table and bury the exception among them. Those are the strings the tables declare,
+    not resolved labels, because an agent that declares nothing is not an override of anything.
+
+    Resolving the entry agent's label can raise, since ``AssistantConfig.default_model`` asks AIMU what
+    is locally available when no table names one. Call it where that failure is already handled: after
+    ``Assistant.start()`` has built a client on the same answer, it is cached and cannot raise again.
+    """
+    return {
+        "agent": config.entry_agent,
+        "model": model_label(config, config.entry_agent),
+        "overrides": {name: agent.model for name, agent in sorted(config.agents.items()) if agent.model},
+    }
+
+
 def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str:
     """The assembled system message for the entry agent -- the one every client Kokua builds directly needs.
 

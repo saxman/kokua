@@ -571,6 +571,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer
     for a front end that wants to render them.) The model and the reasoning effort are not
     runtime-mutable at all: both are read at startup, from `[assistant].model` / `[assistant].thinking`
     or an agent's own `[agents.<name>]` keys. Change them in `config.toml` and restart.
+  - **The header says which model is answering.** A dim label beside the conversation title, carrying
+    the entry agent's resolved model string (`provider:model_id`, endpoint included, exactly the form
+    you could type back into `config.toml`), with every agent that declares its own on a line of the
+    label's tooltip. It arrives as a `models` frame once per connection, sent after `Assistant.start()`
+    returns, and is never refreshed: a model is read as the agents are built, so nothing in a session
+    can change it. Which is the reason to show it at all, since the bullet above is otherwise where
+    this question stops: a startup-only setting has no panel field, and until now the only surface in a
+    running session that named one was `/diag` in the chat. Both front ends ask
+    `build.model_record` rather than working it out apiece, so the page's label and `/diag`'s line
+    cannot drift; the record is fields and the words are each reader's own, the way the sidebar words a
+    task's status for a person and the scheduling tools word it for a model.
   - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
     generation fields anywhere in Kokua's settings. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,

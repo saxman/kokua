@@ -1108,9 +1108,22 @@ Both are read once, at startup. No live client is rebound to another model, whic
 not a `RuntimeSetting`: a hot setting is one the change reaches in the same session, and this one cannot.
 It is an ordinary cold key, so `update_config` writes it and reports that a restart is needed.
 
-`/diag` reports the entry agent's model plus every override, since a running session otherwise has no
-surface that names one. `build.model_label` is the single renderer, and it renders `model_for`'s string,
-which is also what the stored record uses.
+Both front ends name it, since a running session otherwise has no surface that does. `/diag` reports the
+entry agent's model plus every override as a line of prose, and the web page shows the entry agent's in
+its header with the whole record in the label's tooltip. Neither works the answer out for itself:
+`build.model_record` is the one answer to "which models is this session running", returning the entry
+agent's name, its resolved label (`build.model_label`, which renders `model_for`'s string, and is also
+what the stored record uses), and each agent whose own table declares one. A record rather than a
+sentence, because the two readers want different words for it, which is the same split the sidebar makes
+for a task's status.
+
+The page is told once per connection, by a `models` frame sent after `Assistant.start()` returns. After,
+not before, for a sharper reason than the task list has: resolving the label asks AIMU what is locally
+available when no table names one, and that raises when the answer is nothing. `start()` has just built
+a client on that same answer, so by then it is cached, and a failure to resolve has already been reported
+as the message it is. Once per connection is enough because the answer is startup-only: nothing in a
+session can change it, so the page paints it and never refreshes it, and a reconnect repaints it with the
+rest of the resynced view.
 
 A stored conversation records what produced it, in `session.metadata` rather than on any message dict:
 `metadata.model.<user_index>` is the model that answered that turn, and each sub-agent card carries its
@@ -1625,8 +1638,8 @@ than a shared one.
 `channels/web.py`'s `WebChannel` subclasses
 [AIMU's base `WebChannel`](https://saxman.info/aimu/how-to/build-personal-assistant/). The streaming transport
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
-frames its richer page needs, among them `conversations`, `history`, `approval`, `turn_saved`, and
-`inbox`. The UI is a single self-contained `web_static/index.html` served as package data, plus
+frames its richer page needs, among them `conversations`, `history`, `approval`, `turn_saved`,
+`models`, and `inbox`. The UI is a single self-contained `web_static/index.html` served as package data, plus
 vendored `marked` + `DOMPurify`
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with `trust:false` once the turn completes. The server allowlists these assets: JS/CSS by name, the
@@ -1764,8 +1777,8 @@ genuinely down.
 
 Almost none of the work is on the client, because the server was already written for this: it resyncs its
 entire view on every connection (`_sync_view` sends the conversation list and the active conversation's
-history, followed by the settings, then the tasks and a closing `ready` once the assistant has
-started), and the page's `history` handler clears the transcript before replaying it. So a reconnected
+history, followed by the settings, then the models, the tasks, and a closing `ready` once the assistant
+has started), and the page's `history` handler clears the transcript before replaying it. So a reconnected
 page repaints rather than appending a second copy of what it already showed, and the retry notice goes
 out with the rest of the old log.
 

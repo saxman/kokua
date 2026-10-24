@@ -35,7 +35,7 @@ from kokua.core.build import (
     build_model_client,
     entry_agent_system_message,
     make_agent_builder,
-    model_label,
+    model_record,
 )
 from kokua.config import AssistantConfig
 from kokua.core import conversation_commands
@@ -648,6 +648,16 @@ class Assistant:
         """The effective runtime settings, in the wire shape a settings client reads."""
         return self._settings.current()
 
+    def current_models(self) -> dict:
+        """Which models this session runs on, as fields for a front end that renders its own words.
+
+        Startup-only, unlike ``current_settings`` above: ``[assistant].model`` and each
+        ``[agents.<name>].model`` are read as the agents are built, so this answer holds for the life of
+        the process and a front end can paint it once. Safe to call only once ``start()`` has returned
+        (see ``build.model_record``).
+        """
+        return model_record(self._config)
+
     async def apply_settings(self, incoming: dict) -> None:
         """Apply an incoming settings payload at runtime and persist it to config.toml."""
         await self._settings.apply_and_persist(incoming)
@@ -1062,7 +1072,7 @@ class Assistant:
             self._tracker,
             self._gate,
             config=self._config,
-            entry_model=model_label(self._config, self._config.entry_agent),
+            models=self.current_models(),
             pending_approval=self._human.approval.pending,
             pending_decision=self._human.decision.pending,
         )
