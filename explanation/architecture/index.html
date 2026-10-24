@@ -3368,9 +3368,21 @@ reports <code>ollama:qwen3.8:27b@http://gpu-box:11434</code> rather than <code>O
 <p>Both are read once, at startup. No live client is rebound to another model, which is why the model is
 not a <code>RuntimeSetting</code>: a hot setting is one the change reaches in the same session, and this one cannot.
 It is an ordinary cold key, so <code>update_config</code> writes it and reports that a restart is needed.</p>
-<p><code>/diag</code> reports the entry agent's model plus every override, since a running session otherwise has no
-surface that names one. <code>build.model_label</code> is the single renderer, and it renders <code>model_for</code>'s string,
-which is also what the stored record uses.</p>
+<p>Both front ends name it, since a running session otherwise has no surface that does. <code>/diag</code> reports the
+entry agent's model plus every override as a line of prose, and the web page shows the entry agent's in
+its header with the whole record in the label's tooltip. Neither works the answer out for itself:
+<code>build.model_record</code> is the one answer to "which models is this session running", returning the entry
+agent's name, its resolved label (<code>build.model_label</code>, which renders <code>model_for</code>'s string, and is also
+what the stored record uses), and each agent whose own table declares one. A record rather than a
+sentence, because the two readers want different words for it, which is the same split the sidebar makes
+for a task's status.</p>
+<p>The page is told once per connection, by a <code>models</code> frame sent after <code>Assistant.start()</code> returns. After,
+not before, for a sharper reason than the task list has: resolving the label asks AIMU what is locally
+available when no table names one, and that raises when the answer is nothing. <code>start()</code> has just built
+a client on that same answer, so by then it is cached, and a failure to resolve has already been reported
+as the message it is. Once per connection is enough because the answer is startup-only: nothing in a
+session can change it, so the page paints it and never refreshes it, and a reconnect repaints it with the
+rest of the resynced view.</p>
 <p>A stored conversation records what produced it, in <code>session.metadata</code> rather than on any message dict:
 <code>metadata.model.&lt;user_index&gt;</code> is the model that answered that turn, and each sub-agent card carries its
 own worker's model (<code>SubagentReporter</code> resolves it, since AIMU's observer callbacks do not carry one).
@@ -3833,8 +3845,8 @@ than a shared one.</p>
 <code>channels/web.py</code>'s <code>WebChannel</code> subclasses
 <a href="https://saxman.info/aimu/how-to/build-personal-assistant/">AIMU's base <code>WebChannel</code></a>. The streaming transport
 (<code>token</code>/<code>thinking</code>/<code>tool</code>/<code>done</code> frames and <code>send()</code>) lives in AIMU's base; Kokua's subclass adds the
-frames its richer page needs, among them <code>conversations</code>, <code>history</code>, <code>approval</code>, <code>turn_saved</code>, and
-<code>inbox</code>. The UI is a single self-contained <code>web_static/index.html</code> served as package data, plus
+frames its richer page needs, among them <code>conversations</code>, <code>history</code>, <code>approval</code>, <code>turn_saved</code>,
+<code>models</code>, and <code>inbox</code>. The UI is a single self-contained <code>web_static/index.html</code> served as package data, plus
 vendored <code>marked</code> + <code>DOMPurify</code>
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with <code>trust:false</code> once the turn completes. The server allowlists these assets: JS/CSS by name, the
@@ -3955,8 +3967,8 @@ schedule it was already on rather than restarting at 500ms and letting a held mo
 genuinely down.</p>
 <p>Almost none of the work is on the client, because the server was already written for this: it resyncs its
 entire view on every connection (<code>_sync_view</code> sends the conversation list and the active conversation's
-history, followed by the settings, then the tasks and a closing <code>ready</code> once the assistant has
-started), and the page's <code>history</code> handler clears the transcript before replaying it. So a reconnected
+history, followed by the settings, then the models, the tasks, and a closing <code>ready</code> once the assistant
+has started), and the page's <code>history</code> handler clears the transcript before replaying it. So a reconnected
 page repaints rather than appending a second copy of what it already showed, and the retry notice goes
 out with the rest of the old log.</p>
 <p>Where that resync sits in the connection's own startup is the reason the sidebar is not empty while you

@@ -2406,6 +2406,17 @@ The pre-release development history is in the git log.</p>
     for a front end that wants to render them.) The model and the reasoning effort are not
     runtime-mutable at all: both are read at startup, from <code>[assistant].model</code> / <code>[assistant].thinking</code>
     or an agent's own <code>[agents.&lt;name&gt;]</code> keys. Change them in <code>config.toml</code> and restart.</li>
+<li><strong>The header says which model is answering.</strong> A dim label beside the conversation title, carrying
+    the entry agent's resolved model string (<code>provider:model_id</code>, endpoint included, exactly the form
+    you could type back into <code>config.toml</code>), with every agent that declares its own on a line of the
+    label's tooltip. It arrives as a <code>models</code> frame once per connection, sent after <code>Assistant.start()</code>
+    returns, and is never refreshed: a model is read as the agents are built, so nothing in a session
+    can change it. Which is the reason to show it at all, since the bullet above is otherwise where
+    this question stops: a startup-only setting has no panel field, and until now the only surface in a
+    running session that named one was <code>/diag</code> in the chat. Both front ends ask
+    <code>build.model_record</code> rather than working it out apiece, so the page's label and <code>/diag</code>'s line
+    cannot drift; the record is fields and the words are each reader's own, the way the sidebar words a
+    task's status for a person and the scheduling tools word it for a model.</li>
 <li><strong>Sampling parameters are AIMU's, not a Kokua setting.</strong> There is no <code>[generation]</code> section and no
     generation fields anywhere in Kokua's settings. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then <code>client.default_generate_kwargs</code>,
@@ -4084,6 +4095,17 @@ notice on startup.</p>
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
   <code>data/logs/kokua.log</code> (5 × 2 MB) with turn-lifecycle lines, level set by <code>[logging] level</code>.
   <code>faulthandler</code> is enabled, so <code>kill -USR1 &lt;pid&gt;</code> dumps all thread stacks.</li>
+<li><strong>The MCP SDK's own errors are logged where they can be read.</strong> The <code>mcp</code> SDK logger has no handler of
+  its own and propagates, so every <code>logger.exception</code> it raised fell through to <code>logging.lastResort</code>,
+  which writes to stderr at WARNING+ with no timestamp, no logger name, and no server URL. Reconnecting
+  several servers at boot runs their OAuth flows one at a time behind a single callback port, so a
+  failed client registration on one server printed a bare traceback to the terminal directly beneath a
+  <em>different</em> server's authorization URL, reading as that flow having failed when it had in fact
+  succeeded. <code>logging_setup</code> now attaches the rotating file handler to <code>mcp</code> alongside <code>kokua</code> and
+  <code>aimu</code>, which suppresses <code>lastResort</code>, and nothing is lost from the console: <code>kokua.mcp.servers</code>
+  already logs the same failure to that file with the server URL and the full traceback. <code>fastmcp</code> is
+  deliberately left alone, since it configures its own stderr handler at import, sets
+  <code>propagate = False</code>, and removes whatever handlers are already on the logger.</li>
 <li><strong>A slow control cannot wedge the web UI.</strong> <code>frontends/web.py</code>'s <code>pump</code> is two tasks over one queue:
   one reads the WebSocket, one applies frames in arrival order. Reading has to continue regardless of how
   long a control takes, because a disconnect <em>is</em> a read and that reader is the only task positioned to

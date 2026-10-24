@@ -4149,7 +4149,10 @@ tools. Front it with something that authenticates if you need remote access.</p>
 startup also prints each agent's access summary (the lines <code>kokua agents</code> expands on) to stderr; at any
 level it is written to the log.</p>
 <p>The log records the turn lifecycle (submitted, lock acquired, done, error), so a hung turn is visible
-after the fact. It is also where a dropped generation parameter reports itself. For live state, the
+after the fact. It is also where a dropped generation parameter reports itself, and where the MCP SDK's
+own failures land: a server whose OAuth client registration fails used to print an unattributed
+traceback to the terminal instead, carrying no timestamp and no server URL to say which server it came
+from. At <code>DEBUG</code> that same capture includes the SDK's protocol-level chatter. For live state, the
 <code>/diag</code> chat command reports turn and lock state and dumps a wedged turn's async stack, and
 <code>kill -USR1 &lt;pid&gt;</code> dumps all thread stacks.</p>
 <h2 id="email"><code>[email]</code><a class="headerlink" href="#email" title="Permanent link">&para;</a></h2>
