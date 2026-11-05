@@ -1049,6 +1049,10 @@ re-authorization in a later session, since the client registration is cached acr
 random port is not. [Add an MCP service](../how-to/add-mcp-services.md#authorizing-when-kokua-runs-on-another-machine)
 covers both setups.
 
+A pinned port that another program already holds is refused before the authorization link is posted:
+Kokua posts the reason in place of the link and skips that server for the session. See
+[when the callback port is already taken](../how-to/add-mcp-services.md#when-the-callback-port-is-already-taken).
+
 ## `[paths]`
 
 ### `data_dir`

@@ -1593,7 +1593,14 @@ by posting the authorization link into the chat and persisting tokens to disk. I
 piece of that flow a single-machine library gets to assume away: `OAuthSettings` holds where the
 provider's redirect lands, because FastMCP's default (loopback, a random port per process) sends the
 approved browser to *its own* machine, which is the wrong one whenever Kokua is not where you browse.
-The two settings behind it are `[mcp].oauth_callback_host` / `oauth_callback_port`.
+The two settings behind it are `[mcp].oauth_callback_host` / `oauth_callback_port`. Placing the callback
+creates a failure FastMCP's random port never meets: the pinned port can already be held by another
+program. FastMCP binds its callback server only after the browser has been sent to approve, and uvicorn
+reports a failed bind with `sys.exit`, whose `SystemExit` passes every `except Exception` up to the event
+loop. So `ChatOAuth` binds the address itself before posting the link and raises `CallbackUnavailable`
+when it cannot; that leaves only a narrow window between its check and FastMCP's bind, and
+`callback_handler` turns a `SystemExit` there into the same error. Either way one server fails to
+connect and the process carries on.
 
 ## Workflows
 

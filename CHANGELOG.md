@@ -1884,6 +1884,16 @@ alone. The case that does cost something is a configured MCP server, which conne
   across restarts while a random port is not, so a re-authorization in a later process could present a
   redirect URI the provider had on file under the old port. The authorization message now names the
   callback address it will use, because a redirect landing on the wrong machine is otherwise invisible.
+- **A callback port another program holds is refused before the link is posted, not after it crashes
+  Kokua.** FastMCP binds its callback server only after the browser has been sent to approve. With a
+  pinned `oauth_callback_port` already in use (another local app serving on 8765, in the case that found this),
+  the provider delivered the authorization code to *that* program, and the failed bind then exited the
+  whole process, because uvicorn reports one with `sys.exit(1)` and the `SystemExit` passed every
+  `except Exception` up to the event loop. `ChatOAuth` now binds the callback address itself first. When
+  it cannot, it posts the reason in place of the link, naming the address and `[mcp].oauth_callback_port`,
+  and raises `CallbackUnavailable`, so that server fails to connect and the rest of Kokua carries on. A
+  `SystemExit` from the callback server in the moment between that check and FastMCP's bind is turned
+  into the same error.
 - **Boot logs the tools each server contributed, by name.** This is the only record of a remote server's
   tool list: `config.toml` does not know it, `--list-toolsets` runs before any connection so it can only
   name the server, and `add_mcp_server` reports tool names on a runtime add but a boot reconnect reported

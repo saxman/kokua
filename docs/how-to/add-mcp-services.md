@@ -123,6 +123,31 @@ Pinning the port is worth doing even on a single machine. Kokua caches the OAuth
 across restarts, but a random port is chosen fresh in each process, so a re-authorization in a later
 session can present a redirect URI the provider has on file under the old port and be rejected.
 
+### When the callback port is already taken
+
+A pinned port can collide with another program listening on it. Kokua checks that it can listen on the
+callback address before it posts the authorization link, and when it cannot, it posts the reason in
+place of the link, naming the address, and skips that server. The rest of Kokua carries on without it.
+Refusing up front is the safe order: once you approve, the provider sends your browser, and the
+authorization code with it, to whatever is listening on that port. (PKCE keeps that code useless
+without the verifier Kokua holds, but nothing else should receive it.)
+
+To find the other program, and then move Kokua off its port:
+
+```bash
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+```
+
+```toml
+[mcp]
+oauth_callback_port = 8767
+```
+
+Forward the new port instead if you tunnel. A provider that rejects the new redirect URI is holding the
+client registration made under the old port. Delete that server's file from the `client_info` folder
+under `$KOKUA_HOME/data/mcp-oauth` (its name spells out the server's URL), and Kokua registers again on
+the next connect.
+
 ## Add one mid-conversation
 
 The shipped entry agent declares the `mcp` toolset, so it carries `add_mcp_server` and
