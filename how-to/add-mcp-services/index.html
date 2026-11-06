@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -990,6 +990,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#when-the-callback-port-is-already-taken" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the callback port is already taken
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1545,6 +1556,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#when-the-callback-port-is-already-taken" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the callback port is already taken
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1756,6 +1778,23 @@ then crosses your network in cleartext, which is the trade for not tunnelling.</
 <p>Pinning the port is worth doing even on a single machine. Kokua caches the OAuth client registration
 across restarts, but a random port is chosen fresh in each process, so a re-authorization in a later
 session can present a redirect URI the provider has on file under the old port and be rejected.</p>
+<h3 id="when-the-callback-port-is-already-taken">When the callback port is already taken<a class="headerlink" href="#when-the-callback-port-is-already-taken" title="Permanent link">&para;</a></h3>
+<p>A pinned port can collide with another program listening on it. Kokua checks that it can listen on the
+callback address before it posts the authorization link, and when it cannot, it posts the reason in
+place of the link, naming the address, and skips that server. The rest of Kokua carries on without it.
+Refusing up front is the safe order: once you approve, the provider sends your browser, and the
+authorization code with it, to whatever is listening on that port. (PKCE keeps that code useless
+without the verifier Kokua holds, but nothing else should receive it.)</p>
+<p>To find the other program, and then move Kokua off its port:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lsof<span class="w"> </span>-nP<span class="w"> </span>-iTCP:8765<span class="w"> </span>-sTCP:LISTEN
+</span></code></pre></div>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[mcp]</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8767</span>
+</span></code></pre></div>
+<p>Forward the new port instead if you tunnel. A provider that rejects the new redirect URI is holding the
+client registration made under the old port. Delete that server's file from the <code>client_info</code> folder
+under <code>$KOKUA_HOME/data/mcp-oauth</code> (its name spells out the server's URL), and Kokua registers again on
+the next connect.</p>
 <h2 id="add-one-mid-conversation">Add one mid-conversation<a class="headerlink" href="#add-one-mid-conversation" title="Permanent link">&para;</a></h2>
 <p>The shipped entry agent declares the <code>mcp</code> toolset, so it carries <code>add_mcp_server</code> and
 <code>remove_mcp_server</code> and you can just ask:</p>
@@ -1846,7 +1885,7 @@ namespace, and a toolset nobody declares costs nothing to leave unnamed. The cos
 here rather than there: a server does cost something. So check your own work, by asking the assistant to
 delegate to the agent that should have it and list its tools.</p>
 <h2 id="the-mcp-flag">The <code>--mcp</code> flag<a class="headerlink" href="#the-mcp-flag" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>kokua<span class="w"> </span>--mcp<span class="w"> </span>https://broker.example.com/mcp<span class="w"> </span>--mcp<span class="w"> </span>https://other.example.com/mcp
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>uv<span class="w"> </span>run<span class="w"> </span>kokua<span class="w"> </span>--mcp<span class="w"> </span>https://broker.example.com/mcp<span class="w"> </span>--mcp<span class="w"> </span>https://other.example.com/mcp
 </span></code></pre></div>
 <p>Two caveats, both from the flag-over-file precedence rule:</p>
 <ul>
@@ -1972,10 +2011,10 @@ machinery for the same result. See
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>

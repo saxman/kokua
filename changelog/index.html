@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -3744,6 +3744,16 @@ alone. The case that does cost something is a configured MCP server, which conne
   across restarts while a random port is not, so a re-authorization in a later process could present a
   redirect URI the provider had on file under the old port. The authorization message now names the
   callback address it will use, because a redirect landing on the wrong machine is otherwise invisible.</li>
+<li><strong>A callback port another program holds is refused before the link is posted, not after it crashes
+  Kokua.</strong> FastMCP binds its callback server only after the browser has been sent to approve. With a
+  pinned <code>oauth_callback_port</code> already in use (another local app serving on 8765, in the case that found this),
+  the provider delivered the authorization code to <em>that</em> program, and the failed bind then exited the
+  whole process, because uvicorn reports one with <code>sys.exit(1)</code> and the <code>SystemExit</code> passed every
+  <code>except Exception</code> up to the event loop. <code>ChatOAuth</code> now binds the callback address itself first. When
+  it cannot, it posts the reason in place of the link, naming the address and <code>[mcp].oauth_callback_port</code>,
+  and raises <code>CallbackUnavailable</code>, so that server fails to connect and the rest of Kokua carries on. A
+  <code>SystemExit</code> from the callback server in the moment between that check and FastMCP's bind is turned
+  into the same error.</li>
 <li><strong>Boot logs the tools each server contributed, by name.</strong> This is the only record of a remote server's
   tool list: <code>config.toml</code> does not know it, <code>--list-toolsets</code> runs before any connection so it can only
   name the server, and <code>add_mcp_server</code> reports tool names on a runtime add but a boot reconnect reported
@@ -4291,10 +4301,10 @@ notice on startup.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>
