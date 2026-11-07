@@ -80,7 +80,13 @@ None of these is a mode or a preset. Each is the same declared machinery pointed
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer.
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer, plus AIMU's page tools, which no release has yet.
+
+> **Until AIMU 0.39.0 is published, install from a sibling AIMU checkout.** The `web` toolset uses AIMU's
+> page tools (`make_page_tools`), which are on AIMU's main branch and in no release yet. An AIMU from
+> PyPI installs, and Kokua then refuses to start with a message saying so. Clone AIMU beside this repo and
+> run `uv sync --all-extras` without `--no-sources` (see below). Once 0.39.0 is out, the command below
+> works again.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua

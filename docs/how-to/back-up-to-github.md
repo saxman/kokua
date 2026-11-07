@@ -35,6 +35,7 @@ Everything else under `data/` is left out on purpose:
 | `data/logs/` | rotating, noisy, and rewritten on every run |
 | `data/downloads/` | generated artifacts such as rendered PDFs |
 | `data/images/` | generated and attached images, which are binary and bulky |
+| `data/pages/` | pages the `web` toolset's `fetch_page` stored, a cache of pages that are still on the web |
 | `data/mcp-oauth/` | the OAuth tokens Kokua holds for your MCP servers, which are credentials |
 | `data/backup/` | the working tree the backup itself pushes from |
 | `.git/` and `__pycache__/` inside any copied directory | tooling artifacts, not state to restore |

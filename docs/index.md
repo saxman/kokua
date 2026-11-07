@@ -19,6 +19,11 @@ followed rather than taken on faith, so every mechanism above is there to be rea
 Kokua isn't on PyPI; clone the repository and install with `uv` (Python 3.11+ and
 [AIMU](https://saxman.info/aimu/) 0.38.0 or newer):
 
+!!! warning "Until AIMU 0.39.0 is published, AIMU from PyPI is not enough"
+    The `web` toolset uses AIMU's page tools, which are on AIMU's main branch and in no release yet, so
+    Kokua refuses to start against an AIMU installed from PyPI. Use the sibling-checkout install the
+    README describes, without `--no-sources`, until 0.39.0 is out.
+
 ```bash
 git clone https://github.com/saxman/kokua && cd kokua
 uv sync --all-extras --no-sources  # AIMU from PyPI; see the README for the sibling-checkout alternative

@@ -64,7 +64,7 @@ What the AIMU-provided toolsets hold:
 
 | Toolset | Tools | Notes |
 | --- | --- | --- |
-| `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather` | `get_web_content` returns Markdown, converting a PDF as well as a page; `get_webpage_html` is the raw-HTML escape hatch. |
+| `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather`, `fetch_page`, `read_page`, `find_in_page` | `get_web_content` returns a page whole as Markdown, converting a PDF as well; `fetch_page` stores the page under `data/pages` and returns only the passages that match a question, with `read_page` and `find_in_page` reaching the rest. They trade off differently: see [Reading pages](#reading-pages-fetch_page-or-get_web_content) below. `get_webpage_html` is the raw-HTML escape hatch. |
 | `fs` | `list_directory`, `read_file` | **Read-only**, and read-only by construction: AIMU's `fs` group holds the two writers below as well, and this toolset is that group with `builtin.unscoped` excluded. `read_file` returns 2,000 lines per call and names the offset that continues the read. |
 | `fs_write` | `write_file`, `edit_file` | both approval-gated by default. Neither confines a write to any root, so this reaches any path Kokua's own account can write. A separate name from `fs` so an agent can be given the read and not the write. |
 | `compute` | `calculate`, `execute_python`, `run_command` | both execution tools are approval-gated by default; `[compute] command_env_passthrough` decides what a command's environment holds |
@@ -80,6 +80,39 @@ What the AIMU-provided toolsets hold:
 The three generative groups have no default model, so they raise at call time rather than downloading
 weights you did not ask for; see AIMU's
 [environment variables](https://saxman.info/aimu/reference/env-vars/) for the accepted values.
+
+### Reading pages: `fetch_page` or `get_web_content`
+
+An agent holding `web` has two ways to read a page, and the toolset's guidance tells the model to prefer
+`fetch_page`. Both stay because neither is right for every read.
+
+- **`get_web_content(url)`** returns the page itself, up to 20,000 characters a call, with an offset to
+  continue. Nothing is left out of what it returns, but all of it stays in the conversation and is resent
+  with every later request, so an agent that reads several pages fills its context window with them.
+- **`fetch_page(url, question)`** stores the page and returns its outline plus the few passages that best
+  match the question (five at most, about 6,000 characters), verbatim and with their offsets.
+  `read_page(handle, offset)` and `find_in_page(handle, text)` reach the rest of the stored page without
+  fetching it again. The handle names this copy of the page: a page that changed since gets a new one.
+
+What `fetch_page` costs you:
+
+- **It can miss an answer worded differently from the question.** Passages are ranked by the words they
+  share with the question (BM25, from AIMU), ignoring common English words. A question about a "refund
+  policy" will not find a section titled "Returns" that never says "refund". The guidance tells the model
+  to search with `find_in_page` or read on before concluding a page does not say something; a capable
+  model does that, and smaller local models often do not. If an answer drawn from the web looks
+  incomplete, check the trace for a `fetch_page` result whose passages did not contain it.
+- **Every agent holding `web` sends three more tool schemas**, plus the longer guidance: roughly 2,500
+  characters, or about 600 tokens, on every request, whether or not it reads a page that turn.
+- **There is no switch to leave the page tools out.** An agent's `available` list names toolsets, not
+  tools, so an agent that holds `web` holds all eight.
+- **Every page it reads stays on disk.** `data/pages/` holds one `<handle>.md` (the page's text) and one
+  `<handle>.json` (its URL and fetch time) per page, as plain text files only your account can read, and nothing
+  prunes it. They are a record of what your agents have read. A page whose content changes on every load (a timestamp, a rotating token) adds a
+  copy on every fetch. Delete the directory or any file in it whenever you like: a handle in an older
+  conversation then reads as unknown, and the model fetches the page again.
+- **It is not backed up.** The [GitHub backup](back-up-to-github.md) leaves `data/pages/` out, since it is
+  a cache of pages that are still on the web.
 
 ## Declare an agent
 
