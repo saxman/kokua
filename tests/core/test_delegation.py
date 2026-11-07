@@ -10,6 +10,8 @@ from kokua.registry.context import LiveState
 from tests.helpers import allow_all_gates
 
 SPAWN = "spawn_subagent"
+#: What the `web` toolset builds beyond AIMU's `builtin.web` group.
+PAGE_TOOLS = {"fetch_page", "read_page", "find_in_page"}
 
 
 def _state(tmp_path, agents, entry="assistant") -> tuple[AssistantConfig, LiveState]:
@@ -36,7 +38,7 @@ def test_a_spec_carries_only_its_own_declared_tools(tmp_path):
     }
     config, state = _state(tmp_path, agents)
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["researcher"]["tools"]}
-    assert names == {fn.__name__ for fn in builtin.web}
+    assert names == {fn.__name__ for fn in builtin.web} | PAGE_TOOLS
     assert SPAWN not in names
 
 
@@ -616,7 +618,7 @@ async def test_a_worker_loads_a_deferred_group_and_its_guidance_comes_with_it(tm
     }
     config, state = _state(tmp_path, agents)
     web_group = build_agent_specs(config, state, "assistant")["researcher"]["tool_groups"][1]
-    assert {fn.__name__ for fn in web_group.build()} == {fn.__name__ for fn in builtin.web}
+    assert {fn.__name__ for fn in web_group.build()} == {fn.__name__ for fn in builtin.web} | PAGE_TOOLS
     assert "training cutoff" in web_group.guidance
 
 
