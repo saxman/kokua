@@ -356,6 +356,25 @@ from typing import Optional
 
 MINIMUM_AIMU = (0, 38, 0)
 
+# The surface is `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds beside AIMU's
+# `builtin.web` group, and which no AIMU release contains yet: it is on AIMU's main branch, and 0.39.0
+# will be its first release. That is the first time the probe has gripped something newer than every
+# published AIMU, and it is a deliberate choice rather than a slip: the floor stays at 0.38.0 because an
+# editable sibling on main still reports 0.38.0, and a 0.39.0 floor would refuse it. The cost is that an
+# AIMU installed from PyPI passes the floor and fails here, so Kokua does not start from PyPI alone
+# until 0.39.0 is published. `_PROBE_UNRELEASED` is what keeps the message honest about that: the usual
+# remedy, installing the floor from PyPI, is exactly the install that just failed. When 0.39.0 ships,
+# raise the floor to it and set `_PROBE_UNRELEASED` back to None.
+#
+# The shape is a plain name lookup, the seventh time: the factory is a new export, so its presence
+# alone dates a checkout. It also subsumes the probe it replaces, which is why moving the one slot costs
+# nothing here: it landed after every 0.38.0 capability and after 0.36.0's `RunEvent.run_id`, so a
+# sibling that has it has those too. Without the probe, an older AIMU fails at the first `web` build with
+# an `AttributeError`, which is loud but names a symbol rather than the fix.
+#
+# `RunEvent.run_id` (a signature check) is the floor's job now, in its turn; `tests/test_aimu_compat.py`
+# pins it, since its failure is the silent kind.
+
 # 0.38.0 raised the floor for two capabilities, neither with a handle, so the probe stays where it is.
 # `calculate` evaluates an allowlisted syntax tree instead of `eval()` with an empty builtins dict, which
 # any expression could climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves
@@ -425,11 +444,14 @@ MINIMUM_AIMU = (0, 38, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.events"
+_PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "RunEvent"
-_PROBE_PARAMETER: Optional[str] = "run_id"
+_PROBE_SYMBOL = "make_page_tools"
+_PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
+#: The first AIMU release that will carry the probed surface, when no published release does yet; None
+#: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
+_PROBE_UNRELEASED: Optional[str] = "0.39.0"
 
 
 class AimuVersionError(RuntimeError):
@@ -453,6 +475,14 @@ def _release(text: str) -> tuple[int, ...]:
 
 def _message(problem: str) -> str:
     floor = ".".join(str(n) for n in MINIMUM_AIMU)
+    if _PROBE_UNRELEASED is not None:
+        return (
+            f"Kokua needs AIMU's {_PROBE_SYMBOL}, but {problem}. It is on AIMU's main branch and no AIMU "
+            f"release contains it yet; {_PROBE_UNRELEASED} will be the first.\n"
+            f"  Use the sibling checkout: confirm what it is on with git -C ../aimu log -1, pull AIMU main, "
+            f"and run `uv sync --all-extras`. Installing AIMU from PyPI cannot supply it until "
+            f"{_PROBE_UNRELEASED} is published."
+        )
     return (
         f"Kokua needs AIMU {floor} or newer, but {problem}.\n"
         f"  Using the sibling checkout (the default here): confirm what it is actually on with "
@@ -490,8 +520,8 @@ def require_aimu() -> None:
     if probed is None:
         raise AimuVersionError(
             _message(
-                f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}, "
-                f"so it predates that release"
+                f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}"
+                + (", so it predates that release" if _PROBE_UNRELEASED is None else "")
             )
         )
     # `in` reads a frozenset directly and an enum class by name through `__members__`. The fallback is
