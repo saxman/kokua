@@ -2227,7 +2227,9 @@ notice on startup.
   `AIMU_LANGUAGE_MODEL`, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
   invalid, `Assistant.start()` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
-  prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
+  prints it and exits non-zero, the web UI shows it in the chat and prints it to the launch terminal in
+  the CLI's `[error]` form (the `kokua` logger writes only to the file log, so the terminal otherwise
+  said nothing about a server that could not build an assistant). Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
   tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
   finishing with it releases that guard, so a later connection is not wrongly refused as "busy in another
@@ -2239,8 +2241,8 @@ notice on startup.
   "Disconnected." `build_app` now validates the agent tables while building the app, so `kokua
   --frontend web` and `kokua-web` both print the offending name and exit 2, which is what the CLI front
   end already did. A `ConfigError` reaching a connection anyway -- the registry is rebuilt per
-  connection, so a skill deleted from disk under a running server is one -- is shown in the chat, like a
-  model-client failure.
+  connection, so a skill deleted from disk under a running server is one -- is shown in the chat and
+  printed to the terminal, like a model-client failure.
 - **Hang observability.** `/diag` reports the in-flight turn, elapsed time, whether the turn gate is
   held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating

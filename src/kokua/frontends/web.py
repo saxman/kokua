@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
@@ -357,16 +358,26 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             released.set()
             await channel.aclose()
 
+    async def refuse_connection(websocket: WebSocket, channel: WebChannel, error: Exception) -> None:
+        """Report a user mistake that stops the assistant being built, and close the socket.
+
+        Both readers are told. The browser gets it because closing the socket on its own leaves the page
+        able to say only "Disconnected." The terminal gets it in the CLI front end's own form because the
+        `kokua` logger writes only to the file log, so without this the person who launched the server
+        learns nothing until a page is open, and then only in that page.
+        """
+        print(f"[error] {error}", file=sys.stderr)
+        await channel.send(str(error))
+        await websocket.close()
+
     async def serve_connection(websocket: WebSocket, channel: WebChannel) -> None:
         try:
             assistant = await Assistant.create(config, channel, client=client, client_factory=client_factory)
         except (ModelClientError, ConfigError) as e:
             # Either the model client could not be built (no model resolved, or a bad model string) or
             # config.toml no longer resolves (an [agents.*] table naming a toolset since renamed, or moved
-            # out to a skill). Both are user mistakes whose message states the fix, so it goes to the
-            # browser: closing the socket on its own leaves the page able to say only "Disconnected."
-            await channel.send(str(e))
-            await websocket.close()
+            # out to a skill). Both are user mistakes whose message states the fix.
+            await refuse_connection(websocket, channel, e)
             return
         # Sent BEFORE `start()`, which is the point of the split: the conversation list, the active
         # conversation's history and the current settings all read the store and the config, so they are
@@ -381,8 +392,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             # The same two user mistakes as above, in the half of boot that resolves a model and builds
             # the tools an approval gate is checked against, so they surface here now. Reported the same
             # way for the same reason, and the page has already been told nothing about being ready.
-            await channel.send(str(e))
-            await websocket.close()
+            await refuse_connection(websocket, channel, e)
             return
         # After `start()` too, and for a sharper reason than the tasks below: resolving the entry
         # agent's model asks AIMU what is locally available when no table names one, which raises when
