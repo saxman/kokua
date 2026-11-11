@@ -407,6 +407,14 @@ Consequences for working in this repo:
   "genuinely offers no handle": the probe stays on `RunEvent.run_id`, `aimu_compat` says what that leaves
   uncovered (a checkout claiming 0.38.0 without either change passes), and `tests/test_aimu_compat.py`
   pins both by behavior, which a test may do and a preflight may not.
+  **The probe now runs ahead of every AIMU release.** It is a name lookup on
+  `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds and which only AIMU main has; 0.39.0
+  will be its first release. The floor stays at 0.38.0 because a sibling on main still reports that
+  version, so an AIMU from PyPI passes the floor and is refused by the probe, and `_PROBE_UNRELEASED`
+  makes the message say no release has it rather than recommend `--no-sources`, the install that just
+  failed. It subsumes the `RunEvent.run_id` probe it replaced (it landed later), and that field is pinned
+  in `tests/test_aimu_compat.py` now. When 0.39.0 ships: raise the floor, set `_PROBE_UNRELEASED` to
+  None, and drop the "until 0.39.0" caveats from the README, `docs/index.md`, and the changelog.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

@@ -498,6 +498,11 @@ class AssistantConfig:
         return self.data_dir / "documents"
 
     @property
+    def pages_path(self) -> Path:
+        """Pages the `web` toolset's `fetch_page` stored, as plain files. Never pruned automatically."""
+        return self.data_dir / "pages"
+
+    @property
     def downloads_path(self) -> Path:
         """Generated artifacts (PDFs, exported conversation Markdown) the web UI serves at /download.
         Kept out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at

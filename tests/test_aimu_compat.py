@@ -32,6 +32,7 @@ def test_the_installed_aimu_satisfies_the_floor():
 
 
 def test_an_old_version_names_both_fixes(monkeypatch):
+    monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
     monkeypatch.setattr(aimu_compat, "version", lambda name: "0.12.0")
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
@@ -177,46 +178,53 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_release_the_floor_names():
-    """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
+def test_the_probe_targets_the_page_tools_the_web_toolset_builds():
+    """The surface today is ``aimu.tools.builtin.make_page_tools``, which no AIMU release contains yet.
 
-    The surface today is ``aimu.events.RunEvent``'s ``run_id`` field, the identity every recorded call
-    and loop ending is keyed by. ``RunEvent`` predates 0.36.0 by many releases, so its presence proves
-    nothing; the field is a dataclass field, invisible to a name lookup, but a dataclass's constructor
-    takes its fields, so the existing signature shape asks exactly the question.
+    It is a name lookup: the factory is a new export, so its presence alone dates a checkout. It landed
+    after every 0.38.0 capability, so a sibling that has it has the rest of what the floor names.
     """
     import importlib
-    import inspect
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
-    assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.events"
+    assert callable(getattr(module, aimu_compat._PROBE_SYMBOL, None))
+    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "RunEvent"
-    assert aimu_compat._PROBE_PARAMETER == "run_id"
+    assert aimu_compat._PROBE_SYMBOL == "make_page_tools"
+    assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
-    assert "run_id" in inspect.signature(probe).parameters
+    assert aimu_compat._PROBE_UNRELEASED == "0.39.0"
 
 
-def test_an_aimu_whose_run_events_carry_no_run_id_is_refused_by_name(monkeypatch):
-    """An AIMU before 0.36.0 has RunEvent without run_id: every request record would lose its run, so
-    the preflight names the field rather than letting the sink fail per event."""
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class _OldRunEvent:
-        agent: str = None
-        iteration: int = 0
-
+def test_an_aimu_release_without_page_tools_is_told_no_release_has_them(monkeypatch):
+    """A PyPI AIMU 0.38.0 clears the floor and lacks the probe. The usual remedy, installing the floor
+    from PyPI, is the install that just failed, so the message must say no release carries the surface
+    yet rather than send the user round in a circle."""
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
-        lambda name: SimpleNamespace(__file__="/somewhere/aimu/events.py", RunEvent=_OldRunEvent),
+        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/builtin.py"),
     )
-    with pytest.raises(AimuVersionError, match="run_id"):
+    with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
+    message = str(excinfo.value)
+    assert "make_page_tools" in message
+    assert "no AIMU release" in message and "0.39.0" in message
+    assert "--no-sources" not in message
+
+
+def test_the_floor_covers_the_run_ids_the_probe_no_longer_grips():
+    """0.36.0's probe surface is the floor's job now that ``make_page_tools`` holds the one probe slot.
+
+    ``core/requests.py`` keys every recorded call by ``RunEvent.run_id``, and an AIMU without the field
+    fails in silence (the sink raises per event and AIMU swallows it), so it stays pinned here.
+    """
+    import inspect
+
+    from aimu.events import RunEvent
+
+    assert "run_id" in inspect.signature(RunEvent).parameters
 
 
 def test_the_floor_covers_the_skill_update_tool_the_probe_no_longer_grips():

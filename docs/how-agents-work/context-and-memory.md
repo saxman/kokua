@@ -206,7 +206,7 @@ copied in, an earlier version reported an empty store while the files sat there.
 
 **On disk.** Everything lives under `$KOKUA_HOME` (default `~/.kokua`), and every leaf is a derived
 property on the config rather than a new path function: `data/sessions.json`, `data/memory/`,
-`data/documents/`, `data/images/`. [Principle
+`data/documents/`, `data/images/`, `data/pages/`. [Principle
 4](../explanation/design-principles.md#4-all-state-under-one-directory-the-user-owns) is why.
 
 Kokua's README says that state is "plain files under `~/.kokua`, so you can read what it remembers while

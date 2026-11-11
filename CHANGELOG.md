@@ -7,7 +7,9 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer, plus the page tools the
+`web` toolset builds, which are on AIMU's main branch and in no release until 0.39.0. Until it is published,
+Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.
 
 ### Package and entry points
 
@@ -1375,6 +1377,19 @@ warns you about a name no agent named: a toolset that ships and is never declare
 alone. The case that does cost something is a configured MCP server, which connects regardless; see
 [Add MCP services](https://saxman.info/kokua/how-to/add-mcp-services/).
 
+- **The `web` toolset reads a page two ways.** Beside AIMU's `builtin.web` group it builds AIMU's
+  `make_page_tools`: `fetch_page(url, question)` stores the page under `data/pages` and returns its outline
+  plus the passages that best match the question, verbatim with their offsets, and `read_page` /
+  `find_in_page` reach the rest of a stored page by its handle. `get_web_content` stays, for reading a page
+  whole. The guidance prefers `fetch_page`, because a research run that reads several pages otherwise
+  fills its context with them, and says what it costs: the passages are ranked by shared words and can
+  miss an answer worded differently, so the model is told to search or read on before concluding a page
+  does not say something. The store is one directory for every agent, since a handle a worker returns has
+  to be readable by the agent it reports to, and nothing prunes it. The GitHub backup leaves it out. Every
+  agent holding `web` now sends three more tool schemas, about 600 tokens per request.
+  [Set up toolsets](https://saxman.info/kokua/how-to/set-up-toolsets/#reading-pages-fetch_page-or-get_web_content) lists the
+  tradeoffs.
+
 ### Proactive work: scheduled tasks
 
 - Durable, agent-managed tasks that fire an unprompted turn when due, declared as
@@ -2180,6 +2195,12 @@ notice on startup.
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
+  The check now probes `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds and which no
+  AIMU release contains yet. The floor stays at **0.38.0**, because a sibling on AIMU main still reports
+  that version and a 0.39.0 floor would refuse it, so an AIMU installed from PyPI passes the floor and is
+  then refused by the probe. The message says no release has the page tools yet, rather than offering
+  `--no-sources` and PyPI, the install that just failed. When 0.39.0 ships, the floor moves to it.
+  Before that the probe was a signature check on `RunEvent` for `run_id`, which the floor covers now.
   Today the floor is **0.38.0**: `calculate` evaluates an allowlisted syntax tree rather than an escapable
   `eval`, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
   symbol for the startup check to look for, so the check stays where it was and the floor alone covers
