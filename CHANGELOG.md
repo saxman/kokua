@@ -783,7 +783,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer
   so a channel still implementing the older form raises `TypeError` the first time a gated call asks. A
   channel that does not show who is asking can accept and ignore it, which is what adding `agent=None`
   to the signature does. It is keyword-only for the reason `send_turn_saved`'s `token`
-  is.
+  is. **`send_approval_request` and `send_plan_review_request` also take `conversation_id`**, passed
+  the same way, so the page can drop a prompt that raced a conversation switch; a channel that files
+  nothing against a transcript accepts it as `conversation_id=None` and ignores it. `send_prompt_retired()`
+  is new and optional, like every rich frame: a channel without it gets no retirement, which is right
+  for one whose prompt is a printed line.
 - **The AIMU floor is 0.39.0**, for the page tools the `web` toolset builds (`make_page_tools`) and for a
   compaction that keeps a worker's task (see `context_length` under Configuration). Before it the floor
   was 0.38.0, for a `calculate` that evaluates arithmetic and nothing else (it was an
