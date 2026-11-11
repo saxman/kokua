@@ -86,13 +86,23 @@ class WorkflowContext:
     invariants at the top of ``kokua.core.turns``).
 
     ``decide`` asks the user something and waits: it takes a prompt coroutine factory, a parser from
-    the raw reply to the answer, and the answer to use when the request is abandoned. The vocabulary
-    is the workflow's, so the core stays free of any one workflow's reply words.
+    the raw reply to the answer, the answer to use when the request is abandoned, and ``about``, a
+    phrase completing "asked you ..." for the card raised if the question cannot be put to the user
+    at all. The vocabulary is the workflow's throughout, so the core stays free of any one workflow's
+    reply words. Two callers never get to ask: an unattended turn, which has nobody at the keyboard,
+    and a turn the user switched away from, which would put the question to the wrong reader. Both
+    answer with the abandoned-request answer, so a workflow that names a safe one is never surprised
+    by either.
 
     ``commit_user_message`` publishes this turn's committed user message: the core resolves where it
     landed, rewrites the workflow's scaffolding prompt back to the user's own words, and records the
     index here for the caller to read in a ``finally``. That is what lets a cancelled or failed run
     still anchor its sub-agent cards.
+
+    ``conversation_id`` is the conversation this turn belongs to, which a workflow needs for the one
+    thing the core cannot do on its behalf: a frame it sends directly has to say which transcript it
+    belongs to, since a turn keeps running when the user switches away and the page has no other way
+    to tell that a prompt arrived for a conversation it is no longer showing.
 
     ``settings`` is attribute access over the carrying toolset's own ``config.toml`` section: every key
     that toolset declared, at whatever the file set or the declaration defaulted to. The section is the
@@ -107,6 +117,7 @@ class WorkflowContext:
     state: Any
     decide: Optional[Callable[..., Awaitable[Any]]]
     commit_user_message: Optional[Callable[[int, str], None]]
+    conversation_id: str = ""
     _user_index: int = -1
 
     @property

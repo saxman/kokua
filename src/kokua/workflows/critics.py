@@ -6,7 +6,7 @@ calling conversation -- an independent judge, not the author defending its own w
 (`REVIEWER_TOOLS`: web lookup, arithmetic, and the current date/time) so it can check recency and
 factual/numeric claims instead of rejecting anything it cannot verify from its input alone. The typed
 verdict is then extracted in a second, tool-less structured call (`finalize_verdict`); that call stays
-`use_tools=False` because a forced schema and forced tools conflict on Anthropic. The reviewer toolset
+`use_tools=False` because a forced schema and forced tools conflict on most Anthropic models. The reviewer toolset
 deliberately excludes the user's memory/documents, skills, MCP mutation, and every tool that writes
 anywhere the model chose -- see `REVIEWER_TOOLS`.
 
@@ -170,8 +170,10 @@ async def stream_review(
     reviewer's prose reasoning and tool activity) then calls :func:`finalize_verdict`.
 
     Streamed rather than structured because a workflow that shows its work needs the reviewer's
-    *reasoning* visible, and a structured (``schema=``) call cannot stream readable prose (on Anthropic
-    it is a forced tool: JSON only, no thinking). So the assessment loop streams and the typed verdict
+    *reasoning* visible, and a structured (``schema=``) call cannot stream readable prose: it returns
+    JSON, and on most models it is a forced tool that drops reasoning altogether (a few recent Anthropic
+    models answer through native JSON output, which keeps reasoning but still returns only the JSON
+    answer). So the assessment loop streams and the typed verdict
     is extracted from that reasoning afterwards, on the same client.
     """
     agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs, name=name)

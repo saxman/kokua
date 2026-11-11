@@ -266,10 +266,10 @@ async def test_whitespace_is_not_a_standard(tmp_path):
 
 
 async def test_thinking_reviewer_fails(tmp_path):
-    """A structured call cannot stream reasoning, so a truthy `thinking` here would be a key that does
-    nothing. An ignored key is worse than a rejected one."""
+    """A structured call drops a reasoning request on almost every model, so a truthy `thinking` here
+    would be a key that usually does nothing. An ignored key is worse than a rejected one."""
     reviewers = {_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it", thinking="high")}
-    with pytest.raises(ConfigError, match="cannot reason"):
+    with pytest.raises(ConfigError, match="cannot be relied on"):
         await _resolve(tmp_path, reviewers=reviewers)
 
 

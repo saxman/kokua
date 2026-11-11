@@ -300,7 +300,7 @@ from typing import Optional, Union
 from uuid import uuid4
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
-from aimu.aio import ModelConnectionError, ModelRefusalError, RunHandle
+from aimu.aio import ModelConnectionError, ModelNotInstalledError, ModelRefusalError, RunHandle
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import SessionSummary
 
@@ -404,6 +404,25 @@ def _describe_refusal(exc: ModelRefusalError, subject: str) -> str:
     label = f" ({exc.category})" if exc.category else ""
     detail = f": {exc.explanation}" if exc.explanation else "."
     return f"declined {subject}{label}{detail}"
+
+
+def _describe_unavailable(exc: Union[ModelConnectionError, ModelNotInstalledError]) -> str:
+    """The fragment for a model that could not be used at all: "couldn't reach ..." or "couldn't use ...".
+
+    One fragment for both, because both mean the same thing to the user (nothing was asked, so
+    rephrasing will not help) and land in the same three places. They differ in the remedy. AIMU's own
+    ``ModelNotInstalledError`` message names library remedies (``aimu.pull()``, ``pull=True``) that a
+    Kokua user has no way to reach, so this builds the sentence from the error's ``model`` and
+    ``endpoint`` instead. Since AIMU 0.39.0 a client no longer downloads a missing model on
+    construction, so this error is what naming an uninstalled Ollama model now produces.
+    """
+    if isinstance(exc, ModelNotInstalledError):
+        server = exc.endpoint or "the default host"
+        return (
+            f"couldn't use {exc.model!r}: it is not installed on the model server at {server}. "
+            f"Install it there (`ollama pull {exc.model}` on an Ollama server) and try again"
+        )
+    return f"couldn't reach the model server: {describe_error(exc)}"
 
 
 #: How much of one undelivered message's text the notice and the record keep. The same number
@@ -645,7 +664,7 @@ class TurnRunner:
                         session = self._book.get(conversation_id)
                         await self._ui.show_turn(1 + len(turn_numbers(session.messages, session.metadata)))
                     if workflow is not None:
-                        ctx = self._workflow_context(agent, msg, workflow)
+                        ctx = self._workflow_context(agent, msg, workflow, conversation_id)
                         runner = workflow.build(ctx)
                         try:
                             if is_rich(runner):
@@ -730,7 +749,7 @@ class TurnRunner:
                         pass
                     await self._persist(conversation_id, user_index, token=bubble_token)
                     return
-                except ModelConnectionError as exc:
+                except (ModelConnectionError, ModelNotInstalledError) as exc:
                     # before the send: invariant 5
                     self._record_provenance(
                         conversation_id,
@@ -742,10 +761,8 @@ class TurnRunner:
                         message_indices=message_indices,
                     )
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
-                    failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
-                    await self._ui.send(
-                        f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
-                    )
+                    failure_reason = _describe_unavailable(exc)
+                    await self._ui.send(f"The request {failure_reason}", reply_to=msg)
                 except ModelRefusalError as exc:
                     # before the send: invariant 5
                     self._record_provenance(
@@ -924,7 +941,7 @@ class TurnRunner:
             conversation_id=conversation_id,
         )
 
-    def _workflow_context(self, agent, msg: ChannelMessage, workflow) -> WorkflowContext:
+    def _workflow_context(self, agent, msg: ChannelMessage, workflow, conversation_id: str) -> WorkflowContext:
         """One turn's context for ``workflow``.
 
         ``commit_user_message`` is bound here rather than implemented by the workflow because finding
@@ -947,6 +964,7 @@ class TurnRunner:
             settings=SettingsView(self._config.toolset_settings.get(workflow.name, {})),
             msg=msg,
             state=self.state,
+            conversation_id=conversation_id,
             decide=self._decide,
             commit_user_message=commit_user_message,
         )
@@ -1201,9 +1219,9 @@ class TurnRunner:
         report: Optional[str] = None
         try:
             stopped = await self._run_unattended(prompt, spec)
-        except ModelConnectionError as exc:  # invariant 6
+        except (ModelConnectionError, ModelNotInstalledError) as exc:  # invariant 6
             logger.exception("proactive turn connection error")
-            report = f"A scheduled task couldn't reach the model server: {describe_error(exc)}"
+            report = f"A scheduled task {_describe_unavailable(exc)}"
         except ModelRefusalError as exc:  # invariant 6
             logger.info("proactive turn declined by the model")
             report = f"The model {_describe_refusal(exc, 'a scheduled task')}"
@@ -1478,8 +1496,8 @@ class TurnRunner:
                 # Stopped. Handled alongside the failures rather than left to propagate, so the partial
                 # turn is recorded and snapshotted the way a failed one is; re-raised below, after that.
                 stopped, failure = True, "stopped"
-            except ModelConnectionError as exc:
-                error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
+            except (ModelConnectionError, ModelNotInstalledError) as exc:
+                error, failure = exc, _describe_unavailable(exc)
             except ModelRefusalError as exc:
                 error, failure = exc, _describe_refusal(exc, "this request")
             except Exception as exc:

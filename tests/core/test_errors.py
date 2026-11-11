@@ -6,6 +6,7 @@ from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant, ModelConnectionError, ModelRefusalError
 from kokua.core.errors import describe_error
 
+from aimu.aio import ModelNotInstalledError
 from aimu.aio.channels.base import ChannelMessage
 
 from tests.channels import FakeChannel, _config
@@ -15,6 +16,14 @@ def _connection_error() -> ModelConnectionError:
     exc = ModelConnectionError("Connection error.")
     exc.__cause__ = OSError("[Errno 61] Connection refused")
     return exc
+
+
+def _not_installed_error() -> ModelNotInstalledError:
+    return ModelNotInstalledError(
+        "Model 'qwen3:8b' is not installed. Install it with aimu.pull(\"ollama:qwen3:8b\"), or pull=True.",
+        model="qwen3:8b",
+        endpoint="http://gpu-box:11434",
+    )
 
 
 def _refusal_error() -> ModelRefusalError:
@@ -69,6 +78,46 @@ async def test_proactive_surfaces_connection_error_without_raising(tmp_path):
 
     assert len(channel.sent) == 2  # the loop's ending line, then the explanation
     assert "Connection refused" in channel.sent[-1]
+
+
+# ---------------------------------------------------------------------------
+# A model the server does not have. Since AIMU 0.39.0 nothing downloads it implicitly, so naming an
+# uninstalled Ollama model reaches the user as this error, and the remedy is one they have to run.
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_names_the_missing_model_and_how_to_install_it(tmp_path):
+    """Same branch as an unreachable server, with a remedy a Kokua user can act on.
+
+    AIMU's own message names ``aimu.pull()`` and ``pull=True``, which are library calls nobody using
+    Kokua can make, so the reply is built from the error's fields instead.
+    """
+    channel = FakeChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client=MockAsyncModelClient([_not_installed_error()])
+    )
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=assistant._active_id)
+
+    assert len(channel.sent) == 1
+    message = channel.sent[0]
+    assert "'qwen3:8b'" in message and "http://gpu-box:11434" in message
+    assert "ollama pull qwen3:8b" in message
+    assert "aimu.pull" not in message and "pull=True" not in message
+    assert "the request failed" not in message, "a missing model read as a generic failure"
+
+
+async def test_proactive_names_the_missing_model_without_raising(tmp_path):
+    channel = FakeChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client=MockAsyncModelClient([_not_installed_error()])
+    )
+
+    await assistant._proactive("remind")  # must not raise (invariant 6)
+
+    assert len(channel.sent) == 2  # the loop's ending line, then the explanation
+    assert "ollama pull qwen3:8b" in channel.sent[-1]
+    assert "task failed" not in channel.sent[-1]
 
 
 # ---------------------------------------------------------------------------

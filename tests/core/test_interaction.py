@@ -126,17 +126,103 @@ async def test_a_second_askers_default_does_not_leak_onto_the_first():
     assert await b == "b-default"
 
 
+# --- retiring a prompt whose question has closed -------------------------------------------------
+
+
+async def test_every_way_an_ask_ends_retires_its_prompt():
+    """Four ways out, one rule: the controls a prompt put up stop being usable when it stops waiting.
+
+    A page cannot work this out for itself. It knows about the one ending it caused (a click on its
+    own buttons) and about none of the other three, and a button that outlives its question sends a
+    reply nothing is waiting for, which the serve loop can only read as an ordinary message.
+    """
+    retired: list[str] = []
+
+    def request() -> PendingRequest[str]:
+        return PendingRequest(default="abandoned")
+
+    async def retire() -> None:
+        retired.append("retired")
+
+    answered = request()
+    task = asyncio.create_task(answered.ask(_noop, retire=retire))
+    await asyncio.sleep(0)
+    answered.resolve("yes")
+    assert await task == "yes"
+    assert retired == ["retired"]  # answered here
+
+    typed = request()
+    task = asyncio.create_task(typed.ask(_noop, retire=retire))
+    await asyncio.sleep(0)
+    typed.resolve(typed.parse_reply("y", "y"))
+    assert await task == "y"
+    assert len(retired) == 2  # answered by a reply the serve loop routed
+
+    abandoned = request()
+    task = asyncio.create_task(abandoned.ask(_noop, retire=retire))
+    await asyncio.sleep(0)
+    abandoned.abandon()
+    assert await task == "abandoned"
+    assert len(retired) == 3  # the user switched conversations
+
+    cancelled = request()
+    task = asyncio.create_task(cancelled.ask(_noop, retire=retire))
+    await asyncio.sleep(0)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert len(retired) == 4  # /stop took the turn the question belonged to
+
+
+async def test_a_prompt_that_was_never_sent_retires_nothing():
+    """Nothing was put up, so there is nothing to take back. `HumanGate.approve` takes this path for a
+    call whose turn left the screen while it waited its turn for the slot."""
+    retired: list[str] = []
+
+    async def retire() -> None:
+        retired.append("retired")
+
+    async def prompt() -> None:
+        raise RuntimeError("the asker changed its mind")
+
+    request: PendingRequest[str] = PendingRequest(default="abandoned")
+    with pytest.raises(RuntimeError):
+        await request.ask(prompt, retire=retire)
+    assert retired == []
+
+
+async def test_a_channel_that_cannot_be_told_does_not_lose_the_answer():
+    """The retirement runs in the `finally` that returns the answer, so a raising one would replace
+    it. A front end that could not be told is not a reason to drop a decision the user already made.
+    """
+
+    async def retire() -> None:
+        raise RuntimeError("the socket is gone")
+
+    request: PendingRequest[str] = PendingRequest(default="abandoned")
+    task = asyncio.create_task(request.ask(_noop, retire=retire))
+    await asyncio.sleep(0)
+    request.resolve("yes")
+    assert await task == "yes"
+
+
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
         self.asked_by: list[str | None] = []
+        self.asked_for: list[str] = []  # the conversation each prompt was filed against
         self.auto_approvals: list[tuple[str, dict, bool, str, str, str]] = []
         self.auto_approval_agents: list[str | None] = []
         self.alerts: list[str] = []
+        self.retired = 0
 
-    async def ask_approval(self, name, arguments, *, agent=None):
+    async def retire_prompt(self):
+        self.retired += 1
+
+    async def ask_approval(self, name, arguments, *, agent=None, conversation_id=None):
         self.asked.append(f"approve:{name}")
         self.asked_by.append(agent)
+        self.asked_for.append(conversation_id)
 
     async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None, agent=None):
         self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
@@ -203,6 +289,72 @@ async def test_abandoning_a_decision_answers_with_its_default():
     await asyncio.sleep(0)
     gate.abandon_all()
     assert await task == "fallback"
+
+
+async def test_a_decision_on_a_turn_switched_away_from_takes_its_default():
+    """The same rule a gated tool call gets, for the same reason: a question is only put to someone
+    who is there to answer it. A plan review drawn into the conversation the user moved to asks them
+    about a turn they are not reading, and the `plan_review` frame is not muted, so without this the
+    page would draw it exactly there."""
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "elsewhere")
+
+    asked = []
+
+    async def prompt():
+        asked.append("asked")
+
+    answer = await asyncio.wait_for(
+        gate.decide(prompt, lambda raw, text: "parsed", default="rejected", about="whether to proceed with its plan"),
+        timeout=_SETTLE_TIMEOUT,
+    )
+
+    assert answer == "rejected"
+    assert asked == []
+    assert len(ui.alerts) == 1
+    assert "whether to proceed with its plan" in ui.alerts[0]
+
+
+async def test_an_unattended_turn_is_never_asked_to_decide():
+    """Nobody is at the keyboard, so a question here would not be answered wrongly, it would not be
+    answered at all: a firing would wait on it until the scheduler's next restart."""
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: True, turn_conversation=lambda: "c1")
+
+    async def prompt():
+        raise AssertionError("an unattended turn has nobody to ask")
+
+    assert await asyncio.wait_for(gate.decide(prompt, lambda raw, text: "parsed", default="rejected"), timeout=2.0)
+
+
+async def test_a_decision_queued_behind_another_rechecks_the_switch():
+    """Two questions at once is a shape a workflow can produce (a plugin's is arbitrary code, and
+    `WorkflowContext` hands it `decide`), so the second waits inside `PendingRequest.ask` with its
+    check already made, exactly as a round's second gated call does."""
+    viewing = {"id": "c1"}
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    asked = []
+
+    async def prompt():
+        asked.append("asked")
+
+    holds_the_slot = asyncio.create_task(gate.decide(prompt, lambda raw, text: raw, default="rejected"))
+    queued = asyncio.create_task(gate.decide(prompt, lambda raw, text: raw, default="rejected"))
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while not gate.decision.pending:
+            await asyncio.sleep(0.001)
+
+    viewing["id"] = "c2"
+    gate.abandon_all()
+
+    assert await holds_the_slot == "rejected"
+    try:
+        assert await asyncio.wait_for(queued, timeout=_SETTLE_TIMEOUT) == "rejected"
+    except TimeoutError:
+        raise AssertionError("the queued question was put to the conversation the user switched to") from None
+    assert asked == ["asked"]  # the one prompt, raised before the switch
+    assert len(ui.alerts) == 1
 
 
 async def test_approval_takes_precedence_over_a_waiting_decision():
@@ -302,6 +454,19 @@ def _never_called(why: str):
 _SETTLE_TIMEOUT = 2.0
 
 
+async def _wait_for_prompt(gate) -> None:
+    """Wait, bounded, until `approve` has stopped to ask. Raises `TimeoutError` if it never does.
+
+    Polled rather than counted in loop turns, because a review can sit in front of the prompt and how
+    many turns that costs is not this helper's business. Slept rather than spun: on the failure path
+    this polls for the whole timeout, and a busy `sleep(0)` would burn a core for two seconds to reach
+    an assertion that already failed.
+    """
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while not gate.approval.pending:
+            await asyncio.sleep(0.001)
+
+
 async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> bool:
     """Run `approve`, wait for the prompt it must raise, and route `with_answer` the way the loop does.
 
@@ -313,11 +478,7 @@ async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> boo
     """
     task = asyncio.create_task(gate.approve("assistant", name, arguments))
     try:
-        async with asyncio.timeout(_SETTLE_TIMEOUT):
-            # Slept rather than spun: on the failure path this polls for the whole timeout, and a busy
-            # `sleep(0)` would burn a core for two seconds to reach an assertion that already failed.
-            while not gate.approval.pending:
-                await asyncio.sleep(0.001)
+        await _wait_for_prompt(gate)
     except TimeoutError:
         task.cancel()
         # Awaited, so the cancellation lands before this returns: a task left pending is collected
@@ -552,6 +713,42 @@ async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatc
     assert "denied automatically" in ui.alerts[0]
 
 
+async def test_a_switch_while_queued_behind_another_prompt_denies_instead_of_asking(in_turn):
+    """The check in front of the prompt is as old as the wait for the slot, which the user's answer bounds.
+
+    AIMU dispatches a round's tool calls concurrently (`[assistant].concurrent_tools`, on by default),
+    so two gated calls reach the gate at once and the second blocks inside `PendingRequest.ask` until
+    the first is answered. Its switched-away check was made before that wait, and a switch during the
+    wait abandons only the request that holds the slot. Asking anyway would put the question in front
+    of the wrong reader: an `approval` frame is never muted, so the page draws it into the conversation
+    now on screen, and a yes there runs the tool on a turn nobody is watching. The same reasoning as
+    the review above, over a window the user's own reading time sets rather than a model call.
+    """
+    viewing = {"id": "c1"}
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    gate.policies = _policies(confirm={"run_command"})
+
+    holds_the_slot = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
+    queued = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
+    await _wait_for_prompt(gate)
+
+    viewing["id"] = "c2"
+    gate.abandon_all()  # what a conversation switch does, and it reaches only the outstanding request
+
+    assert await holds_the_slot is False
+    try:
+        assert await asyncio.wait_for(queued, timeout=_SETTLE_TIMEOUT) is False
+    except TimeoutError:
+        raise AssertionError("the queued call asked the conversation the user had switched to") from None
+
+    assert ui.asked == ["approve:run_command"]  # the one prompt, raised before the switch
+    assert ui.asked_for == ["c1"]  # and filed against the turn's conversation, not the reader's
+    assert ui.retired == 1  # the one prompt, retired when the switch abandoned it, and nothing else
+    assert len(ui.alerts) == 1
+    assert "denied automatically" in ui.alerts[0]
+
+
 async def test_a_gate_with_no_auto_approval_prompts_as_before(monkeypatch, in_turn):
     """The feature ships off, and off means the gate behaves exactly as it did before it existed."""
     monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("the feature is off"))
@@ -562,6 +759,20 @@ async def test_a_gate_with_no_auto_approval_prompts_as_before(monkeypatch, in_tu
 
     assert ui.asked == ["approve:execute_python"]
     assert ui.auto_approvals == []
+    assert ui.retired == 1  # the answer closed the question, so the buttons stop being usable
+
+
+async def test_a_denial_that_never_asked_retires_nothing(monkeypatch, in_turn):
+    """A call denied before the prompt put nothing on screen, so there is nothing to take back."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("a backgrounded turn is not reviewable"))
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "elsewhere")
+    gate.policies = _policies(confirm={"run_command"})
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
+
+    assert ui.asked == []
+    assert ui.retired == 0
 
 
 class _ApprovingClient:

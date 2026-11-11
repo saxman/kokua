@@ -162,7 +162,14 @@ class PlanningWorkflow(aio.AsyncRunner):
             return raw.strip()
 
         return await self._ctx.decide(
-            lambda: self._ui.ask_plan_review(plan, critique), parse, default=None, context=plan
+            lambda: self._ui.ask_plan_review(plan, critique, conversation_id=self._ctx.conversation_id),
+            parse,
+            default=None,
+            context=plan,
+            # How a card names this question if the user switches conversations before it is asked.
+            # Phrased to complete "asked you ...", and this workflow's words rather than the core's,
+            # for the reason `parse` is: only the asker knows what it was asking.
+            about="whether to proceed with its plan",
         )
 
     async def _execute_streaming(self, msg: ChannelMessage, plan: str, events: list[dict]) -> WorkflowResult:

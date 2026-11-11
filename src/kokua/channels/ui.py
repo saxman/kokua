@@ -65,6 +65,7 @@ class ChannelUI:
         self._conversations = getattr(channel, "send_conversations", None)
         self._notification = getattr(channel, "send_notification", None)
         self._approval_request = getattr(channel, "send_approval_request", None)
+        self._prompt_retired = getattr(channel, "send_prompt_retired", None)
         self._auto_approval = getattr(channel, "send_auto_approval", None)
         self._plan_review_request = getattr(channel, "send_plan_review_request", None)
         self._plan = getattr(channel, "send_plan", None)
@@ -271,23 +272,44 @@ class ChannelUI:
         else:
             await self._channel.send(text)
 
-    async def ask_approval(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+    async def ask_approval(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+    ) -> None:
         """Prompt for tool approval, as a frame or as a plain-text question.
 
         ``agent`` names who is asking, since a delegated worker's call reaches the same prompt as the
         entry agent's and the user is deciding whether *that* agent may act. The frame method always
-        receives ``agent`` (None when unknown), so a channel written against the older one-argument
-        method raises ``TypeError`` rather than being half-served: the frame change is a breaking one.
+        receives ``agent`` and ``conversation_id`` (None when unknown), so a channel written against an
+        older signature raises ``TypeError`` rather than being half-served: the frame change is a
+        breaking one.
+
+        ``conversation_id`` rides along for a front end that files a frame against a transcript, and
+        is dropped by the plain-text fallback, which has one place to print and no way to be looking
+        somewhere else.
 
         ``name`` is the label to show, ``toolset.tool`` where the toolset is known (``HumanGate`` composes
         it), not an identifier to match on: nothing replies with it, since the answer is a bare yes or no.
         """
         if self._approval_request is not None:
-            await self._approval_request(name, arguments, agent=agent)
+            await self._approval_request(name, arguments, agent=agent, conversation_id=conversation_id)
         elif agent is None:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
         else:
             await self._channel.send(f"[approve] Allow {agent} to run {name}({arguments})? [y/N]")
+
+    async def retire_prompt(self) -> None:
+        """Say that the outstanding question is closed, however it closed: answered here, answered by
+        a typed reply, abandoned by a switch, or cancelled with its turn.
+
+        For a channel whose prompt is a *control* (the web page's Allow/Deny, a plan review's
+        Approve/Edit/Reject), which is the only kind that can still be used after the question is
+        gone: a click on a closed prompt sends a reply that matches no pending request, which the
+        serve loop can only read as an ordinary message, so the user's "y" becomes a turn saying "y".
+        A channel that prompts by printing a line has nothing to take back and no way to be clicked,
+        so this is silence there, as it is for a channel with no prompt frame at all.
+        """
+        if self._prompt_retired is not None:
+            await self._prompt_retired()
 
     async def show_auto_approval(
         self,
@@ -345,11 +367,16 @@ class ChannelUI:
         else:
             await self._channel.send(f"[auto-approval] {model} is asking you to approve {call}{because}")
 
-    async def ask_plan_review(self, plan: str, critique: Optional[list[str]] = None) -> None:
-        """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh."""
+    async def ask_plan_review(
+        self, plan: str, critique: Optional[list[str]] = None, *, conversation_id: Optional[str] = None
+    ) -> None:
+        """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh.
+
+        ``conversation_id`` rides along as it does for :meth:`ask_approval`, and is dropped by the
+        same fallback for the same reason: a printed question has one place to appear."""
         concerns = _bullets(critique) if critique else None
         if self._plan_review_request is not None:
-            await self._plan_review_request(plan, concerns)
+            await self._plan_review_request(plan, concerns, conversation_id=conversation_id)
         else:
             note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)

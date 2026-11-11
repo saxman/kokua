@@ -1035,18 +1035,62 @@ async def test_web_channel_send_working_with_no_elapsed_reports_idle():
 
 
 async def test_web_channel_send_approval_request_emits_frame():
+    """The conversation rides on the prompt too, for the reason it rides on an auto-approval card:
+    the page has to be able to drop a question that raced a switch instead of asking the wrong
+    reader about another conversation's call."""
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_approval_request("add_skill_script", {"skill_name": "x"})
+    await channel.send_approval_request("add_skill_script", {"skill_name": "x"}, conversation_id="c1")
     assert ws.frames == [
-        {"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}, "agent": None}
+        {
+            "type": "approval",
+            "name": "add_skill_script",
+            "arguments": {"skill_name": "x"},
+            "agent": None,
+            "conversation_id": "c1",
+        }
     ]
 
 
 async def test_web_approval_frame_carries_the_agent():
     ws = _FakeWS()
     await WebChannel(ws).send_approval_request("run_command", {}, agent="coder")
-    assert ws.frames == [{"type": "approval", "name": "run_command", "arguments": {}, "agent": "coder"}]
+    assert ws.frames == [
+        {"type": "approval", "name": "run_command", "arguments": {}, "agent": "coder", "conversation_id": None}
+    ]
+
+
+async def test_web_channel_sends_a_plan_review_frame_with_its_conversation():
+    """The conversation rides on this prompt too, for the reason it rides on an approval: the page
+    has to be able to drop a question that raced a switch rather than ask the wrong reader."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_plan_review_request("step 1", "too vague", conversation_id="c1")
+    assert ws.frames == [{"type": "plan_review", "plan": "step 1", "critique": "too vague", "conversation_id": "c1"}]
+
+
+async def test_web_channel_sends_a_prompt_retired_frame():
+    """One frame, no payload: the page keeps one outstanding prompt because the core allows one."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_prompt_retired()
+    assert ws.frames == [{"type": "prompt_retired"}]
+
+
+async def test_a_prompt_retired_frame_is_never_muted_by_a_switch():
+    """Not a turn frame, deliberately. It is sent as a turn ends, including by the /stop that ended
+    it, and muting it would leave live controls on a question nothing is waiting to answer."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "on-screen"
+    token = streaming_conversation.set("elsewhere")
+    try:
+        await channel.send_prompt_retired()
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "prompt_retired"}]
 
 
 async def test_web_channel_sends_an_auto_approval_frame():

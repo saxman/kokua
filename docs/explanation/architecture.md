@@ -120,6 +120,25 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
+Anything that stops to ask the user something therefore has one question to keep asking first: is the
+turn it belongs to still the conversation on screen? A gated tool call asks it most often, and a
+workflow's own question (a plan review) asks it too, since a `plan_review` frame is no more muted than
+an `approval` one and would otherwise put one turn's question to another turn's reader; a workflow
+that cannot ask takes the safe answer it named for an abandoned request, and says so on a card in the
+words the workflow supplied, since only the asker knows what it was asking.
+
+For a gated call, `HumanGate.approve` asks at each of the three points the answer can have gone
+stale, and each window is wider than the last: when the call arrives, after the reviewer's model
+call, and once the single approval slot is finally held. The third is the one that is easy to miss.
+Tool calls in a round are dispatched concurrently (`[assistant].concurrent_tools`) while the approval
+slot is single and lock-guarded, so a round's second gated call waits inside `PendingRequest.ask` for
+as long as the user takes to answer the first. A switch during that wait abandons only the request
+holding the slot, and without the third check the call queued behind it would go on to ask: an
+`approval` frame is never muted, so the page would draw that question into whatever transcript is now
+on screen, and an Allow there would run the tool on a turn nobody is watching. The frame carries its
+conversation for the reason an `auto_approval` card does, so a prompt that raced even that last check
+is dropped by the page rather than shown to the wrong reader.
+
 The approval gate has one optional layer above it, off by default:
 [`core/auto_approval.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py).
 A declared reviewer answers three questions and writes one sentence about a gated call, and
@@ -1313,12 +1332,24 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.38.0`**, for two capabilities. `calculate` evaluates an allowlisted syntax
+The floor is now **`aimu>=0.39.0`**, and the probe is a name lookup on `aimu.tools.builtin.make_page_tools`,
+the factory the `web` toolset builds `fetch_page`, `read_page`, and `find_in_page` from. The probe moved
+there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
+`aimu_compat._PROBE_UNRELEASED` kept the refusal from recommending the PyPI install that had just failed.
+The same release makes `trim_messages` keep the first message after the system prompt (`keep_first`,
+default 1), which is a spawned worker's task, so a worker compacted by `compaction_for_window` no longer
+loses its assignment first. That change is silent when missing and has a signature handle, but the probe
+stays on `make_page_tools`: every AIMU commit between the two features reports 0.38.0, so the floor
+already refuses them, and `tests/test_aimu_compat.py` pins the behavior. 0.39.0 is also the release in
+which an Ollama client stopped downloading a missing model when built, so a missing model now reaches a
+turn as `ModelNotInstalledError`, which `core/turns.py` reports beside an unreachable server.
+
+Before it, the floor was `aimu>=0.38.0`, for two capabilities. `calculate` evaluates an allowlisted syntax
 tree instead of `eval` with an empty builtins dict, which any expression could climb out of to reach
 `os`, and the shipped approval policy leaves `compute.calculate` ungated on the premise that it runs no
 code of the model's. And a spawn leads a worker's result with a note when its round cap ended it, which
 is how the delegating agent learns the answer is partial. Neither has a symbol, parameter, or set member
-to probe, so the probe stays on `RunEvent.run_id` and the floor covers both, pinned by behavior in
+to probe, so the probe stayed on `RunEvent.run_id` and the floor covered both, pinned by behavior in
 `tests/test_aimu_compat.py`.
 
 Before it, the floor was `aimu>=0.37.0`: a spawned worker's spec carries a `"tool_approval"` key, which is
@@ -1656,9 +1687,9 @@ than a shared one.
 `channels/web.py`'s `WebChannel` subclasses
 [AIMU's base `WebChannel`](https://saxman.info/aimu/how-to/build-personal-assistant/). The streaming transport
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
-frames its richer page needs, among them `conversations`, `history`, `approval`, `turn_saved`,
-`models`, and `inbox`. The UI is a single self-contained `web_static/index.html` served as package data, plus
-vendored `marked` + `DOMPurify`
+frames its richer page needs, among them `conversations`, `history`, `approval`, `prompt_retired`,
+`turn_saved`, `models`, and `inbox`. The UI is a single self-contained `web_static/index.html` served as
+package data, plus vendored `marked` + `DOMPurify`
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with `trust:false` once the turn completes. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
@@ -1699,6 +1730,15 @@ on a plain string, and the commonest message of all is the one that most needs n
 `frontends/web.py`'s `_parse_input` decodes it and `WebChannel.feed_input` queues it; both shapes
 converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took,
 and a frame's text is read exactly as a bare one's, commands and all.
+
+A reply that matches no outstanding request is not an error, it is an ordinary message, so a control
+that outlives its question is a real hazard rather than a dead button: clicking Allow on a closed prompt
+turns `y` into a turn saying "y". The `prompt_retired` frame is what closes one. It is sent from
+`PendingRequest.ask`'s `finally`, so it covers all four ways a question stops waiting (answered by a
+click, answered by a typed reply, abandoned by a switch, cancelled with its turn by `/stop`) rather than
+the one the page can see for itself, and the page disables the card's controls without removing the card,
+which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
+so `ChannelUI.retire_prompt` is silence there.
 
 ### Reading the socket, and applying what arrives
 

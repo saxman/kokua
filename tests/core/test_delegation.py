@@ -321,12 +321,19 @@ def test_a_spec_carries_a_trimmer_sized_to_the_window_its_agent_resolves(tmp_pat
     compaction = build_agent_specs(config, state, "assistant")["researcher"]["compaction"]
 
     # Its own window, not the global one and not its delegator's: 8,000 leaves 6,000 for messages, so a
-    # conversation over that is trimmed and one under it is handed back unchanged.
-    long_conversation = [{"role": "user", "content": "word " * 20_000}] + [
-        {"role": "assistant", "content": "ok"},
+    # conversation over that is trimmed and one under it is handed back unchanged. The bulk sits after the
+    # task, because the task is the one message a trim keeps (AIMU's `keep_first`, default 1): a worker
+    # that lost it would carry on answering a question it could no longer see.
+    task = {"role": "user", "content": "find the release date"}
+    long_conversation = [
+        task,
+        {"role": "assistant", "content": "word " * 20_000},
         {"role": "user", "content": "and?"},
+        {"role": "assistant", "content": "ok"},
     ]
-    assert len(compaction(long_conversation)) < len(long_conversation)
+    trimmed = compaction(long_conversation)
+    assert len(trimmed) < len(long_conversation)
+    assert trimmed[0] == task
     short = [{"role": "user", "content": "hello"}]
     assert compaction(short) == short
 
