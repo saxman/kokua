@@ -316,8 +316,10 @@ class AssistantConfig:
     # Past this, the review escalates rather than being waited on any longer.
     auto_approval_timeout_seconds: float = 10.0
     # Most auto-approvals one turn may collect. A loop calling one tool twenty times must not collect
-    # twenty approvals, and the cap bounds what the feature can cost per turn at the same time.
-    auto_approval_max_per_turn: int = 5
+    # twenty approvals, and the cap bounds what the feature can cost per turn at the same time. Sized for
+    # a delegating turn, since sub-agents spend from the same budget: one shell-heavy worker can use up a
+    # smaller allowance by itself, and the rest of the turn then asks the user as if the feature were off.
+    auto_approval_max_per_turn: int = 10
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
     # forms, and store.LOCK_AXIOM for the one key no list can unlock.
     locked_config_keys: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_CONFIG_KEYS))

@@ -2059,7 +2059,9 @@ notice on startup.
   gated call a reviewer waved through from one the user approved. An unattended turn is excluded twice
   over: it auto-denies before a reviewer is consulted, and it opens no per-turn budget, so a call
   reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and `max_per_turn`
-  (default 5, spent when a review is *attempted*) bound what it can cost. What it does
+  (default 10, spent when a review is *attempted*) bound what it can cost. The budget is the turn's,
+  sub-agents included, so the default is sized for a delegating turn: at 5, one shell-heavy worker could
+  spend it all, and the rest of the turn asked the user as if the feature were off. What it does
   not do is written down as plainly as what it does, in
   [docs/explanation/auto-approval.md](https://saxman.info/kokua/explanation/auto-approval/): no
   sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most
