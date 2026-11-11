@@ -396,6 +396,11 @@ A tool in neither list runs. Entries use one vocabulary, the one `available` use
 two. The shipped default names `fs_write` bare so a writer AIMU adds to that group later is gated on
 arrival, and names `compute.execute_python` explicitly because `compute` also holds `calculate`.
 
+The same name is what you watch. Every tool call Kokua shows (a card, a terminal line, an approval
+prompt, a reload, an export) reads `toolset.tool`, so the entry you would write to gate a call is printed
+on the call itself. The toolset is the one that gave *the calling agent* that tool, which matters when
+two toolsets offer one name and two agents hold different ones.
+
 This is the layer other frameworks call permissions or authorization policy. Managed Agents has three
 policies, `always_allow`, `always_ask`, and `auto`; OpenClaw's approval engine says allow, deny, or ask;
 Claude Code has permission rules plus an auto mode. Kokua says "approval" because the code already did

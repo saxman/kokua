@@ -514,3 +514,63 @@ def test_shadowed_tools_ignores_the_activate_skill_every_skill_carries(tmp_path,
     }
 
     assert shadowed_tools(config, build_registry(config), tools) == []
+
+
+def _labelling_state(tmp_path, agents, tools_by_toolset):
+    from kokua.registry.context import LiveState
+
+    config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent="assistant")
+    state = LiveState(config=config, registry=build_registry(config))
+    state.tools_by_toolset = tools_by_toolset
+    return state
+
+
+def test_toolset_of_answers_from_the_calling_agents_own_toolsets(tmp_path):
+    """Two toolsets offering one name is the case a global lookup gets wrong: each agent is answered
+    from what it declared, in the order its tools were built, so the toolset that won is the one named."""
+    from kokua.core.agents import toolset_of
+
+    agents = {
+        "assistant": AgentConfig(available=["time", "compute"], delegates_to=["explorer"]),
+        "explorer": AgentConfig(available=["compute"]),
+    }
+    state = _labelling_state(tmp_path, agents, {"time": {"now", "clash"}, "compute": {"calculate", "clash"}})
+
+    assert toolset_of(state, "assistant", "calculate") == "compute"
+    assert toolset_of(state, "assistant", "clash") == "time"
+    assert toolset_of(state, "explorer", "clash") == "compute"
+
+
+@pytest.mark.parametrize("tool", ["spawn_subagent", "activate_skill", "available_tools", "load_tools"])
+def test_toolset_of_puts_the_tools_no_toolset_provides_under_core(tmp_path, tool):
+    from kokua.core.agents import toolset_of
+
+    state = _labelling_state(tmp_path, {"assistant": AgentConfig(available=["time"])}, {"time": {"now"}})
+    assert toolset_of(state, "assistant", tool) == "core"
+
+
+def test_toolset_of_names_a_skill_for_its_scripts(tmp_path):
+    """The entry agent's SkillAgent holds a skill's scripts without any build recording them."""
+    from kokua.core.agents import toolset_of
+    from tests.core.test_skill_toolsets import write_skill
+
+    state = _labelling_state(tmp_path, {"assistant": AgentConfig(available=["time"])}, {"time": {"now"}})
+    write_skill(state.config, "weekly-digest", "Digest the week.", script="print(1)\n")
+    assert toolset_of(state, "assistant", "weekly_digest__run") == "weekly-digest"
+
+
+def test_toolset_of_falls_back_to_every_toolset_for_an_agent_the_config_does_not_describe(tmp_path):
+    """A composed worker or a critic has no declaration to search, so every built toolset is."""
+    from kokua.core.agents import toolset_of
+
+    state = _labelling_state(tmp_path, {"assistant": AgentConfig(available=["time"])}, {"web": {"get_web_content"}})
+    assert toolset_of(state, "composed:reader", "get_web_content") == "web"
+    assert toolset_of(state, None, "get_web_content") == "web"
+
+
+def test_toolset_of_is_none_for_a_name_nothing_recorded(tmp_path):
+    """Shown bare rather than under a guess."""
+    from kokua.core.agents import toolset_of
+
+    state = _labelling_state(tmp_path, {"assistant": AgentConfig(available=["time"])}, {"time": {"now"}})
+    assert toolset_of(state, "assistant", "mystery") is None

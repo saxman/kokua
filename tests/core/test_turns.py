@@ -13,6 +13,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from kokua.core.assistant import Assistant
 from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, is_user_turn
 from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
+from kokua.core.transcripts import replay_items
 from kokua.core.turn_registry import TurnInfo
 from kokua.core.turns import UNDELIVERED_TEXT_CHARS
 from kokua.toolsets.planning import PLANNING_WORKFLOW
@@ -1076,6 +1077,24 @@ async def test_turn_records_the_model_that_answered_it_under_its_user_index(tmp_
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
 
     assert assistant._store.get(assistant._active_id).metadata["model"]["0"] == "ollama:qwen3:8b"
+
+
+async def test_a_turn_records_the_toolset_behind_each_tool_call_under_its_user_index(tmp_path):
+    """Resolved when the turn ends, against the registry the turn ran with, so a reload later shows the
+    toolset that served the call rather than whatever is installed by then."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["tool", "done"]))
+    # The mock's faked round calls `mock_tool`, which no real toolset builds; filed under one the shipped
+    # entry agent holds, as a build would have recorded it.
+    assistant._state.tools_by_toolset.setdefault("time", set()).add("mock_tool")
+
+    await assistant._handle(ChannelMessage(text="go", channel="fake"), conversation_id=assistant._active_id)
+
+    stored = assistant._store.get(assistant._active_id)
+    assert stored.metadata["toolsets"] == {"0": {"x": "time"}}
+    tools = [
+        item for item in replay_items(stored.messages, toolsets=stored.metadata["toolsets"]) if item["type"] == "tool"
+    ]
+    assert tools[0]["toolset"] == "time"
 
 
 async def test_a_turn_records_the_entry_agents_own_model_over_the_default(tmp_path):

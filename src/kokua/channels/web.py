@@ -94,6 +94,22 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+def _tool_frame(call: Any) -> dict:
+    """A ``tool`` frame for one TOOL_CALLING chunk's content: AIMU's frame plus the ``toolset`` the call
+    came from, which ``ChannelUI`` adds to the chunk and AIMU's own mapping would drop. Absent, not
+    ``None``, when no toolset is known, so the page tells "unknown" from a toolset by the key alone."""
+    call = call if isinstance(call, dict) else {}
+    frame = {
+        "type": "tool",
+        "name": call.get("name"),
+        "arguments": call.get("arguments"),
+        "response": call.get("response"),
+    }
+    if call.get("toolset"):
+        frame["toolset"] = call["toolset"]
+    return frame
+
+
 def _image_frame_for(chunk: StreamChunk) -> Optional[dict]:
     """Return an ``image`` frame for a final IMAGE_GENERATING chunk, else None.
 
@@ -421,10 +437,10 @@ class WebChannel(BaseWebChannel):
         *,
         reply_to: Optional[ChannelMessage] = None,
     ) -> None:
-        """Stream a reply, forwarding an ``image`` frame for each image-progress chunk along the way.
+        """Stream a reply, sending the frames this subclass maps itself along the way.
 
         Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
-        hook for image progress); strings (including proactive pushes) pass straight through. A
+        hook); strings (including proactive pushes) pass straight through. A
         background turn needs no special path here: the base loop drains the whole stream either way
         (so the agent run completes and its state persists), and each frame it produces is muted or not
         on its own, as the view stands when that frame is sent (see the module docstring).
@@ -432,7 +448,7 @@ class WebChannel(BaseWebChannel):
         if isinstance(content, str):
             await super().send(content, reply_to=reply_to)
             return
-        await super().send(self._forward_image_frames(content), reply_to=reply_to)
+        await super().send(self._forward_own_frames(content), reply_to=reply_to)
 
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream the agentic loop live and return the accumulated GENERATING text.
@@ -457,15 +473,7 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.THINKING and chunk.content:
                 await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING:
-                call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame(
-                    {
-                        "type": "tool",
-                        "name": call.get("name"),
-                        "arguments": call.get("arguments"),
-                        "response": call.get("response"),
-                    }
-                )
+                await self.send_frame(_tool_frame(chunk.content))
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
@@ -484,15 +492,21 @@ class WebChannel(BaseWebChannel):
                     await self.send_frame(image)
         return "".join(parts)
 
-    async def _forward_image_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
-        """Yield ``chunks`` unchanged, sending an ``image`` frame for each image-progress chunk.
+    async def _forward_own_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Pass ``chunks`` on to the base ``send`` loop, sending the frames that loop cannot produce.
 
-        The base ``send`` loop has no branch for image progress and no per-chunk hook, so this wrapper
-        is how those frames reach the page. Loop boundaries used to be inferred here from a rise in
+        Two kinds. An image-progress chunk gets an ``image`` frame and is still passed on, since the base
+        loop has no branch for it and no per-chunk hook. A tool call is sent here instead and *not*
+        passed on, because the base loop's ``tool`` frame has no ``toolset`` (see :func:`_tool_frame`) and
+        sending both would draw the call twice. Loop boundaries used to be inferred here from a rise in
         ``StreamChunk.iteration``; AIMU now yields a ``CONTINUING`` chunk carrying the injected prompt
         itself, which the base loop maps, so nothing is guessed on this path any more.
         """
         async for chunk in chunks:
+            if chunk.phase == StreamingContentType.TOOL_CALLING:
+                if self.stream_tools:
+                    await self.send_frame(_tool_frame(chunk.content))
+                continue
             image = _image_frame_for(chunk)
             if image is not None:
                 await self.send_frame(image)
@@ -531,6 +545,7 @@ class WebChannel(BaseWebChannel):
             mid_turn=meta.get("messages"),
             undelivered=meta.get("undelivered"),
             requests=meta.get("requests"),
+            toolsets=meta.get("toolsets"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:
@@ -680,7 +695,7 @@ class WebChannel(BaseWebChannel):
         verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
         and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
         entries (a ``"tool"`` entry carrying ``name``/``arguments``/``response``, the last being what the
-        call returned), closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
+        call returned, and ``toolset`` when it is known), closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
         reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
         no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
 

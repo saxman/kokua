@@ -196,6 +196,7 @@ def render_markdown(
         mid_turn=metadata.get("messages"),
         undelivered=metadata.get("undelivered"),
         requests=metadata.get("requests"),
+        toolsets=metadata.get("toolsets"),
     )
     lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
@@ -523,7 +524,9 @@ def _render_tool(item: dict, max_payload_chars: Optional[int], payloads_path: Op
     back through ``payloads_path`` and shown whole; otherwise, or if the blob is missing, the stored
     preview stands with a note giving its real size and where the rest lives.
     """
-    lines = [f"**Tool call: `{item['name']}`**", ""]
+    # `toolset.tool` where the call recorded its toolset, as the page shows it; bare where it did not.
+    name = f"{item['toolset']}.{item['name']}" if item.get("toolset") else item["name"]
+    lines = [f"**Tool call: `{name}`**", ""]
     arguments = item.get("arguments")
     if arguments:
         lines.append(_fenced(_capped(arguments, max_payload_chars), "json"))

@@ -491,6 +491,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer
     that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
     card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
     `tool_call_id`, since concurrent dispatch appends results in completion order.
+  - **A tool call names the toolset it came from**, as `toolset.tool` (`web.get_web_content`,
+    `core.spawn_subagent`, `github.create_issue` for an MCP server named `github`): the name an
+    `available` list or a `confirm` / `review` entry would use, so what you watch matches what you
+    configure. It shows on live cards, in the terminal's `[tool]` lines, inside sub-agent cards, on
+    approval and auto-approval prompts, on reload, and in a Markdown export. The toolset is resolved
+    for the agent that made the call (`core.agents.toolset_of`), since two toolsets can offer one tool
+    name, and recorded when the turn ends (`metadata["toolsets"]`, per call id; a worker's rides its card
+    entry), so a reload names the toolset that served the call rather than whatever is installed later.
+    A call stored before this, or one no toolset recorded, shows its bare name rather than a guess. The
+    request panel's tool calls stay bare: they show what the model returned, verbatim.
   - **Sub-agent work is visible.** A `spawn_subagent` call renders as
     `subagent  spawn_subagent(<role>)  <status>` over an argument line, then the nested thinking, tool calls,
     and answer the child produced, each individually foldable and built by the same builders and CSS as

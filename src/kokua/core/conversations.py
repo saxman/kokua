@@ -69,6 +69,7 @@ TURN_KEYED_METADATA = (
     "requests",
     "messages",
     "undelivered",
+    "toolsets",
 )
 
 
@@ -777,10 +778,11 @@ class ConversationBook:
         usage: Optional[dict] = None,
         messages: Optional[list[int]] = None,
         requests: Optional[dict] = None,
+        toolsets: Optional[dict[str, str]] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
-        reasoning effort it ran at, why it stopped early if it did, what it cost, and which of its
-        messages the user sent into it while it ran.
+        reasoning effort it ran at, why it stopped early if it did, what it cost, which of its
+        messages the user sent into it while it ran, and which toolset served each of its tool calls.
 
         The cards are what reload replays. The model and the effort are recorded per turn rather than
         once per conversation because a conversation outlives the config that started it:
@@ -816,8 +818,15 @@ class ConversationBook:
         ``requests`` is what ``core.requests.TurnRequests.record`` returned: each model call's exact
         request (by reference to a payload file) and how each agent loop ended. It sits beside ``usage``
         because the two answer one question from two sides, what the turn cost and what it was shown.
+
+        ``toolsets`` maps each of the entry agent's tool call ids to the toolset that served it, so a
+        replayed call reads ``toolset.tool`` as it did live. A message's own ``tool_calls`` are not the
+        place for it, for ``failure``'s reason: the messages are what this conversation's agent rebuilds
+        its context from, so a key added there would travel to the provider on every later request.
         """
-        if user_index < 0 or not (events or model or thinking is not None or failure or usage or messages or requests):
+        if user_index < 0 or not (
+            events or model or thinking is not None or failure or usage or messages or requests or toolsets
+        ):
             return
         session = self._store.get(conversation_id)
         if events:
@@ -834,6 +843,8 @@ class ConversationBook:
             session.metadata.setdefault("requests", {})[str(user_index)] = requests
         if messages:
             session.metadata.setdefault("messages", {})[str(user_index)] = list(messages)
+        if toolsets:
+            session.metadata.setdefault("toolsets", {})[str(user_index)] = dict(toolsets)
         self._store.save(session)
 
     def record_undelivered(self, conversation_id: str, user_index: int, reports: list[dict]) -> None:

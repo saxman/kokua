@@ -116,11 +116,15 @@ class HumanGate:
         active_id: Callable[[], str],
         is_proactive: Callable[[], bool],
         turn_conversation: Callable[[], Optional[str]],
+        toolset_of: Callable[[Optional[str], str], Optional[str]] = lambda agent, tool: None,
     ):
         self._ui = ui
         self._active_id = active_id
         self._is_proactive = is_proactive
         self._turn_conversation = turn_conversation
+        # Names the toolset a gated call came from, so a prompt asks about `toolset.tool`: the name the
+        # `confirm` or `review` entry that gated it was written in.
+        self._toolset_of = toolset_of
         # Every agent's resolved approval policy, assigned once every agent has been wired
         # (core.approval.resolve_approval_policies, called from Assistant.start). None until then,
         # deliberately, rather than an empty set: this gate is built in the composition root's __init__
@@ -213,7 +217,7 @@ class HumanGate:
             if self._turn_conversation() != self._active_id():
                 return await self._deny_switched_away(name, turn_conversation)
             await self._ui.show_auto_approval(
-                name,
+                self._label(agent, name),
                 arguments,
                 approved=outcome.approved,
                 reason=outcome.reason,
@@ -223,7 +227,12 @@ class HumanGate:
             )
             if outcome.approved:
                 return True
-        return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments, agent=agent))
+        return await self.approval.ask(lambda: self._ui.ask_approval(self._label(agent, name), arguments, agent=agent))
+
+    def _label(self, agent: str, name: str) -> str:
+        """``name`` as the prompt shows it: ``toolset.tool``, or bare when no toolset is known."""
+        toolset = self._toolset_of(agent, name)
+        return f"{toolset}.{name}" if toolset else name
 
     async def _deny_switched_away(self, name: str, turn_conversation: Optional[str]) -> bool:
         """Deny a gated call whose turn is not the conversation on screen, and say so. Always False.

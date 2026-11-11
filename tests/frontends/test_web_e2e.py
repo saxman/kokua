@@ -2825,6 +2825,16 @@ def test_a_live_tool_round_moves_its_button_onto_the_tool_card_that_follows(page
     expect(thinking.locator("> .fold-header > .fold-ts")).to_have_count(1)  # its caption went back home
 
 
+def test_a_tool_card_names_its_toolset_and_one_without_stays_bare(page, live_server):
+    _open(page, live_server())
+    _live_frame(page, {"type": "tool", "name": "calculate", "arguments": {}, "response": "4", "toolset": "compute"})
+    _live_frame(page, {"type": "tool", "name": "mystery", "arguments": {}, "response": "x"})
+    labels = page.locator("#log > .bubble.tool > .fold-header > .fold-label")
+    expect(labels.nth(0)).to_contain_text("compute.calculate()")
+    expect(labels.nth(1)).to_contain_text("mystery()")
+    expect(labels.nth(1)).not_to_contain_text(".mystery")
+
+
 def test_a_live_tool_round_with_two_calls_puts_its_button_on_the_last(page, live_server):
     _open(page, live_server(seed=_request_seed()))
     _live_frame(page, {**_LIVE_CALL, "tool_call_count": 2})

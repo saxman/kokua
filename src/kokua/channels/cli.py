@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Union
 
 from aimu.aio import CLIChannel as BaseCLIChannel
 from aimu.aio.channels.base import ChannelMessage
+from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.channels.ui import ending_line
 
@@ -36,6 +37,20 @@ _THINK_COMMAND = "/think"
 # The words `/think` takes, in the order they are offered. "default" is the one that is not a level: it
 # clears the request, leaving whatever config.toml declares in force.
 _THINK_CHOICES = ("default", "off", "low", "medium", "high")
+
+
+async def _toolset_names(chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+    """Yield ``chunks`` with each tool call renamed ``toolset.tool`` where its toolset is known.
+
+    AIMU's terminal line prints a call's ``name`` and nothing else from the chunk, so the rename is the
+    whole of what it takes to show the ``toolset`` key ``ChannelUI`` added. Safe only because nothing
+    downstream of this channel reads the name back.
+    """
+    async for chunk in chunks:
+        call = chunk.content
+        if chunk.phase == StreamingContentType.TOOL_CALLING and isinstance(call, dict) and call.get("toolset"):
+            chunk = chunk._replace(content={**call, "name": f"{call['toolset']}.{call.get('name')}"})
+        yield chunk
 
 
 def _apply_think(argument: str, current: Optional[str]) -> Optional[str]:
@@ -62,8 +77,19 @@ def _apply_think(argument: str, current: Optional[str]) -> Optional[str]:
 
 
 class CLIChannel(BaseCLIChannel):
-    """AIMU's ``CLIChannel`` with ``/attach <path>`` and ``/think <level>``, and the two plain lines a
-    terminal needs to follow a turn: its number and how each tool loop ended."""
+    """AIMU's ``CLIChannel`` with ``/attach <path>`` and ``/think <level>``, the two plain lines a
+    terminal needs to follow a turn (its number and how each tool loop ended), and each tool call shown
+    as ``toolset.tool``."""
+
+    async def send(
+        self,
+        content: Union[str, AsyncIterator[StreamChunk]],
+        *,
+        reply_to: Optional[ChannelMessage] = None,
+    ) -> None:
+        if not isinstance(content, str):
+            content = _toolset_names(content)
+        await super().send(content, reply_to=reply_to)
 
     async def send_turn(self, number: int) -> None:
         await self.send(f"[turn {number}]")

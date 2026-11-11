@@ -24,11 +24,11 @@ are not "call it if present" -- they change what the core *does*:
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union
 
 from aimu.aio import Channel
 from aimu.aio.channels.base import ChannelMessage
-from aimu.models import StreamChunk
+from aimu.models import StreamChunk, StreamingContentType
 
 
 def ending_line(ending: dict) -> str:
@@ -56,8 +56,11 @@ def _bullets(issues: list[str]) -> str:
 class ChannelUI:
     """Adapts any ``aimu.aio.Channel`` to the full surface the core wants to use."""
 
-    def __init__(self, channel: Channel):
+    def __init__(self, channel: Channel, *, toolset_of: Optional[Callable[[str], Optional[str]]] = None):
         self._channel = channel
+        # Names the toolset a streamed tool call came from, written into the chunk as ``toolset`` so a
+        # channel can show the call as ``toolset.tool``. None, or a None answer, streams the call bare.
+        self._toolset_of = toolset_of
         self._conversations = getattr(channel, "send_conversations", None)
         self._notification = getattr(channel, "send_notification", None)
         self._approval_request = getattr(channel, "send_approval_request", None)
@@ -116,7 +119,27 @@ class ChannelUI:
         *,
         reply_to: Optional[ChannelMessage] = None,
     ) -> None:
+        if not isinstance(content, str):
+            content = self._with_toolsets(content)
         await self._channel.send(content, reply_to=reply_to)
+
+    async def _with_toolsets(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Yield ``chunks``, each tool call carrying the ``toolset`` it came from where one is known.
+
+        Added here, once, rather than by each channel, because naming a toolset takes the live registry,
+        which the core holds and a channel must not reach for. The key rides AIMU's own chunk, so a
+        channel that does not read it renders the call exactly as before.
+        """
+        async for chunk in chunks:
+            if (
+                self._toolset_of is not None
+                and chunk.phase == StreamingContentType.TOOL_CALLING
+                and isinstance(chunk.content, dict)
+            ):
+                toolset = self._toolset_of(chunk.content.get("name") or "")
+                if toolset:
+                    chunk = chunk._replace(content={**chunk.content, "toolset": toolset})
+            yield chunk
 
     def receive(self) -> AsyncIterator[ChannelMessage]:
         return self._channel.receive()
@@ -253,6 +276,9 @@ class ChannelUI:
         entry agent's and the user is deciding whether *that* agent may act. The frame method always
         receives ``agent`` (None when unknown), so a channel written against the older one-argument
         method raises ``TypeError`` rather than being half-served: the frame change is a breaking one.
+
+        ``name`` is the label to show, ``toolset.tool`` where the toolset is known (``HumanGate`` composes
+        it), not an identifier to match on: nothing replies with it, since the answer is a bare yes or no.
         """
         if self._approval_request is not None:
             await self._approval_request(name, arguments, agent=agent)
@@ -357,7 +383,8 @@ class ChannelUI:
         which a renderer uses to place the card inside its parent's; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
         (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, ``"loop"``, or ``"error"`` for a
         spawn; a ``"tool"`` entry carries ``name``/``arguments``/``response``, the last being what the
-        call returned; a ``"loop"`` entry carries ``reason`` (``"continuation"`` or ``"final_answer"``,
+        call returned, plus ``toolset`` where the toolset that gave the worker the tool is known; a
+        ``"loop"`` entry carries ``reason`` (``"continuation"`` or ``"final_answer"``,
         naming which prompt the loop injected) and ``text`` (the prompt itself); a reviewer instead sends
         its verdict as ``issues`` alongside a terminal ``status`` and no ``append``); and closes with a
         terminal ``status``: ``"done"``, ``"stopped"``, or ``"error"`` for a spawn, ``"approved"`` or
@@ -396,6 +423,7 @@ class ChannelUI:
         and returns "". A caller that needs the text (rather than just the completion) must check
         ``supports_streamed_activity`` and run non-streaming instead.
         """
+        chunks = self._with_toolsets(chunks)
         if self._stream_activity is not None:
             return await self._stream_activity(chunks, show_answer=show_answer)
         async for _ in chunks:

@@ -165,7 +165,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
         streaming_conversation.reset(token)
 
     assert results == [True, True]
-    assert prompts == ["execute_python", "execute_python"]  # both prompted, one at a time
+    assert prompts == ["compute.execute_python", "compute.execute_python"]  # both prompted, one at a time
     assert set(order) == {"a", "b"}
 
 

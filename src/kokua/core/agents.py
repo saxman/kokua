@@ -23,6 +23,7 @@ from kokua.config.schema import ALL_TOOLSETS, DEFAULT_SYSTEM_MESSAGE, AssistantC
 from kokua.core import conversation_commands
 from kokua.core.messaging import EVERYONE, USER, WORKER_SOURCE
 from kokua.core.metrics import record_event
+from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
@@ -167,16 +168,16 @@ def available_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name
     declared = config.agents[agent_name].available
     if declared is not ALL_TOOLSETS:
         return list(declared)
-
-    def rank(name: str) -> int:
-        provider = registry.providers.get(name)
-        return TRUST_ORDER.index(provider) if provider in TRUST_ORDER else len(TRUST_ORDER)
-
     is_entry = agent_name == config.entry_agent
     return sorted(
         (name for name, toolset in registry.items() if is_entry or not toolset.entry_point_only),
-        key=rank,
+        key=functools.partial(_trust_rank, registry),
     )
+
+
+def _trust_rank(registry: ToolsetRegistry, name: str) -> int:
+    provider = registry.providers.get(name)
+    return TRUST_ORDER.index(provider) if provider in TRUST_ORDER else len(TRUST_ORDER)
 
 
 def resident_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> list[str]:
@@ -998,6 +999,40 @@ def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
         reserved |= set(CORE_TOOL_NAMES)
     by_toolset[RESERVED_GATE_NAMESPACE] = reserved
     return by_toolset
+
+
+def toolset_of(state: LiveState, agent_name: Optional[str], tool: str) -> Optional[str]:
+    """The toolset that gave ``agent_name`` the tool called ``tool``, so a call can be shown as
+    ``toolset.tool``: the same name a ``confirm`` or ``review`` entry, or an ``available`` list, would use.
+
+    Asked per agent because two toolsets can offer one tool name, and which one an agent holds depends on
+    what it declared. Its own availability is searched first, in the order its tools were built, so the
+    toolset that won a same-named pair at build time is the one named. A deferred toolset loaded later
+    loses such a pair to the tool already held (see :data:`TRUST_ORDER`), so for one loaded mid-run this
+    can name the loser; ``shadowed_tools`` already warns about that collision at startup.
+
+    The tools no toolset provides answer :data:`RESERVED_GATE_NAMESPACE`, as they do in a gate entry. A
+    skill's scripts answer the skill, since the entry agent's ``SkillAgent`` holds them without a build
+    ever recording them. An agent the config does not describe (a composed worker, a critic) falls back to every
+    built toolset in :data:`TRUST_ORDER`. ``None`` means nothing recorded the name, and the call is then
+    shown bare rather than under a guess.
+    """
+    config, registry, recorded = state.config, state.registry, state.tools_by_toolset
+    declared = available_for(config, registry, agent_name) if agent_name in config.agents else []
+    for name in declared:
+        if tool in recorded.get(name, ()):
+            return name
+    if tool in CORE_TOOL_NAMES or tool in (_ACTIVATE_SKILL, SPAWN_SUBAGENT_TOOL_NAME):
+        return RESERVED_GATE_NAMESPACE
+    # Every skill on disk rather than the entry agent's scoped catalogue: a script's name already says
+    # which skill it belongs to, so the only question left is which skill that is.
+    for skill in state.all_skills.skills.values():
+        if tool in skill.script_tool_names():
+            return skill.name
+    for name in sorted(recorded, key=functools.partial(_trust_rank, registry)):
+        if tool in recorded[name]:
+            return name
+    return None
 
 
 def gate_entry_grammar_fault(entry: str) -> str:

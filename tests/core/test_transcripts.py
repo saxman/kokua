@@ -155,6 +155,26 @@ def test_replay_items_pairs_a_tool_result_with_its_call():
     assert [t["response"] for t in tools] == ["contents of b", "contents of a"]
 
 
+def test_replay_items_carries_each_calls_recorded_toolset():
+    """Joined by call id, as results are. A call with no record (a transcript stored before toolsets
+    were recorded) replays bare rather than under a toolset looked up now, which could be wrong."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "calculate", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+    ]
+    items = replay_items(messages, toolsets={"0": {"c1": "compute"}})
+    tools = [item for item in items if item["type"] == "tool"]
+    assert tools[0]["toolset"] == "compute"
+    assert "toolset" not in tools[1]
+
+
 def test_replay_items_stamps_each_user_item_with_its_transcript_index():
     """The key a turn's recorded model, effort, usage, and failure are all stored under.
 

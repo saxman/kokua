@@ -112,6 +112,39 @@ async def test_nested_tool_calls_reach_the_card():
     }
 
 
+async def test_a_nested_tool_entry_names_the_toolset_the_worker_got_it_from():
+    """Asked with the worker's own agent type, since two workers can hold same-named tools from
+    different toolsets, and recorded with the entry so a reload shows what the live card did."""
+    asked: list[tuple] = []
+
+    def toolset_of(agent, tool):
+        asked.append((agent, tool))
+        return "web"
+
+    channel = SubagentCapturingChannel()
+    reporter = SubagentReporter(
+        ChannelUI(channel),
+        model_for=lambda agent_type: None,
+        thinking_for=lambda agent_type: None,
+        payloads_path=_UNUSED_PAYLOADS_PATH,
+        toolset_of=toolset_of,
+    )
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "https://example.com"}))
+    assert asked == [("researcher", "get_web_content")]
+    assert channel.subagent_frames[-1]["append"]["toolset"] == "web"
+    assert events[-1]["append"]["toolset"] == "web"
+
+
+async def test_a_nested_tool_entry_with_no_known_toolset_has_no_toolset_key():
+    reporter, channel = _reporter()
+    _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("mystery", {}))
+    assert "toolset" not in channel.subagent_frames[-1]["append"]
+
+
 async def test_a_nested_tool_entry_carries_what_the_call_returned():
     """A sub-agent's card is the only place its nested calls are ever shown, so dropping the result
     would leave no way to see what the spawn actually retrieved."""

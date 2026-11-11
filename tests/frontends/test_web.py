@@ -226,7 +226,7 @@ async def test_web_channel_send_pairs_a_nested_card_with_no_top_level_call():
 async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
     """The base channel maps the CONTINUING chunk, and what this pins is that Kokua's ``send`` override
     delegates to that base loop, so the base's mapping reaches the page unchanged. The override wraps
-    the chunk iterator for image progress and adds no per-chunk branches of its own; one that did would
+    the chunk iterator for image progress and tool calls only; one that took over more chunk types would
     have to carry this arm forward, which is the drift this test catches. The wrap-up's wording is the
     case that matters: a marker showing the nudge's text here would say the model was told to keep
     working when it was told to stop."""
@@ -507,6 +507,39 @@ async def test_web_channel_stream_activity_tool_frame_carries_the_response():
 
     await channel.stream_activity(gen())
     assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"}]
+
+
+@pytest.mark.parametrize("path", ["send", "stream_activity"])
+async def test_web_channel_tool_frame_carries_the_toolset(path):
+    """AIMU's own ``tool`` frame has no ``toolset``, so both of Kokua's paths have to map the call
+    themselves, and ``send`` must not also pass the chunk on, or the call would be drawn twice."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(
+            StreamingContentType.TOOL_CALLING,
+            {"name": "calculate", "arguments": {"x": 2}, "response": "4", "toolset": "compute"},
+        )
+
+    await getattr(channel, path)(gen())
+    tools = [frame for frame in ws.frames if frame["type"] == "tool"]
+    assert tools == [
+        {"type": "tool", "name": "calculate", "arguments": {"x": 2}, "response": "4", "toolset": "compute"}
+    ]
+
+
+async def test_web_channel_send_withholds_tool_frames_when_tools_are_not_streamed():
+    """The base loop's ``stream_tools`` switch still governs a call this subclass now maps itself."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.stream_tools = False
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {}, "toolset": "compute"})
+
+    await channel.send(gen())
+    assert ws.frames == [{"type": "done"}]
 
 
 async def test_web_channel_send_phase_and_done():

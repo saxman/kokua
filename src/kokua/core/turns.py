@@ -470,6 +470,7 @@ class TurnRunner:
         spawn_title,
         state=None,
         reporter=None,
+        toolset_of=lambda agent, tool: None,
     ):
         self._book = book
         # Where a sub-agent's request and ending entries are appended to its card.
@@ -493,6 +494,9 @@ class TurnRunner:
         # placeholder one. The assistant's, because the task outlives this turn and shutdown has to be
         # able to end it; all this module knows is the moment a conversation first gets a title.
         self._spawn_title = spawn_title
+        # Names the toolset that gave an agent a tool, so each of the entry agent's calls is recorded
+        # under the toolset that served it (see `_call_toolsets`).
+        self._toolset_of = toolset_of
         # Shared toolset state, passed through to a workflow's context. Assigned after construction by
         # the composition root, which builds it later (see Assistant.create).
         self.state = state
@@ -1068,7 +1072,28 @@ class TurnRunner:
             usage=usage,
             messages=message_indices,
             requests=requests.record() if requests is not None else None,
+            toolsets=self._call_toolsets(conversation_id, user_index),
         )
+
+    def _call_toolsets(self, conversation_id: str, user_index: int) -> dict[str, str]:
+        """The toolset behind each of this turn's tool calls, by call id, for a reload or an export to
+        show as ``toolset.tool``.
+
+        Resolved now, while the registry still holds the tools the turn ran with, because asking again
+        on reload would answer for whatever is installed by then: a removed MCP server would turn its
+        calls bare, and a renamed toolset would claim calls it never served. Only the entry agent's own
+        calls are here; a worker's ride its card's entries (``SubagentReporter``). A call no toolset
+        recorded is left out rather than stored as a guess.
+        """
+        if user_index < 0:
+            return {}
+        toolsets: dict[str, str] = {}
+        for message in self._book.agent_for(conversation_id).model_client.messages[user_index:]:
+            for call in message.get("tool_calls") or []:
+                toolset = self._toolset_of(self._config.entry_agent, call.get("function", {}).get("name") or "")
+                if toolset and call.get("id"):
+                    toolsets[call["id"]] = toolset
+        return toolsets
 
     def _record_undelivered(self, conversation_id: str, user_index: int, messages: list[Message]) -> None:
         """Persist what one of this turn's own agents sent and no reader took, so a reload still shows it.

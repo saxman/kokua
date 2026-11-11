@@ -1667,6 +1667,18 @@ as an attachment only for a name matching `^[A-Za-z0-9._-]{1,100}\Z`). Every pay
 reaches the DOM through `textContent`, since a request is model and user content. `turn_saved` carries
 the turn's number, which the user bubble wears as a `turn N` badge.
 
+A `tool` frame carries one key AIMU's does not: `toolset`, the toolset that gave the calling agent that
+tool, which the page prints as `toolset.tool`. Naming it takes the live registry, which a channel must
+not reach for, so `ChannelUI` writes it into the entry agent's TOOL_CALLING chunks (through
+`core.agents.toolset_of`, bound by the composition root) and each channel only reads it. That is also
+why Kokua's `send` maps a tool call itself instead of leaving it to AIMU's loop, which would drop the
+key; the terminal renames the call to `toolset.tool` before AIMU prints it. A sub-agent's entries get
+the key from `SubagentReporter`, asked with that worker's agent type, and an approval prompt gets the
+label from `HumanGate`, asked with the calling agent's name. For reload, `TurnRunner` records the entry
+agent's call ids against their toolsets when the turn ends (`metadata["toolsets"]`, keyed by user index
+like every other turn record), and `replay_items` rejoins them by id. The key is absent, never `None`,
+when nothing recorded the tool, so a call is shown bare rather than under a guess.
+
 The page sends an `input` frame (`{"type": "input", "text", "token", "images"?, "thinking"?}`) for
 **every** message the composer sends, text-only ones included, and the bare string only for its own
 control replies: the Stop button's `/stop`, an approval's Allow/Deny, and a plan review's verdict. It

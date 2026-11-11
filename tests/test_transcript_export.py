@@ -144,6 +144,37 @@ def test_a_tool_call_shows_its_name_arguments_and_result():
     assert "the contents" in out
 
 
+def test_a_tool_call_is_named_under_its_recorded_toolset():
+    messages = [
+        {"role": "user", "content": "read it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "mystery", "arguments": "{}"}},
+            ],
+        },
+    ]
+    out = render_markdown(_session(messages, {"toolsets": {"0": {"c1": "fs"}}}))
+    assert "**Tool call: `fs.read_file`**" in out
+    assert "**Tool call: `mystery`**" in out
+
+
+def test_a_sub_agents_tool_entry_is_named_under_its_toolset():
+    messages = [
+        {"role": "user", "content": "look it up"},
+        {"role": "assistant", "content": "done"},
+    ]
+    events = [
+        {"id": "s1", "role": "researcher", "task": "find", "status": "running"},
+        {"id": "s1", "append": {"kind": "tool", "name": "get_web_content", "arguments": {}, "toolset": "web"}},
+        {"id": "s1", "status": "done"},
+    ]
+    out = render_markdown(_session(messages, {"subagent": {"0": events}}))
+    assert "**Tool call: `web.get_web_content`**" in out
+
+
 def test_a_payload_containing_a_fence_does_not_break_out_of_its_block():
     """The single most likely silent failure in the export.
 

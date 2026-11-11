@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, AsyncIterator, Optional
 
 import pytest
+from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.channels.ui import ChannelUI
 
@@ -462,3 +463,59 @@ async def test_show_turn_is_a_no_op_on_a_bare_channel():
     channel = BareChannel()
     await ChannelUI(channel).show_turn(3)
     assert channel.sent == []
+
+
+# --- toolset labels -------------------------------------------------------------------------------
+
+
+class _DrainingChannel(BareChannel):
+    """Drains a streamed reply into ``chunks``, the way a real channel's send loop consumes one."""
+
+    def __init__(self):
+        super().__init__()
+        self.chunks: list[StreamChunk] = []
+
+    async def send(self, content, *, reply_to=None) -> None:
+        if isinstance(content, str):
+            self.sent.append(content)
+            return
+        self.chunks.extend([chunk async for chunk in content])
+
+
+def _tool_chunk(name: str) -> StreamChunk:
+    return StreamChunk(StreamingContentType.TOOL_CALLING, {"name": name, "arguments": {}, "response": "ok"})
+
+
+async def test_a_streamed_tool_call_carries_the_toolset_it_came_from():
+    channel = _DrainingChannel()
+    ui = ChannelUI(channel, toolset_of={"get_web_content": "web"}.get)
+    thinking = StreamChunk(StreamingContentType.THINKING, "hmm")
+    await ui.send(_chunks(thinking, _tool_chunk("get_web_content")))
+    assert channel.chunks[0] == thinking
+    assert channel.chunks[1].content == {
+        "name": "get_web_content",
+        "arguments": {},
+        "response": "ok",
+        "toolset": "web",
+    }
+
+
+async def test_a_tool_call_with_no_known_toolset_streams_without_the_key():
+    """Absent rather than None, so a renderer tells "unknown" from a toolset by the key alone."""
+    channel = _DrainingChannel()
+    await ChannelUI(channel, toolset_of=lambda tool: None).send(_chunks(_tool_chunk("mystery")))
+    assert "toolset" not in channel.chunks[0].content
+
+
+async def test_stream_activity_labels_tool_calls_too():
+    """A planned turn's executor streams through stream_activity rather than send, and is labelled alike."""
+    seen: list[StreamChunk] = []
+
+    class _Streaming(BareChannel):
+        async def stream_activity(self, chunks, *, show_answer=False) -> str:
+            seen.extend([chunk async for chunk in chunks])
+            return ""
+
+    ui = ChannelUI(_Streaming(), toolset_of={"calculate": "compute"}.get)
+    await ui.stream_activity(_chunks(_tool_chunk("calculate")))
+    assert seen[0].content["toolset"] == "compute"

@@ -942,6 +942,7 @@ function appendSubagentEntry(card, entry) {
     card.answer = null;
     renderTool(entry.name, entry.arguments, undefined, {
       parent: card.body,
+      toolset: entry.toolset,
       response: entry.response,
       responseRef: entry.response_ref,
       responseBytes: entry.response_bytes,
@@ -2008,7 +2009,8 @@ function addTurnBadge(bubble, turn) {
 // Foldable tool / continuation blocks. The header carries the call and its condensed arguments, so a
 // folded row says what was called without being opened; the body holds the full untruncated arguments
 // and, for a tool call, the result it returned. Shared by live frames, history replay, and (via
-// `opts.parent`) a sub-agent card's nested tool calls.
+// `opts.parent`) a sub-agent card's nested tool calls. `opts.toolset` names the toolset the call came
+// from, shown as `toolset.tool` (the name a gate or an `available` list uses); absent, the call is bare.
 function renderTool(name, args, ts, opts) {
   // An absent response means no result was recorded (a transcript stored before results were
   // replayed, a turn cut short mid-dispatch); an empty one means the tool returned nothing. Neither
@@ -2020,7 +2022,8 @@ function renderTool(name, args, ts, opts) {
   // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
   // expanded.
   const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
-  const parts = { kind: "tool", payload: toolLine(name, args), metric };
+  const label = opts && opts.toolset ? `${opts.toolset}.${name}` : name;
+  const parts = { kind: "tool", payload: toolLine(label, args), metric };
   const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
   f.body.appendChild(document.createTextNode(toolArgs(args)));
   if (returned) {
@@ -2138,7 +2141,7 @@ function handleFrame(event) {
     autoscroll();
   } else if (frame.type === "tool") {
     thinkingBlock = null;
-    renderTool(frame.name, frame.arguments, new Date(), { response: frame.response });
+    renderTool(frame.name, frame.arguments, new Date(), { response: frame.response, toolset: frame.toolset });
   } else if (frame.type === "loop") {
     // Agent-loop continuation boundary. Like a tool block, it ends the answer segment above it: the
     // next tokens open their own bubble below this marker.
@@ -2348,7 +2351,7 @@ function handleFrame(event) {
         f.body.textContent = item.text || "";
         setFoldLabel(f.label, "thinking", "", lineMetric(item.text));
       }
-      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
+      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response, toolset: item.toolset });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       // A message sent into a turn already running, read from the stored record
       // (`record_turn_provenance`'s `messages` map) rather than a frame about a turn still open: this

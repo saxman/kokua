@@ -340,6 +340,7 @@ def replay_items(
     mid_turn: Optional[dict] = None,
     undelivered: Optional[dict] = None,
     requests: Optional[dict] = None,
+    toolsets: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
@@ -427,6 +428,10 @@ def replay_items(
     ``notice``. Both carry the shape a live frame folds into on a catch-up record, so the page treats a
     replayed one and a watched one alike.
 
+    ``toolsets`` is keyed the same way and maps each of the entry agent's tool call ids to the toolset
+    that served it, which rides that call's item as ``toolset``, as it rides a live ``tool`` frame. A
+    call with no entry (a transcript stored before toolsets were recorded) gets no key and replays bare.
+
     Every item opening a turn carries ``turn``, its ordinal from
     :func:`kokua.core.conversations.turn_numbers`.
     """
@@ -441,6 +446,8 @@ def replay_items(
     mid_turn_set = {index for indices in (mid_turn or {}).values() for index in indices}
     items: list[dict] = []
     results = tool_results_by_call_id(messages)
+    # Flattened across turns for `mid_turn_set`'s reason: a call id belongs to one turn.
+    call_toolsets = {call_id: toolset for calls in (toolsets or {}).values() for call_id, toolset in calls.items()}
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
     pending_undelivered: Optional[tuple[list[dict], object]] = None  # (the turn's reports, its timestamp)
     # The turn's spawn cards not yet placed, each a lineage from `_spawn_lineages` with its turn's
@@ -627,15 +634,15 @@ def replay_items(
                 name = fn.get("name")
                 if place_card_for(spawn_task(name, fn.get("arguments")), ts):
                     continue  # the card stands in for its call; see SPAWN_TOOL_NAMES
-                add(
-                    {
-                        "type": "tool",
-                        "name": name,
-                        "arguments": fn.get("arguments"),
-                        "response": results.get(call.get("id")),
-                    },
-                    ts,
-                )
+                item = {
+                    "type": "tool",
+                    "name": name,
+                    "arguments": fn.get("arguments"),
+                    "response": results.get(call.get("id")),
+                }
+                if call.get("id") in call_toolsets:
+                    item["toolset"] = call_toolsets[call["id"]]
+                add(item, ts)
             emit_request_group(ts)
         elif role == "tool":
             # Tool results are otherwise not replayed, but a generate_image result carries an /images/

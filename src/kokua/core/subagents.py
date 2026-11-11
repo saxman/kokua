@@ -103,6 +103,7 @@ class SubagentReporter:
         model_for: Callable[[Optional[str]], Optional[str]],
         thinking_for: Callable[[Optional[str]], Optional[Union[bool, str]]],
         payloads_path: Path,
+        toolset_of: Callable[[Optional[str], str], Optional[str]] = lambda agent, tool: None,
     ):
         self._ui = ui
         # Resolve a spawn's agent_type to the model it runs on and the reasoning effort it runs at.
@@ -142,6 +143,12 @@ class SubagentReporter:
         # whole config, because this is the only setting the reporter reads and taking the config
         # would let it grow a dependency on anything else in there.
         self._payloads_path = payloads_path
+        # Names the toolset that gave a worker each tool it calls, so a card entry reads `toolset.tool`.
+        # Asked with the worker's agent type, since two workers can hold same-named tools from different
+        # toolsets. The agent type is kept per spawn from `spawned`, and popped in `finished` like the
+        # dicts above, because a chunk callback carries only the spawn id.
+        self._toolset_of = toolset_of
+        self._agent_types: dict[str, Optional[str]] = {}
 
     async def spawned(self, spawn_id: str, agent_type: Optional[str], task: str) -> None:
         """Open the card, naming the model this worker runs on and the reasoning effort it runs at, so the
@@ -169,6 +176,7 @@ class SubagentReporter:
         Context) would still see the child's leftover address once the child returns.
         """
         self._address_tokens[spawn_id] = current_address.set(None)
+        self._agent_types[spawn_id] = agent_type
         parent = current_spawn.get()
         call = spawn_call.get()
         self._spawn_tokens[spawn_id] = (current_spawn.set(spawn_id), spawn_call.set(None))
@@ -231,14 +239,14 @@ class SubagentReporter:
                 if not self._children_awaiting_call[key]:
                     del self._children_awaiting_call[key]
                 return
-            await self._report({"id": spawn_id, "append": self._tool_append(call)})
+            await self._report({"id": spawn_id, "append": self._tool_append(spawn_id, call)})
         elif chunk.phase == StreamingContentType.GENERATING:
             if chunk.content:
                 self._streamed_answers.add(spawn_id)
                 await self._report({"id": spawn_id, "append": {"kind": "answer", "text": chunk.content}})
         # Image/audio progress from a sub-agent is not surfaced.
 
-    def _tool_append(self, call: dict) -> dict:
+    def _tool_append(self, spawn_id: str, call: dict) -> dict:
         """One tool call as a card entry, spilling an oversized response to a payload file.
 
         Applied here rather than when a card is displayed, so the frame sent live and the entry
@@ -246,6 +254,9 @@ class SubagentReporter:
         away and back would be a worse bug than the size it fixes.
         """
         append = {"kind": "tool", "name": call.get("name"), "arguments": call.get("arguments")}
+        toolset = self._toolset_of(self._agent_types.get(spawn_id), call.get("name") or "")
+        if toolset:
+            append["toolset"] = toolset
         response = call.get("response")
         if not isinstance(response, str) or len(response) <= RESPONSE_PREVIEW_CHARS:
             append["response"] = response
@@ -291,6 +302,7 @@ class SubagentReporter:
         if spawn_tokens is not None:
             current_spawn.reset(spawn_tokens[0])
             spawn_call.reset(spawn_tokens[1])
+        self._agent_types.pop(spawn_id, None)
         for key in [key for key in self._children_awaiting_call if key[0] == spawn_id]:
             del self._children_awaiting_call[key]
         streamed = spawn_id in self._streamed_answers

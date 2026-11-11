@@ -91,7 +91,9 @@ class Assistant:
         store: TinyDBSessionStore,
         config: AssistantConfig,
     ):
-        self._ui = ChannelUI(channel)
+        # The entry agent's own streams are the only ones reaching the channel as chunks, so the label
+        # the channel puts on a tool call is resolved for that agent.
+        self._ui = ChannelUI(channel, toolset_of=lambda tool: self._toolset_of(config.entry_agent, tool))
         # The live settings table: Kokua's own entries plus whatever the installed toolsets declared.
         # Built here because the applier below needs it, and shared with the config toolset through
         # LiveState so a hot `update_config` resolves against the same table `apply_settings` does.
@@ -104,6 +106,7 @@ class Assistant:
             model_for=config.model_for,
             thinking_for=config.thinking_for,
             payloads_path=config.payloads_path,
+            toolset_of=self._toolset_of,
         )
         self._scheduler = scheduler
         self._store = store
@@ -149,6 +152,7 @@ class Assistant:
             active_id=lambda: self._book.active_id,
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
+            toolset_of=self._toolset_of,
         )
         # Reads, applies, and persists the runtime-mutable settings. Reaches the live state through a
         # callback rather than holding it, since it does not exist yet (see create()).
@@ -171,6 +175,7 @@ class Assistant:
             delete_conversation=self.delete_conversation,
             spawn_title=self._spawn_title,
             reporter=self._subagent_reporter,
+            toolset_of=self._toolset_of,
         )
         # The background title writers still in flight (see `core/titles.py`). Held so shutdown can
         # end them: a task that outlives `self._store.close()` writes to a closed file, out of a task
@@ -1009,6 +1014,16 @@ class Assistant:
         whose policy it is judged by.
         """
         return functools.partial(self._human.approve, agent_name)
+
+    def _toolset_of(self, agent_name: Optional[str], tool: str) -> Optional[str]:
+        """Which toolset gave ``agent_name`` the tool called ``tool``; see ``core.agents.toolset_of``.
+
+        ``None`` before ``create`` has built the live state, which no tool call can precede.
+        """
+        # Imported here, not at module level: see the comment on the import in `create`.
+        from kokua.core.agents import toolset_of
+
+        return toolset_of(self._state, agent_name, tool) if self._state is not None else None
 
     def _alert_soon(self, text: str) -> None:
         """Raise ``text`` as an alert from any thread, doing nothing until ``start`` has captured the loop.

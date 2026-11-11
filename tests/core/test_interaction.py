@@ -341,6 +341,40 @@ async def test_the_gate_names_the_asking_agent_on_its_prompt():
     assert ui.asked_by == ["coder"]
 
 
+async def test_the_prompt_names_the_call_as_toolset_dot_tool():
+    """The name a `confirm` entry gates a call by, asked for the calling agent's own toolset."""
+    ui = _UI()
+    asked: list[tuple] = []
+
+    def toolset_of(agent, tool):
+        asked.append((agent, tool))
+        return "compute"
+
+    gate = HumanGate(
+        ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1", toolset_of=toolset_of
+    )
+    gate.policies = _policies(confirm={"execute_python"})
+    assert await _answer_the_prompt(gate, "execute_python", {"code": "1"}, with_answer=True) is True
+    assert ui.asked == ["approve:compute.execute_python"]
+    assert asked == [("assistant", "execute_python")]
+
+
+async def test_an_auto_approval_card_names_the_call_as_toolset_dot_tool(monkeypatch, in_turn):
+    monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(True, "harmless", "ollama:b")))
+    ui = _UI()
+    gate = HumanGate(
+        ui,
+        active_id=lambda: "c1",
+        is_proactive=lambda: False,
+        turn_conversation=lambda: "c1",
+        toolset_of=lambda agent, tool: "compute",
+    )
+    gate.policies = _policies(review={"run_command"})
+    gate.auto_approval = _auto()
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is True
+    assert ui.auto_approvals[0][0] == "compute.run_command"
+
+
 async def _settle_without_a_prompt(gate, name, arguments, *, agent="assistant") -> bool:
     """`approve`'s answer on a path that must not stop to ask, bounded so a regression fails.
 
