@@ -2204,7 +2204,12 @@ function handleFrame(event) {
     // minutes ago counts on from there rather than restarting at zero.
     setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
-    renderApproval(frame.name, frame.arguments, frame.agent);
+    renderApproval(frame);
+  } else if (frame.type === "prompt_retired") {
+    // The question this page is showing is no longer waiting on an answer, however it stopped
+    // waiting: answered here, answered by a typed reply, abandoned by a switch, or cancelled with
+    // its turn. Only the controls change; the card stays as the record of what was asked.
+    retirePrompt();
   } else if (frame.type === "auto_approval") {
     renderAutoApproval(frame);
   } else if (frame.type === "plan") {
@@ -2212,7 +2217,7 @@ function handleFrame(event) {
   } else if (frame.type === "subagent") {
     renderSubagent(frame, new Date());
   } else if (frame.type === "plan_review") {
-    renderPlanReview(frame.plan, frame.critique);
+    renderPlanReview(frame);
   } else if (frame.type === "conversations") {
     lastConversations = frame.items;
     awaitingTitle.clear();
@@ -2293,6 +2298,7 @@ function handleFrame(event) {
     latestRound.delete(log);  // its button lived in the transcript being replaced
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
+    outstandingPrompt = null;  // and any prompt card, which this repaint has just removed
     // Drop the references to the bubbles just removed. Without this they stay live but detached, and
     // the next token or thinking frame -- from any conversation -- re-attaches the old conversation's
     // partial bubble into this view and keeps writing into it. A `partial` item below re-opens the
@@ -2411,9 +2417,34 @@ function renderModels(frame) {
   modelLabel.title = lines.join("\n");
 }
 
+// The prompt currently waiting on an answer (a tool approval, or a plan review), or null. One at a
+// time, because the core allows one at a time: `HumanGate` holds each as a single lock-guarded slot.
+// Held so that the controls can be retired when the question closes, which is not always something
+// this page did: a typed "y" answers the prompt without touching its buttons, and a /stop cancels the
+// turn the question belonged to. A button that outlives its question sends a reply nothing is waiting
+// for, and the server can only read that as an ordinary message, so an idle click turns "y" into a
+// turn saying "y".
+let outstandingPrompt = null;
+
+// Close whatever prompt is on screen: the controls go dead, exactly as they do when this page is the
+// one that answered. Disabled rather than removed, because the question and its answer are part of
+// the transcript the user is reading.
+function retirePrompt() {
+  if (!outstandingPrompt) return;
+  outstandingPrompt.querySelectorAll("button, textarea").forEach((control) => (control.disabled = true));
+  outstandingPrompt = null;
+}
+
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
 // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
-function renderApproval(name, args, agent) {
+// The question belongs to one turn, so a prompt that raced a conversation switch is dropped rather
+// than put in front of the wrong reader. The server asks the same question last thing before sending
+// (HumanGate.approve, under the lock that orders concurrent gated calls); this covers the gap between
+// that check and the frame arriving. Same shape as `renderAutoApproval` below.
+function renderApproval(frame) {
+  const { name, arguments: args, agent } = frame;
+  const active = lastConversations.find((item) => item.active);
+  if (frame.conversation_id && active && active.id !== frame.conversation_id) return;
   const el = document.createElement("div");
   el.className = "bubble approval";
   const prompt = document.createElement("div");
@@ -2443,6 +2474,7 @@ function renderApproval(name, args, agent) {
   el.appendChild(prompt);
   el.appendChild(actions);
   appendToLog(el);
+  outstandingPrompt = el;
   autoscroll();
 }
 
@@ -2479,8 +2511,15 @@ function renderAutoApproval(frame) {
 }
 
 // Deep planning review: show Approve / Edit / Reject. Replies are plain "approve"/"reject"/"edit: <text>"
-// frames the server routes to the waiting plan (same path as tool approval).
-function renderPlanReview(planText, critique) {
+// frames the server routes to the waiting plan (same path as tool approval). Dropped when it belongs
+// to another conversation, for the reason `renderApproval` above drops one: the server already asks
+// whether the turn is still on screen before sending, and this covers the gap between that check and
+// the frame arriving.
+function renderPlanReview(frame) {
+  const planText = frame.plan;
+  const critique = frame.critique;
+  const active = lastConversations.find((item) => item.active);
+  if (frame.conversation_id && active && active.id !== frame.conversation_id) return;
   const el = document.createElement("div");
   el.className = "bubble approval";
   const prompt = document.createElement("div");
@@ -2528,6 +2567,7 @@ function renderPlanReview(planText, critique) {
   if (note) el.appendChild(note);
   el.appendChild(actions);
   appendToLog(el);
+  outstandingPrompt = el;
   autoscroll();
 }
 

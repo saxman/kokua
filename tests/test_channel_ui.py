@@ -53,16 +53,23 @@ class RichChannelDouble(BareChannel):
     async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
         self.calls.append(("notification", (text, conversation_id, url, group)))
 
-    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
-        self.calls.append(("approval", (name, arguments, agent)))
+    async def send_approval_request(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id=None
+    ) -> None:
+        self.calls.append(("approval", (name, arguments, agent, conversation_id)))
+
+    async def send_prompt_retired(self) -> None:
+        self.calls.append(("prompt_retired", ()))
 
     async def send_auto_approval(
         self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None, agent=None
     ) -> None:
         self.calls.append(("auto_approval", (name, arguments, approved, reason, model, conversation_id, agent)))
 
-    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
-        self.calls.append(("plan_review", (plan, critique)))
+    async def send_plan_review_request(
+        self, plan: str, critique: Optional[str] = None, *, conversation_id=None
+    ) -> None:
+        self.calls.append(("plan_review", (plan, critique, conversation_id)))
 
     async def send_plan(self, plan: str) -> None:
         self.calls.append(("plan", (plan,)))
@@ -165,12 +172,24 @@ async def test_plain_text_approval_names_the_agent():
     assert channel.sent[-1] == "[approve] Allow coder to run run_command({'command': 'ls'})? [y/N]"
 
 
-async def test_rich_approval_carries_the_agent_and_defaults_to_none():
+async def test_rich_approval_carries_the_agent_and_conversation_and_defaults_to_none():
     channel = RichChannelDouble()
     ui = ChannelUI(channel)
-    await ui.ask_approval("run_command", {}, agent="coder")
+    await ui.ask_approval("run_command", {}, agent="coder", conversation_id="c1")
     await ui.ask_approval("run_command", {})
-    assert channel.calls == [("approval", ("run_command", {}, "coder")), ("approval", ("run_command", {}, None))]
+    assert channel.calls == [
+        ("approval", ("run_command", {}, "coder", "c1")),
+        ("approval", ("run_command", {}, None, None)),
+    ]
+
+
+async def test_retiring_a_prompt_is_silent_on_a_channel_that_printed_one():
+    """The one frame whose degradation has to be silence rather than a sentence. A printed question
+    has no controls to take back, and a line saying the question is closed would be noise in a
+    terminal whose next line is the answer the user just typed."""
+    channel = BareChannel()
+    await ChannelUI(channel).retire_prompt()
+    assert channel.sent == []
 
 
 async def test_plan_review_falls_back_to_text_and_includes_the_critique():
@@ -216,6 +235,7 @@ async def test_rich_channel_receives_every_frame():
     await ui.notify("done")
     await ui.alert("a scheduled task finished")
     await ui.ask_approval("execute_python", {"code": "1"})
+    await ui.retire_prompt()
     await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="m")
     await ui.ask_plan_review("step 1", ["too vague"])
     await ui.show_plan("step 1")
@@ -231,6 +251,7 @@ async def test_rich_channel_receives_every_frame():
         "notification",  # notify
         "notification",  # alert: one frame, two methods, differing only in their fallback
         "approval",
+        "prompt_retired",
         "auto_approval",
         "plan_review",
         "plan",
@@ -246,10 +267,11 @@ async def test_rich_channel_receives_every_frame():
 
 async def test_plan_review_critique_reaches_a_rich_channel_as_rendered_bullets():
     channel = RichChannelDouble()
-    await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"])
-    (_, (plan, critique)) = channel.calls[0]
+    await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"], conversation_id="c1")
+    (_, (plan, critique, conversation_id)) = channel.calls[0]
     assert plan == "step 1"
     assert critique == "- too vague\n- no verification"
+    assert conversation_id == "c1"  # the turn's, so the page can drop a question that raced a switch
 
 
 def test_mirrored_attributes_reach_a_rich_channel():

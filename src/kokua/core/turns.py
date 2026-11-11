@@ -653,7 +653,7 @@ class TurnRunner:
                         session = self._book.get(conversation_id)
                         await self._ui.show_turn(1 + len(turn_numbers(session.messages, session.metadata)))
                     if workflow is not None:
-                        ctx = self._workflow_context(agent, msg, workflow)
+                        ctx = self._workflow_context(agent, msg, workflow, conversation_id)
                         runner = workflow.build(ctx)
                         try:
                             if is_rich(runner):
@@ -929,7 +929,7 @@ class TurnRunner:
             conversation_id=conversation_id,
         )
 
-    def _workflow_context(self, agent, msg: ChannelMessage, workflow) -> WorkflowContext:
+    def _workflow_context(self, agent, msg: ChannelMessage, workflow, conversation_id: str) -> WorkflowContext:
         """One turn's context for ``workflow``.
 
         ``commit_user_message`` is bound here rather than implemented by the workflow because finding
@@ -952,6 +952,7 @@ class TurnRunner:
             settings=SettingsView(self._config.toolset_settings.get(workflow.name, {})),
             msg=msg,
             state=self.state,
+            conversation_id=conversation_id,
             decide=self._decide,
             commit_user_message=commit_user_message,
         )

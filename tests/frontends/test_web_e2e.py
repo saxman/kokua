@@ -3266,3 +3266,65 @@ def test_the_panel_scrolls_on_its_own_and_returns_focus_when_closed(page, live_s
     _open_round(page)
     page.locator("#round-panel .round-panel-close").click()
     expect(page.locator("#log button.round-button")).to_be_focused()
+
+
+def test_an_approval_prompt_for_another_conversation_is_dropped(page, live_server):
+    """The page-side half of the switched-away denial, driven by injecting the frame.
+
+    The server asks whether the turn is still on screen last thing before sending this
+    (`HumanGate.approve`, under the lock that orders a round's concurrently dispatched gated calls),
+    so in a live run the prompt below never leaves the server. This covers what the page does with one
+    that raced even that check: asking the reader in front of conversation B to allow a call belonging
+    to conversation A's turn is a question they cannot answer, and an Allow would run it unwatched.
+    """
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+    assert active  # the sidebar has landed, so the page has something to compare against
+
+    def render(**frame):
+        page.evaluate("(f) => renderApproval(f)", frame)
+
+    render(name="run_command", arguments={"command": "ls"}, conversation_id="another-conversation")
+    expect(page.locator(".bubble.approval")).to_have_count(0)
+
+    render(name="run_command", arguments={"command": "ls"}, conversation_id=active)
+    expect(page.locator(".bubble.approval")).to_have_count(1)
+
+
+def test_a_plan_review_for_another_conversation_is_dropped(page, live_server):
+    """The plan review's half of the same rule the approval prompt follows: a question about one
+    turn must not be put to the reader of another. The server refuses to ask at all
+    (`HumanGate.decide`); this is the page's backstop for one that raced that check."""
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+
+    def render(**frame):
+        page.evaluate("(f) => renderPlanReview(f)", frame)
+
+    render(plan="step 1", critique=None, conversation_id="another-conversation")
+    expect(page.locator(".bubble.approval")).to_have_count(0)
+
+    render(plan="step 1", critique=None, conversation_id=active)
+    expect(page.locator(".bubble.approval")).to_have_count(1)
+
+
+def test_a_retired_prompt_keeps_its_card_and_loses_its_buttons(page, live_server):
+    """A question can stop waiting without this page having answered it: a typed "y" resolves it
+    without touching the buttons, and a /stop cancels the turn it belonged to. The controls have to
+    go dead either way, because a click after that sends a reply nothing is waiting for and the
+    serve loop can only read it as an ordinary message, turning "y" into a turn saying "y". The card
+    itself stays: it is the record of what was asked."""
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+
+    def frame(**payload):
+        page.evaluate("(f) => handleFrame({ data: JSON.stringify(f) })", payload)
+
+    frame(type="approval", name="run_command", arguments={"command": "ls"}, conversation_id=active)
+    card = page.locator(".bubble.approval")
+    expect(card.locator("button").first).to_be_enabled()
+
+    frame(type="prompt_retired")
+    expect(card).to_have_count(1)
+    expect(card.locator("button").first).to_be_disabled()
+    expect(card.locator("button").last).to_be_disabled()

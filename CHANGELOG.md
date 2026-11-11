@@ -783,7 +783,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer
   so a channel still implementing the older form raises `TypeError` the first time a gated call asks. A
   channel that does not show who is asking can accept and ignore it, which is what adding `agent=None`
   to the signature does. It is keyword-only for the reason `send_turn_saved`'s `token`
-  is.
+  is. **`send_approval_request` and `send_plan_review_request` also take `conversation_id`**, passed
+  the same way, so the page can drop a prompt that raced a conversation switch; a channel that files
+  nothing against a transcript accepts it as `conversation_id=None` and ignores it. `send_prompt_retired()`
+  is new and optional, like every rich frame: a channel without it gets no retirement, which is right
+  for one whose prompt is a printed line.
 - **The AIMU floor is 0.39.0**, for the page tools the `web` toolset builds (`make_page_tools`) and for a
   compaction that keeps a worker's task (see `context_length` under Configuration). Before it the floor
   was 0.38.0, for a `calculate` that evaluates arithmetic and nothing else (it was an
@@ -1527,6 +1531,11 @@ alone. The case that does cost something is a configured MCP server, which conne
   skill or connect a server -- and then executes it. Planning is scratch work kept out of the saved
   conversation, which stores your actual request and the answer.
 - **`plan_review`** pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.
+  A question is only put to someone who is there to answer it, the rule the tool-approval gate follows:
+  a planned turn the user has switched away from takes the workflow's own safe answer (reject, for this
+  one) and raises an alert card naming the conversation, rather than drawing its Approve / Edit / Reject
+  into whatever transcript is on screen, and an unattended turn is never asked at all. The frame carries
+  its conversation, so the page can drop a question that raced that check.
 - **Adversarial plan and result review** (both off by default): an independent, context-free reviewer
   agent -- a fresh client seeing only the request plus the plan or answer -- critiques the plan and/or
   the final result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover
@@ -2008,7 +2017,13 @@ notice on startup.
   `config.update_config`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
+  are currently viewing. **That question is asked again at every point the answer can have gone stale**,
+  and the widest window is the one easiest to miss: a round's tool calls are dispatched concurrently
+  while the approval slot is single, so its second gated call waits inside the slot for as long as you
+  take to answer the first, and a switch during that wait leaves the question behind it pointed at a
+  reader who is now looking somewhere else. It is denied and raises the card below instead. The prompt
+  frame carries its conversation for the same reason an auto-approval card does, so a page can drop one
+  that raced the last check rather than draw it into the wrong transcript. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
@@ -2017,7 +2032,14 @@ notice on startup.
   [#7](https://github.com/saxman/kokua/issues/7).
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
-  cannot overwrite each other.
+  cannot overwrite each other. **A prompt's controls are retired when its question closes**, which is
+  not always something the page can see: a typed `y` answers without touching the buttons, and a
+  `/stop` cancels the turn the question belonged to. A reply matching no outstanding request is an
+  ordinary message, so a button outliving its question turns a `y` into a turn saying "y". The
+  `prompt_retired` frame is sent from the one place that knows all four endings (`PendingRequest.ask`'s
+  `finally`: answered here, answered by a typed reply, abandoned by a switch, cancelled with the turn),
+  and the page disables the card's controls while keeping the card, which is the record of what was
+  asked. A terminal prompt is a printed line with nothing to take back, so it degrades to silence.
 - **A gate names its toolset, and one that would gate nothing fails startup.** A `[security]
   confirm_tools` entry is `<toolset>` for every tool a capability provides, `<toolset>.*` for the same
   thing said with a wildcard, or `<toolset>.<tool>` for one; `*` anywhere else is refused. A reserved

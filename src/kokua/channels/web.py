@@ -622,13 +622,39 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "download", "name": name, "url": url})
 
-    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+    async def send_approval_request(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+    ) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
+
+        Never muted (``approval`` is not in ``_TURN_FRAMES``), and it carries its conversation
+        instead, for the reasons ``send_auto_approval`` below carries one: the core only prompts for
+        the conversation being viewed, and muting the question a turn is blocked on would hang that
+        turn until something abandoned it. The id is what lets the page drop a prompt that raced a
+        switch, rather than asking one conversation's reader about another conversation's call.
         """
-        await self.send_frame({"type": "approval", "name": name, "arguments": arguments, "agent": agent})
+        await self.send_frame(
+            {
+                "type": "approval",
+                "name": name,
+                "arguments": arguments,
+                "agent": agent,
+                "conversation_id": conversation_id,
+            }
+        )
+
+    async def send_prompt_retired(self) -> None:
+        """Tell the page the question it is showing is closed, whichever way it closed.
+
+        Never muted (``prompt_retired`` is not in ``_TURN_FRAMES``) and carrying no conversation,
+        unlike the prompt it retires: the page keeps one outstanding prompt, because the core allows
+        one, and a switch has already replaced the whole transcript by the time anything could
+        arrive for the wrong one.
+        """
+        await self.send_frame({"type": "prompt_retired"})
 
     async def send_auto_approval(
         self,
@@ -720,8 +746,16 @@ class WebChannel(BaseWebChannel):
         if ending.get("parent_run_id") is None:
             await self.send_frame({"type": "ending", **ending})
 
-    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
+    async def send_plan_review_request(
+        self, plan: str, critique: Optional[str] = None, *, conversation_id: Optional[str] = None
+    ) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'
         frame that the serve loop routes to the pending plan (same path as approval). ``critique`` carries
-        any adversarial-reviewer concerns for the user to weigh."""
-        await self.send_frame({"type": "plan_review", "plan": plan, "critique": critique})
+        any adversarial-reviewer concerns for the user to weigh.
+
+        Never muted, and carrying its conversation, for the reasons ``send_approval_request`` above
+        does: the core only asks for the conversation being viewed, and the id is what lets the page
+        drop a question that raced a switch."""
+        await self.send_frame(
+            {"type": "plan_review", "plan": plan, "critique": critique, "conversation_id": conversation_id}
+        )

@@ -61,6 +61,7 @@ class PendingRequest(Generic[T]):
         context: Any = None,
         parse: Optional[Callable[[str, str], T]] = None,
         default: Any = _UNSET,
+        retire: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> T:
         """Send ``prompt`` and wait for the answer, serialized against any other asker.
 
@@ -71,6 +72,19 @@ class PendingRequest(Generic[T]):
         default can never leak onto the first asker's abandon. The slot is cleared in that same
         ``finally``, so a ``/stop`` that cancels the waiting turn mid-await still leaves no stale
         pending request behind.
+
+        ``retire`` takes back what ``prompt`` put up, and runs once this request is no longer
+        outstanding *however* it stopped being outstanding: answered, abandoned by a switch, or
+        cancelled with the turn that raised it. It is the asker's too, and it is paired with ``prompt``
+        rather than left to the answering paths because there are four of those and every one of them
+        leaves the same live question on a page that has no other way to learn it is closed. A front
+        end whose prompt is a printed line has nothing to take back and passes none.
+
+        Two details of the pairing matter. Nothing is retired when ``prompt`` itself raised, since
+        nothing was put up (``HumanGate.approve`` raises there for a call whose turn left the screen).
+        And a ``retire`` that fails is logged rather than raised: it runs in a ``finally``, where an
+        exception would replace the answer this call is returning, and a channel that could not be
+        told is not a reason to lose a decision the user already made.
         """
         async with self._lock:
             previous_default = self._default
@@ -79,14 +93,21 @@ class PendingRequest(Generic[T]):
             self._future = asyncio.get_running_loop().create_future()
             self._context = context
             self._parse = parse
+            prompted = False
             try:
                 await prompt()
+                prompted = True
                 return await self._future
             finally:
                 self._default = previous_default
                 self._future = None
                 self._context = None
                 self._parse = None
+                if prompted and retire is not None:
+                    try:
+                        await retire()
+                    except Exception:
+                        logger.warning("Could not retire an answered prompt", exc_info=True)
 
     def resolve(self, value: T) -> bool:
         """Answer the outstanding request. Returns whether there was one to answer."""
@@ -104,6 +125,16 @@ class PendingRequest(Generic[T]):
     def abandon(self) -> None:
         """Resolve with the default answer, if outstanding."""
         self.resolve(self._default)
+
+
+class _SwitchedAway(Exception):
+    """The viewed conversation moved on while an approval waited its turn for the single slot.
+
+    Flow control, not a failure: ``approve`` catches it and denies the call the way it does for a
+    switch it noticed earlier. It travels as an exception because the prompt callable is the only
+    code ``PendingRequest.ask`` runs while holding the lock that orders the askers, and that is where
+    the question has to be asked one last time.
+    """
 
 
 class HumanGate:
@@ -172,6 +203,12 @@ class HumanGate:
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
 
+        **That one question is asked at all three points where the answer can have gone stale**, and
+        each window is wider than the last: on arrival, after the review's model call, and once the
+        approval slot is finally held. The third exists because the slot is single and lock-guarded,
+        so a second gated call from the same concurrently dispatched round waits out the user's answer
+        to the first, and nothing bounds how long that is.
+
         A gated tool in the agent's ``review`` list is reviewed (when ``[security.auto_approval]`` is on) just before that prompt, and
         only there: both auto-denials above run first, so a review happens exactly where a human would
         otherwise have been asked and nowhere else, and the switched-away one is asked again after the
@@ -227,7 +264,28 @@ class HumanGate:
             )
             if outcome.approved:
                 return True
-        return await self.approval.ask(lambda: self._ui.ask_approval(self._label(agent, name), arguments, agent=agent))
+
+        async def prompt() -> None:
+            # Asked a third time, here rather than above, because this runs under the lock that orders
+            # the askers and the checks above are as old as the wait for it. Concurrent tool dispatch
+            # ([assistant].concurrent_tools) puts a second gated call from the same round behind this
+            # slot, where it waits out the user's answer to the first: an unbounded window in practice,
+            # far wider than the review's. A switch during it abandons only the request holding the
+            # slot, so without this the one behind would go on to ask, and ask the wrong reader: an
+            # `approval` frame is never muted, so the page draws it into whatever transcript is on
+            # screen, and an Allow there runs the tool on a turn nobody is watching. The conversation
+            # riding on that frame is the page's own backstop for the sliver of the window even this
+            # check cannot close; the check is what keeps the question from being asked at all.
+            if self._turn_conversation() != self._active_id():
+                raise _SwitchedAway
+            await self._ui.ask_approval(
+                self._label(agent, name), arguments, agent=agent, conversation_id=turn_conversation
+            )
+
+        try:
+            return await self.approval.ask(prompt, retire=self._ui.retire_prompt)
+        except _SwitchedAway:
+            return await self._deny_switched_away(name, turn_conversation)
 
     def _label(self, agent: str, name: str) -> str:
         """``name`` as the prompt shows it: ``toolset.tool``, or bare when no toolset is known."""
@@ -243,8 +301,9 @@ class HumanGate:
         firing, which reports itself when it ends and would otherwise raise one of these on every
         firing.
 
-        One method, two callers, because the two are the same event at different times: the switch may
-        have happened before the call reached the gate, or during the review the gate ran.
+        One method, three callers, because all three are the same event at different times: the switch
+        may have happened before the call reached the gate, during the review the gate ran, or while
+        the call waited behind another call's prompt for the approval slot.
         """
         await self._ui.alert(
             f"A turn you switched away from asked to run {name}. It was denied automatically, "
@@ -263,6 +322,7 @@ class HumanGate:
         *,
         default: Any = None,
         context: Any = None,
+        about: str = "something",
     ) -> Any:
         """Ask the user something on a workflow's behalf and wait for the answer.
 
@@ -270,8 +330,72 @@ class HumanGate:
         that raised it). It is passed per call rather than fixed at construction because it is the
         workflow's safe answer, not the core's: "reject" for a plan review, but a different word for
         the next workflow along.
+
+        **A question is only put to someone who is there to answer it**, which is the rule
+        ``approve`` follows and this one now follows too, in the same two conditions: nobody is at
+        the keyboard (an unattended turn), or the keyboard is showing something else (a turn the
+        user switched away from). The consequences differ, and the unattended one is the worse of
+        the two: a switched-away question drawn anyway would be put to the wrong reader (a
+        ``plan_review`` frame is no more muted than an ``approval`` one), while an unattended one
+        would not be answered at all and would hold the firing open until the process restarted. No
+        path reaches here from an unattended turn today, since ``_unattended_body`` calls
+        ``agent.run`` rather than dispatching a workflow; the check is here because it is the same
+        rule, and because the failure it would prevent has no other recovery.
+
+        ``about`` is how the card names the question, and it belongs to the asker for the reason
+        ``parse`` does: only the workflow knows what it was asking. The default is deliberately
+        vague, since a workflow that says nothing leaves the core nothing true to say.
+
+        The retirement is the core's, though, and it is the same one an approval gets: what the page
+        has to be told is that the question is closed, which is true of every prompt this class puts
+        up and says nothing about whose vocabulary asked it.
         """
-        return await self.decision.ask(prompt, context=context, parse=parse, default=default)
+        if self._is_proactive():
+            return default
+        turn_conversation = self._turn_conversation()
+        if turn_conversation != self._active_id():
+            return await self._answer_switched_away(about, turn_conversation, default)
+
+        async def prompt_unless_switched_away() -> None:
+            # Asked again under the lock that orders the askers, as `approve` does and for the same
+            # reason: the check above is as old as the wait for the slot. Nothing in Kokua's own
+            # planning workflow queues here, since it asks one question at a time and a second
+            # conversation's question is refused by the check above before it can queue, but a
+            # workflow is a plugin seam and a plugin's is arbitrary code: two questions asked
+            # concurrently is a shape this class has to answer for.
+            if self._turn_conversation() != self._active_id():
+                raise _SwitchedAway
+            await prompt()
+
+        try:
+            return await self.decision.ask(
+                prompt_unless_switched_away,
+                context=context,
+                parse=parse,
+                default=default,
+                retire=self._ui.retire_prompt,
+            )
+        except _SwitchedAway:
+            return await self._answer_switched_away(about, turn_conversation, default)
+
+    async def _answer_switched_away(self, about: str, turn_conversation: Optional[str], default: Any) -> Any:
+        """Answer a workflow's question with its own safe answer, because its turn left the screen.
+
+        The counterpart to :meth:`_deny_switched_away`, and separate from it because the two say
+        different true things: that one denies a capability the core named, this one answers a
+        question whose words belong to the workflow that asked it, so the card can only repeat what
+        the asker said it was about.
+        """
+        await self._ui.alert(
+            f"A turn you switched away from asked you {about}. It took its own safe answer, "
+            "because answering means reading the question, and that turn is not on screen.",
+            conversation_id=turn_conversation,
+            # One card per conversation, not per question: a workflow that asks repeatedly should
+            # supersede its own card rather than stack one per attempt, and unlike a tool call there
+            # is no name here to tell two questions apart.
+            group=f"{turn_conversation}:decision",
+        )
+        return default
 
     def resolve_reply(self, raw: str, text: str) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.
