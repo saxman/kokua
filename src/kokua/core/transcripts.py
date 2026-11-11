@@ -320,7 +320,7 @@ def tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
     """Map each tool result in ``messages`` to the id of the call it answers.
 
     A live ``tool`` frame carries the call and its result together (AIMU emits ``TOOL_CALLING`` only once
-    the call has returned), but a stored transcript splits them across an assistant message's
+    the call has returned, after the ``TOOL_REQUESTED`` that announced it), but a stored transcript splits them across an assistant message's
     ``tool_calls`` and a later ``role: "tool"`` message, joined by id. Concurrent dispatch appends those
     results in completion order, so the join has to be by id and not by position.
     """
@@ -423,8 +423,9 @@ def replay_items(
     ``after``, which for a worker's image is the call that opened the worker's card, and after that
     round's ``request`` marker as well as the call's tool items; one whose
     ``after`` names no assistant message with tool calls in its turn is placed at the turn's end.
-    A direct call's image therefore replays just below its tool row, where live it arrived just above
-    it (AIMU reports a call only once it returns). A turn with no record still has its tool results
+    A direct call's image therefore replays just below its tool row, which is where it lands live too,
+    since the row is drawn when the call is announced and the image arrives while the tool runs.
+    A turn with no record still has its tool results
     scanned for ``/images/`` references, which is how a transcript stored before this record existed
     keeps its images.
 

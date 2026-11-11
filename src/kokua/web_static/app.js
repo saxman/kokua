@@ -1260,6 +1260,8 @@ function addFoldable(cls, labelParts, opts, ts) {
   });
   outer.appendChild(header);
   outer.appendChild(body);
+  // Set before the block lands, because appendToLog decides on landing whether it takes a round button.
+  if (opts && Number.isInteger(opts.round)) outer.dataset.round = String(opts.round);
   appendToLog(outer, opts && opts.parent);
   autoscroll();
   return { outer, header, body, label };
@@ -1756,9 +1758,9 @@ const ROUND_OUTPUT = ".bubble:not(.user, .phase, .notice, .approval, .inbox, .lo
 // typed into the running turn (`.sent-mid-turn` is added when the page draws it, since the server's
 // `.mid-turn` mark only arrives later), the injected-round marker, a delivered note, and the page's own
 // notices and approval prompts. Anything else that is not output (a turn-opening user bubble, a phase
-// divider) ends the search. A published file (`.artifact`) is one too: live it arrives between a round's
-// request and its tool row, and on reload after both, so looking past it puts the button on the tool row
-// in both views instead of on the image.
+// divider) ends the search. A published file (`.artifact`) is one too: on reload it lands after both a
+// round's tool row and its request, and live it can land before the tool row when the call was not
+// announced (a sub-agent's), so looking past it puts the button on the tool row instead of on the image.
 const ROUND_PASSTHROUGH = ".mid-turn, .sent-mid-turn, .inbox, .loop, .notice, .approval, .artifact";
 
 // The model's own output a request describes: the nearest one above the end of `container`, looking past
@@ -1862,13 +1864,14 @@ function releaseRoundButton(record) {
 }
 
 // A dispatch result (a tool card, a sub-agent card, a generated image) is the last thing its round
-// produced, but it reaches the page after that round's request: a round's record completes when the
-// model's response ends, and the tool it asked for runs afterwards. A live tool round's button is
-// therefore drawn first on whatever came before (the round's reasoning, or a row of its own), and a
-// sub-agent card, whose entries are stored in that same arrival order, does the same on reload. So when a
-// dispatch result lands right after the latest round's output (looking past ROUND_PASSTHROUGH), the
-// button moves onto it: the output a top-level replay, which orders the tool card first, puts it on.
-// Model output (an answer, reasoning) never takes it, since that belongs to the round that comes next.
+// produced, but it can reach the page after that round's request: a round's record completes when the
+// model's response ends, and the tool cards it asked for are drawn afterwards (announced as the tools
+// start, or only once they return for a sub-agent's). A live tool round's button can therefore be drawn
+// first on whatever came before (the round's reasoning, or a row of its own), and a sub-agent card,
+// whose entries are stored in that same arrival order, does the same on reload. So when a dispatch
+// result lands right after the latest round's output (looking past ROUND_PASSTHROUGH), the button moves
+// onto it: the output a top-level replay, which orders the tool card first, puts it on. Model output
+// (an answer, reasoning) never takes it, since that belongs to the round that comes next.
 function adoptRoundButton(el, container) {
   if (!el.matches(DISPATCH_RESULT)) return;
   const record = latestRound.get(container);
@@ -1877,6 +1880,11 @@ function adoptRoundButton(el, container) {
   // places at a turn's end (one matched to no call, such as a plan reviewer's) would take the button of
   // a round that only answered. A record with no count (written before it was recorded) is not moved.
   if (!(record.call.tool_call_count > 0)) return;
+  // An announced card names its round. The request frame is sent from AIMU's event sink and the
+  // announcement from the stream, so a card can land before its own round's request: the latest record
+  // is then the round before, whose button must stay where it is. That request, when it lands, finds
+  // this card itself (roundOutputIn).
+  if (el.dataset.round !== undefined && Number(el.dataset.round) !== record.call.round) return;
   let previous = el.previousElementSibling;
   while (previous && previous.matches(ROUND_PASSTHROUGH)) previous = previous.previousElementSibling;
   if (previous !== record.output) return;
@@ -2044,7 +2052,24 @@ function addTurnBadge(bubble, turn) {
 // and, for a tool call, the result it returned. Shared by live frames, history replay, and (via
 // `opts.parent`) a sub-agent card's nested tool calls. `opts.toolset` names the toolset the call came
 // from, shown as `toolset.tool` (the name a gate or an `available` list uses); absent, the call is bare.
+// `opts.pending` draws a call that has been announced and not yet returned (a `tool_requested` frame):
+// no result yet, and `fillToolResult` completes it in place when the result arrives. `opts.round` is the
+// loop round that asked for the call, which `adoptRoundButton` matches against.
 function renderTool(name, args, ts, opts) {
+  const pending = !!(opts && opts.pending);
+  const label = opts && opts.toolset ? `${opts.toolset}.${name}` : name;
+  const payload = toolLine(label, args);
+  const parts = { kind: "tool", payload, metric: pending ? "running…" : "" };
+  const placement = { parent: opts && opts.parent, round: opts && opts.round };
+  const f = addFoldable(pending ? "tool pending" : "tool", parts, placement, ts);
+  f.payload = payload;
+  f.body.appendChild(document.createTextNode(toolArgs(args)));
+  if (!pending) fillToolResult(f, opts);
+  return f;
+}
+
+// A tool card's result: its size on the header and its output below the arguments.
+function fillToolResult(f, opts) {
   // An absent response means no result was recorded (a transcript stored before results were
   // replayed, a turn cut short mid-dispatch); an empty one means the tool returned nothing. Neither
   // has anything to show, and an "output (0 chars)" row on every such card would be noise.
@@ -2055,17 +2080,45 @@ function renderTool(name, args, ts, opts) {
   // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
   // expanded.
   const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
-  const label = opts && opts.toolset ? `${opts.toolset}.${name}` : name;
-  const parts = { kind: "tool", payload: toolLine(label, args), metric };
-  const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
-  f.body.appendChild(document.createTextNode(toolArgs(args)));
+  f.outer.classList.remove("pending");
+  setFoldLabel(f.label, "tool", f.payload, metric);
   if (returned) {
     renderToolOutput(f.body, response, {
       responseRef: opts && opts.responseRef,
       responseBytes: opts && opts.responseBytes,
     });
   }
-  return f;
+}
+
+// Calls announced and not yet returned, by tool-call id: the card each one's `tool` frame fills in.
+// Emptied by a history repaint (the cards are gone) and at a turn's end (see settlePendingTools).
+let pendingTools = new Map();
+
+function renderToolRequested(frame, ts) {
+  const f = renderTool(frame.name, frame.arguments, ts, { toolset: frame.toolset, round: frame.round, pending: true });
+  if (frame.id) pendingTools.set(frame.id, f);
+}
+
+// A call's result: into the card its announcement drew, or, with none (a call announced before this page
+// loaded, or a sub-agent's), a card of its own exactly as before announcements existed.
+function renderToolResult(frame, ts) {
+  const f = frame.id ? pendingTools.get(frame.id) : null;
+  if (!f) {
+    renderTool(frame.name, frame.arguments, ts, { response: frame.response, toolset: frame.toolset });
+    return;
+  }
+  pendingTools.delete(frame.id);
+  fillToolResult(f, { response: frame.response });
+}
+
+// A turn that ended with a call still running (stopped, or failed mid-dispatch) will never send its
+// result, so its card stops claiming the call is running.
+function settlePendingTools() {
+  for (const f of pendingTools.values()) {
+    f.outer.classList.remove("pending");
+    setFoldLabel(f.label, "tool", f.payload, "no result");
+  }
+  pendingTools.clear();
 }
 // The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this
 // marker is deliberately not drawn there (the tool block is that boundary), so both words below
@@ -2172,9 +2225,13 @@ function handleFrame(event) {
     thinkingBlock.body.appendChild(document.createTextNode(frame.text));
     setFoldLabel(thinkingBlock.label, "thinking", "", lineMetric(thinkingBlock.body.textContent));
     autoscroll();
+  } else if (frame.type === "tool_requested") {
+    // The call is drawn as the tool starts, so a slow one is on screen while it works.
+    thinkingBlock = null;
+    renderToolRequested(frame, new Date());
   } else if (frame.type === "tool") {
     thinkingBlock = null;
-    renderTool(frame.name, frame.arguments, new Date(), { response: frame.response, toolset: frame.toolset });
+    renderToolResult(frame, new Date());
   } else if (frame.type === "loop") {
     // Agent-loop continuation boundary. Like a tool block, it ends the answer segment above it: the
     // next tokens open their own bubble below this marker.
@@ -2205,6 +2262,7 @@ function handleFrame(event) {
     scheduleStreamRender();
   } else if (frame.type === "done") {
     finalizeStreaming();
+    settlePendingTools();
     autoscroll();
     setProcessing(false);
     setWorking(null);
@@ -2223,6 +2281,7 @@ function handleFrame(event) {
     // A proactive one interrupts whatever is going on without ending it, so it leaves both alone: the
     // indicator belongs to the turn now, not to "the last thing that arrived".
     if (!frame.proactive) {
+      settlePendingTools();
       setProcessing(false);
       setWorking(null);
     }
@@ -2341,6 +2400,7 @@ function handleFrame(event) {
     streamingText = "";
     thinkingBlock = null;
     pendingBubbles = new Map();  // the bubbles these referred to were just detached by the repaint
+    pendingTools = new Map();  // so were these cards; a `pending` item below re-registers a still-running call
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
     setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
@@ -2391,7 +2451,10 @@ function handleFrame(event) {
         f.body.textContent = item.text || "";
         setFoldLabel(f.label, "thinking", "", lineMetric(item.text));
       }
-      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response, toolset: item.toolset });
+      // A `pending` tool is a call still running in an in-flight turn's catch-up, which its live result fills.
+      else if (item.type === "tool" && item.pending) renderToolRequested(item, item.ts);
+      // `round` is set only on a catch-up's announced call, which can sit ahead of its own round's request.
+      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response, toolset: item.toolset, round: item.round });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       // A message sent into a turn already running, read from the stored record
       // (`record_turn_provenance`'s `messages` map) rather than a frame about a turn still open: this

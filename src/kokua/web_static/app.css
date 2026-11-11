@@ -487,6 +487,8 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    its caption. Other metrics (a sub-agent's running status) are state and stay put. */
 .bubble.tool > .fold-header .fold-metric { opacity: 0; transition: opacity 120ms ease; }
 .bubble.tool:hover > .fold-header .fold-metric, .bubble.tool > .fold-header:focus-visible .fold-metric { opacity: 1; }
+/* A call still running is state, like a running sub-agent, so its "running…" shows unhovered. */
+.bubble.tool.pending > .fold-header .fold-metric { opacity: 1; font-style: italic; }
 /* No payload (thinking, continuation, plan): the kind word IS the line, so it takes the row's primary
    content colour and its full size. As the secondary label it wears next to a call, it reads as an
    empty row and the reasoning looks like it never happened. */

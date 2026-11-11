@@ -560,3 +560,12 @@ async def test_stream_activity_labels_tool_calls_too():
     ui = ChannelUI(_Streaming(), toolset_of={"calculate": "compute"}.get)
     await ui.stream_activity(_chunks(_tool_chunk("calculate")))
     assert seen[0].content["toolset"] == "compute"
+
+
+async def test_an_announced_tool_call_carries_the_toolset_too():
+    """The page draws an announced call before its result arrives, so it is labelled the same way."""
+    channel = _DrainingChannel()
+    ui = ChannelUI(channel, toolset_of={"generate_image": "image"}.get)
+    announced = StreamChunk(StreamingContentType.TOOL_REQUESTED, {"name": "generate_image", "arguments": {}, "id": "c"})
+    await ui.send(_chunks(announced))
+    assert channel.chunks[0].content == {"name": "generate_image", "arguments": {}, "id": "c", "toolset": "image"}

@@ -2983,6 +2983,80 @@ def test_a_live_tool_round_with_two_calls_puts_its_button_on_the_last(page, live
     expect(page.locator("#log > .round-orphan")).to_have_count(0)
 
 
+def _announced(name, call_id, round_index=0):
+    return {"type": "tool_requested", "name": name, "arguments": {}, "id": call_id, "round": round_index}
+
+
+def _returned(name, call_id, response):
+    return {"type": "tool", "name": name, "arguments": {}, "id": call_id, "response": response}
+
+
+def test_an_announced_call_shows_while_it_runs_and_its_result_fills_the_same_card(page, live_server):
+    _open(page, live_server())
+    _live_frame(page, _announced("generate_image", "c1"))
+    tools = page.locator("#log > .bubble.tool")
+    expect(tools).to_have_count(1)
+    expect(tools.first).to_have_class(re.compile(r"\bpending\b"))
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("running…")
+    _live_frame(page, _returned("generate_image", "c1", "Generated image."))
+    expect(tools).to_have_count(1)
+    expect(tools.first).not_to_have_class(re.compile(r"\bpending\b"))
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("16 chars")
+    expect(tools.first.locator("> .fold-body")).to_contain_text("output")  # the result's own foldable
+
+
+@pytest.mark.parametrize("request_first", [True, False], ids=["request-first", "announcement-first"])
+def test_a_two_round_tool_turn_puts_one_button_on_each_rounds_card(page, live_server, request_first):
+    """The turn that loads a toolset and then calls its tool. Each round's request frame is scheduled from
+    AIMU's event sink while the announcement comes down the stream, so either can arrive first; the
+    card's `round` is what keeps the second round's button off the first round's card either way."""
+    _open(page, live_server(seed=_request_seed()))
+    _live_frame(page, _LIVE_CALL)
+    _live_frame(page, _announced("load_tools", "c0"))
+    _live_frame(page, _returned("load_tools", "c0", "Loaded 'image': generate_image."))
+    second_request = {**_LIVE_CALL, "round": 1}
+    if request_first:
+        _live_frame(page, second_request)
+        _live_frame(page, _announced("generate_image", "c1", 1))
+    else:
+        _live_frame(page, _announced("generate_image", "c1", 1))
+        _live_frame(page, second_request)
+    tools = page.locator("#log > .bubble.tool")
+    expect(tools).to_have_count(2)
+    # While the image is still generating, which is when two buttons used to sit on load_tools.
+    expect(tools.nth(0).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_attribute("data-round", "2")
+    _live_frame(page, _returned("generate_image", "c1", "Generated image."))
+    expect(tools).to_have_count(2)
+    expect(tools.nth(0).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_count(1)
+    expect(page.locator("#log > .round-orphan")).to_have_count(0)
+
+
+def test_a_call_still_running_when_its_turn_ends_says_it_has_no_result(page, live_server):
+    """A stopped turn never sends the result, so the card must not keep claiming the call is running."""
+    _open(page, live_server())
+    _live_frame(page, _announced("generate_image", "c1"))
+    _live_frame(page, {"type": "done"})
+    tool = page.locator("#log > .bubble.tool")
+    expect(tool).not_to_have_class(re.compile(r"\bpending\b"))
+    expect(tool.locator("> .fold-header .fold-metric")).to_have_text("no result")
+
+
+def test_switching_into_a_running_call_shows_it_pending_and_its_result_fills_it(page, live_server):
+    """A switch-in mid-call replays the call as the catch-up record holds it, pending, and the result that
+    arrives live afterwards completes that card rather than adding one beside it."""
+    _open(page, live_server())
+    item = {"type": "tool", "name": "generate_image", "arguments": {}, "id": "c1", "round": 0, "pending": True}
+    _live_frame(page, {"type": "history", "items": [{"type": "user", "text": "draw"}, item]})
+    tools = page.locator("#log > .bubble.tool")
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("running…")
+    _live_frame(page, _returned("generate_image", "c1", "Generated image."))
+    expect(tools).to_have_count(1)
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("16 chars")
+
+
 def test_a_card_after_a_round_that_asked_for_no_tools_does_not_take_its_button(page, live_server):
     """A round that only answered has no dispatch results, so a card that follows it is not its output."""
     _open(page, live_server(seed=_request_seed()))

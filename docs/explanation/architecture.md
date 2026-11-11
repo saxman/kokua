@@ -1711,7 +1711,7 @@ the turn's number, which the user bubble wears as a `turn N` badge.
 
 A `tool` frame carries one key AIMU's does not: `toolset`, the toolset that gave the calling agent that
 tool, which the page prints as `toolset.tool`. Naming it takes the live registry, which a channel must
-not reach for, so `ChannelUI` writes it into the entry agent's TOOL_CALLING chunks (through
+not reach for, so `ChannelUI` writes it into the entry agent's TOOL_REQUESTED and TOOL_CALLING chunks (through
 `core.agents.toolset_of`, bound by the composition root) and each channel only reads it. That is also
 why Kokua's `send` maps a tool call itself instead of leaving it to AIMU's loop, which would drop the
 key; the terminal renames the call to `toolset.tool` before AIMU prints it. A sub-agent's entries get
@@ -2126,11 +2126,25 @@ at a firing rather than at an edit is what makes lowering one non-destructive an
 whole. This is also why the record needs no `session_id`: nothing reuses a conversation, so a firing
 writes nothing back to the task's table.
 
-A `tool` frame carries what the call returned as well as what it was asked to do (`response`, added to
-AIMU's base frame), because AIMU yields `TOOL_CALLING` only once the call has been dispatched. An error,
-an argument-binding failure, and a denied approval are results too and arrive on that same key, so the
-page needs no separate failure path and no second frame updating a card in place: the card is complete
-when it appears. `renderTool` puts the result in a nested foldable of its own below the arguments, filled
+A call reaches the page in two frames, because AIMU reports it twice. `TOOL_REQUESTED` comes first, one
+per call in the round, before any of them is approved or run, and becomes a `tool_requested` frame: the
+page draws the card then, marked `running…`, so a tool that takes a minute (an image generation) is on
+screen for that minute instead of appearing only once it is over. `TOOL_CALLING` comes once the call has
+been dispatched and becomes a `tool` frame carrying what the call returned (`response`, added to AIMU's
+base frame) and the provider's tool-call `id`, the key the page uses to find the announced card and fill
+it in place (`renderToolResult`). It pairs by id rather than by position because concurrent dispatch
+reports results together after every call has run. An error, an argument-binding failure, and a denied
+approval are results too and arrive on that same key, so the page needs no separate failure path. A
+result with no announced card (a sub-agent's call, whose card entries still arrive only once each call
+returns) is drawn complete, as every call was before announcements existed, and a turn that ends with a
+call still running (stopped mid-dispatch) leaves that card reading `no result` rather than `running…`. A
+spawn call is never announced, since its sub-agent card stands in for it. The announcement also carries
+its `round`, which the round buttons need: the `request` frame for that round is scheduled from AIMU's
+synchronous event sink while the announcement comes down the stream, so either can reach the page
+first, and `adoptRoundButton` refuses to move a round's button onto a card from a different round. A
+switch into a turn mid-call replays the call as the catch-up record holds it, `pending` until its result
+arrives, when that same item takes the result rather than a second one being added.
+`renderTool` puts the result in a nested foldable of its own below the arguments, filled
 on first expand and clamped to `OUTPUT_CLAMP` characters with a button for the rest, as plain text --
 never markdown, since a tool result is untrusted input. Output travels whole and only the DOM clamps, so
 a `history` frame grows by every tool result in the conversation and is re-sent on every conversation
