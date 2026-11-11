@@ -611,7 +611,7 @@ policy's `review` list. Off by default, and the whole sub-table is startup-only 
 enabled = false
 reviewers = ["approval"]
 timeout_seconds = 10
-max_per_turn = 5
+max_per_turn = 10
 ```
 
 **This is a convenience layer, not a security boundary.** It reduces prompts; it contains nothing. The
@@ -628,7 +628,7 @@ reviewer whose token cost is not counted).
 | `enabled` | bool | `false` | whether any `review` call is reviewed at all |
 | `reviewers` | list of strings | `[]` | which [`[reviewers.<name>]`](#reviewersname) tables are asked |
 | `timeout_seconds` | number > 0 | `10` | past this, the review escalates rather than being waited on |
-| `max_per_turn` | integer >= 1 | `5` | most auto-approvals one turn may collect |
+| `max_per_turn` | integer >= 1 | `10` | most auto-approvals one turn may collect |
 
 Name more than one reviewer and **all of them must agree**: they are asked in order, and the first
 withheld answer ends the round, so a quorum costs every reviewer only when the ones before it agreed.
@@ -652,8 +652,11 @@ narrow that list, `run_command` is the entry to drop.
 
 `max_per_turn` is per *turn*, counted across every agent in it, and the budget is spent when a review
 is **attempted**, not when one approves. A model retrying the same rejected call cannot collect one approval per attempt, and a loop
-that keeps being escalated stops costing reviews after the fifth. Each reactive turn gets its own
-budget, so one conversation's loop cannot spend another's.
+that keeps being escalated stops costing reviews after the tenth. Each reactive turn gets its own
+budget, so one conversation's loop cannot spend another's. The default is sized for a turn that
+delegates: a sub-agent spends from its turn's budget rather than opening its own, so one shell-heavy
+worker can use up a small allowance by itself, and every later gated call in that turn then asks you
+as if auto-approval were off.
 
 An unattended turn (a scheduled task, anything the assistant starts unprompted) is never auto-approved.
 Its gated calls are denied before a reviewer is consulted at all, which is the behavior
