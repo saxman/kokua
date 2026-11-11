@@ -51,7 +51,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.38.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.39.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -60,7 +60,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.38.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.39.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -394,7 +394,7 @@ Consequences for working in this repo:
   0.28.0 reasoning: `core/build.py` imports `ToolGroup` at module scope, so a checkout without it raises
   `ImportError` the moment a front end or `kokua agents` imports the core, after the preflight and before
   any conversation exists. Loud, so the floor covers it. `tests/test_aimu_compat.py` pins both.
-  **AIMU 0.38.0 is the current floor, and it is the first release where the probe stayed put because
+  **AIMU 0.38.0 was the floor until 0.39.0, and it is the first release where the probe stayed put because
   neither capability had any handle at all.** Both are silent when missing. `calculate` evaluates an
   allowlisted syntax tree instead of `eval()` with an empty builtins dict, which any expression could
   climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves `compute.calculate` ungated on
@@ -407,14 +407,22 @@ Consequences for working in this repo:
   "genuinely offers no handle": the probe stays on `RunEvent.run_id`, `aimu_compat` says what that leaves
   uncovered (a checkout claiming 0.38.0 without either change passes), and `tests/test_aimu_compat.py`
   pins both by behavior, which a test may do and a preflight may not.
-  **The probe now runs ahead of every AIMU release.** It is a name lookup on
-  `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds and which only AIMU main has; 0.39.0
-  will be its first release. The floor stays at 0.38.0 because a sibling on main still reports that
-  version, so an AIMU from PyPI passes the floor and is refused by the probe, and `_PROBE_UNRELEASED`
-  makes the message say no release has it rather than recommend `--no-sources`, the install that just
-  failed. It subsumes the `RunEvent.run_id` probe it replaced (it landed later), and that field is pinned
-  in `tests/test_aimu_compat.py` now. When 0.39.0 ships: raise the floor, set `_PROBE_UNRELEASED` to
-  None, and drop the "until 0.39.0" caveats from the README, `docs/index.md`, and the changelog.
+  **AIMU 0.39.0 is the current floor, and its probe is the first that ran ahead of every release.** It is a
+  name lookup on `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds, and it moved there
+  while only AIMU main had it: the floor stayed at 0.38.0 so a sibling on main (still reporting 0.38.0)
+  could start, and `_PROBE_UNRELEASED` made the refusal say no release had it rather than recommend
+  `--no-sources`, the install that had just failed. With 0.39.0 published, `_PROBE_UNRELEASED` is None
+  again and kept for the next probe that runs ahead. It subsumes the `RunEvent.run_id` probe it replaced
+  (it landed later), and that field is pinned in `tests/test_aimu_compat.py` now. The same release's
+  silent capability does not get the probe, and the reason is new: `trim_messages` keeps the first message
+  after the system prompt (`keep_first`, default 1), a spawned worker's task, which `compaction_for_window`
+  relies on by calling it with no keyword. `keep_first` is a signature handle and landed *after*
+  `make_page_tools`, so by the usual rule the probe would move. It stays because AIMU's version string
+  changes only in its release commit: every sibling between the two features reports 0.38.0 and the floor
+  refuses it, so the window the move would close holds no checkout the probe could see. The behavior is
+  pinned in `tests/test_aimu_compat.py`. 0.39.0 is also when Ollama clients stopped downloading a missing
+  model on construction, so a missing model reaches a turn as `ModelNotInstalledError`, imported at module
+  scope by `core/turns.py` (loud when absent, so the floor's job).
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

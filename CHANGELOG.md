@@ -7,9 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer, plus the page tools the
-`web` toolset builds, which are on AIMU's main branch and in no release until 0.39.0. Until it is published,
-Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -786,9 +784,11 @@ Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.
   channel that does not show who is asking can accept and ignore it, which is what adding `agent=None`
   to the signature does. It is keyword-only for the reason `send_turn_saved`'s `token`
   is.
-- **The AIMU floor is 0.38.0**, for a `calculate` that evaluates arithmetic and nothing else (it was an
+- **The AIMU floor is 0.39.0**, for the page tools the `web` toolset builds (`make_page_tools`) and for a
+  compaction that keeps a worker's task (see `context_length` under Configuration). Before it the floor
+  was 0.38.0, for a `calculate` that evaluates arithmetic and nothing else (it was an
   escapable `eval`, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
-  of a worker cut off at its round cap. Before it the floor was 0.37.0, for the spawn spec's
+  of a worker cut off at its round cap. Before that it was 0.37.0, for the spawn spec's
   `"tool_approval"` key and for `ToolGroup`, which residency rides. See the floor history under
   "Diagnostics and error reporting" below.
 - **A delegating agent hears when its worker ran out of rounds.** A worker's forced wrap-up answer
@@ -1779,7 +1779,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
   `tests/core/test_delegation.py` pins the asymmetry. Needs `aimu>=0.31.0`, which added the `compaction`
   factory argument and the matching `"compaction"` entry in `SUBAGENT_SPEC_KEYS`; it is also the surface
-  the startup preflight's capability probe now grips. A stored conversation,
+  the startup preflight's capability probe then gripped. **The trim keeps the worker's task.** AIMU
+  0.39.0's `trim_messages` protects the first message after the system prompt by default, which in a
+  spawned worker is the task its delegator handed it. Before that a trim dropped oldest-first, so the
+  task was the first thing to go, and a compacted worker carried on with its system message and recent
+  tool traffic, answering a question it could no longer see. A task too long to fit beside the recent
+  messages is still kept, so a worker handed a very large task can still fill its window. A stored conversation,
   a scheduled task's included, is never compacted: the user can still open and read it.
   Two things worth knowing about the parameters themselves: `max_tokens` caps *generated* tokens while
   `context_length` sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
@@ -2195,15 +2200,16 @@ notice on startup.
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
-  The check now probes `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds and which no
-  AIMU release contains yet. The floor stays at **0.38.0**, because a sibling on AIMU main still reports
-  that version and a 0.39.0 floor would refuse it, so an AIMU installed from PyPI passes the floor and is
-  then refused by the probe. The message says no release has the page tools yet, rather than offering
-  `--no-sources` and PyPI, the install that just failed. When 0.39.0 ships, the floor moves to it.
+  Today the floor is **0.39.0**, and the check probes `aimu.tools.builtin.make_page_tools`, which the
+  `web` toolset builds. The probe moved there before 0.39.0 was published, while the floor still read
+  0.38.0 so a sibling on AIMU main could start, and for that stretch the message said no release had the
+  page tools yet rather than offering `--no-sources` and PyPI, the install that had just failed. The same
+  release's `trim_messages(keep_first=1)` default is silent when missing and does not get the probe,
+  because every AIMU commit between the two features reports 0.38.0 and the floor already refuses it.
   Before that the probe was a signature check on `RunEvent` for `run_id`, which the floor covers now.
-  Today the floor is **0.38.0**: `calculate` evaluates an allowlisted syntax tree rather than an escapable
+  Before it the floor was **0.38.0**: `calculate` evaluates an allowlisted syntax tree rather than an escapable
   `eval`, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
-  symbol for the startup check to look for, so the check stays where it was and the floor alone covers
+  symbol for the startup check to look for, so the check stayed where it was and the floor alone covered
   both. Before it the floor was **0.37.0**: a spawned worker's spec carries a `"tool_approval"` key, which is what lets
   each agent's tool calls be judged by its own approval policy; its absence raises loudly, so the startup
   check stays where it was. Residency rides the same release's `ToolGroup`, and the check skips it for the
@@ -2243,6 +2249,14 @@ notice on startup.
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
   (caused by ... Connection refused)"). Reactive and proactive turns both surface the detail.
+- **A model the server does not have says which model, where, and how to install it.** Since AIMU 0.39.0
+  an Ollama client no longer downloads a missing model when it is built (which could start a
+  multi-gigabyte download of a newer build, unlogged, once per sub-agent spawn), so naming an uninstalled
+  model now fails at the first request with `ModelNotInstalledError`. It shares the unreachable-server
+  branch at all three sites, in the web UI and the CLI alike, and the reply is built from the error's
+  `model` and `endpoint` ("couldn't use 'qwen3:8b': it is not installed on the model server at
+  http://gpu-box:11434. Install it there (`ollama pull qwen3:8b` on an Ollama server) and try again"),
+  because AIMU's own message names `aimu.pull()` and `pull=True`, which no Kokua user can call.
 - **A refused request reads as refused, not as a failure.** A model's safety classifiers declining a
   request is not a broken thing to go looking for, so it does not share the generic failure wording.
   Anthropic returns a refusal as HTTP 200 with `stop_reason: "refusal"` and no content, which AIMU

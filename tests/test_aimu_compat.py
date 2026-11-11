@@ -179,7 +179,7 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
 
 
 def test_the_probe_targets_the_page_tools_the_web_toolset_builds():
-    """The surface today is ``aimu.tools.builtin.make_page_tools``, which no AIMU release contains yet.
+    """The surface today is ``aimu.tools.builtin.make_page_tools``, first released in 0.39.0.
 
     It is a name lookup: the factory is a new export, so its presence alone dates a checkout. It landed
     after every 0.38.0 capability, so a sibling that has it has the rest of what the floor names.
@@ -193,13 +193,12 @@ def test_the_probe_targets_the_page_tools_the_web_toolset_builds():
     assert aimu_compat._PROBE_SYMBOL == "make_page_tools"
     assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
-    assert aimu_compat._PROBE_UNRELEASED == "0.39.0"
+    assert aimu_compat._PROBE_UNRELEASED is None
 
 
-def test_an_aimu_release_without_page_tools_is_told_no_release_has_them(monkeypatch):
-    """A PyPI AIMU 0.38.0 clears the floor and lacks the probe. The usual remedy, installing the floor
-    from PyPI, is the install that just failed, so the message must say no release carries the surface
-    yet rather than send the user round in a circle."""
+def test_a_release_at_the_floor_without_page_tools_is_sent_to_pypi(monkeypatch):
+    """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
+    checkout, and installing the floor from PyPI is a real remedy again."""
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(
         aimu_compat.importlib,
@@ -209,8 +208,29 @@ def test_an_aimu_release_without_page_tools_is_told_no_release_has_them(monkeypa
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "make_page_tools" in message
-    assert "no AIMU release" in message and "0.39.0" in message
+    assert "make_page_tools" in message and "predates that release" in message
+    assert "--no-sources" in message
+    assert "no AIMU release" not in message
+
+
+def test_a_probe_ahead_of_every_release_is_told_no_release_has_it(monkeypatch):
+    """The mechanism the page tools used before 0.39.0 shipped, kept for the next probe that runs ahead.
+
+    A PyPI AIMU at the floor clears the version check and lacks the probe. The usual remedy, installing
+    the floor from PyPI, is the install that just failed, so the message must say no release carries the
+    surface yet rather than send the user round in a circle.
+    """
+    monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", "9.9.9")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/builtin.py"),
+    )
+    with pytest.raises(AimuVersionError) as excinfo:
+        require_aimu()
+    message = str(excinfo.value)
+    assert "no AIMU release" in message and "9.9.9" in message
     assert "--no-sources" not in message
 
 
@@ -518,10 +538,43 @@ def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
     assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_38_0():
+def test_the_floor_is_0_39_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 38, 0)
+    assert MINIMUM_AIMU == (0, 39, 0)
+
+
+def test_the_floor_covers_a_trim_that_keeps_the_workers_task():
+    """``compaction_for_window`` calls ``trim_messages`` with no keyword and relies on 0.39.0's default:
+    the first message after the system prompt, a spawned worker's task, survives the trim. Before it, a
+    compacting worker dropped its task first and nothing raised. The probe stays on ``make_page_tools``
+    (see ``aimu_compat``), so this is pinned by behavior."""
+    from aimu import trim_messages
+
+    task = {"role": "user", "content": "find the release date"}
+    messages = [
+        {"role": "system", "content": "You are a researcher."},
+        task,
+        {"role": "assistant", "content": "word " * 5_000},
+        {"role": "user", "content": "and?"},
+        {"role": "assistant", "content": "ok"},
+    ]
+    trimmed = trim_messages(messages, max_tokens=500)
+
+    assert len(trimmed) < len(messages)
+    assert trimmed[1] == task
+
+
+def test_the_floor_covers_the_missing_model_error_turns_report():
+    """Since 0.39.0 an Ollama client no longer downloads a missing model when built, so a missing model
+    reaches a turn as ``ModelNotInstalledError``, and ``core/turns.py`` builds its reply from the error's
+    ``model`` and ``endpoint`` fields."""
+    import inspect
+
+    from aimu.aio import ModelNotInstalledError
+
+    parameters = inspect.signature(ModelNotInstalledError).parameters
+    assert {"model", "endpoint"} <= set(parameters)
 
 
 def test_the_floor_covers_a_calculate_that_runs_no_code():

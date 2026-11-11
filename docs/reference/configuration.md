@@ -963,10 +963,13 @@ produced by a tool-using agent, over a curated read-only toolset the workflow fi
 gives it the persona, never the tools. See [Architecture](../explanation/architecture.md).)
 
 `[reviewers.approval]` additionally refuses a declared `thinking`, and the error says why: its answer
-comes back through a structured call, which returns JSON and no reasoning on every provider, so a
-reasoning request there could never take effect. An effort inherited from `[assistant].thinking` is
-inert rather than refused, since that key makes no claim about this reviewer and refusing it would turn
-one global setting into an install-wide bar on enabling the gate.
+comes back through a structured call, which drops a reasoning request on almost every model, because
+structured output there is a forced tool and reasoning cannot ride along. A few recent Anthropic models
+(Fable 5.x, Opus 5.5, Sonnet 5.5) answer through native JSON output instead and keep the request, but
+nothing tells Kokua which kind a model is, so a declared effort would work on those and be dropped
+silently everywhere else. An effort inherited from `[assistant].thinking` is not refused, since that key
+makes no claim about this reviewer and refusing it would turn one global setting into an install-wide
+bar on enabling the gate: it is dropped on most models and spent on those few.
 
 **This whole section is locked by default**, like `[agents.*]` and for the same reason: `update_config`
 is a tool the assistant holds, and a reviewer's prompt decides how the assistant's own work is judged.

@@ -17,12 +17,7 @@ A toy cannot teach what real work costs, so Kokua does real work. And the machin
 followed rather than taken on faith, so every mechanism above is there to be read, run, and extended.
 
 Kokua isn't on PyPI; clone the repository and install with `uv` (Python 3.11+ and
-[AIMU](https://saxman.info/aimu/) 0.38.0 or newer):
-
-!!! warning "Until AIMU 0.39.0 is published, AIMU from PyPI is not enough"
-    The `web` toolset uses AIMU's page tools, which are on AIMU's main branch and in no release yet, so
-    Kokua refuses to start against an AIMU installed from PyPI. Use the sibling-checkout install the
-    README describes, without `--no-sources`, until 0.39.0 is out.
+[AIMU](https://saxman.info/aimu/) 0.39.0 or newer):
 
 ```bash
 git clone https://github.com/saxman/kokua && cd kokua
