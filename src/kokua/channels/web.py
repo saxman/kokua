@@ -74,6 +74,7 @@ _TURN_FRAMES = frozenset(
     {
         "token",
         "thinking",
+        "tool_requested",
         "tool",
         "message",
         "done",
@@ -95,9 +96,11 @@ def _now() -> str:
 
 
 def _tool_frame(call: Any) -> dict:
-    """A ``tool`` frame for one TOOL_CALLING chunk's content: AIMU's frame plus the ``toolset`` the call
-    came from, which ``ChannelUI`` adds to the chunk and AIMU's own mapping would drop. Absent, not
-    ``None``, when no toolset is known, so the page tells "unknown" from a toolset by the key alone."""
+    """A ``tool`` frame for one TOOL_CALLING chunk's content: AIMU's frame plus two keys its own mapping
+    would drop. ``toolset`` is the toolset the call came from, which ``ChannelUI`` adds to the chunk;
+    ``id`` is the provider's tool-call id, which pairs the result with the ``tool_requested`` frame that
+    announced the call, so the page fills that card in rather than drawing a second one. Each is absent,
+    not ``None``, when unknown, so the page tells "unknown" from a value by the key alone."""
     call = call if isinstance(call, dict) else {}
     frame = {
         "type": "tool",
@@ -105,8 +108,32 @@ def _tool_frame(call: Any) -> dict:
         "arguments": call.get("arguments"),
         "response": call.get("response"),
     }
-    if call.get("toolset"):
-        frame["toolset"] = call["toolset"]
+    return _with_call_keys(frame, call)
+
+
+def _tool_requested_frame(chunk: StreamChunk) -> dict:
+    """A ``tool_requested`` frame for one TOOL_REQUESTED chunk: a call the model asked for, sent before
+    the tool runs so a slow one is on screen while it works. Its ``tool`` frame follows with the same
+    ``id`` once the call returns (see :func:`_tool_frame`).
+
+    ``round`` is the loop round whose model call asked for it, the same count a ``request`` frame's
+    ``round`` uses, and it is how the page puts that round's button on this card. Order cannot say:
+    the ``request`` frame is scheduled from AIMU's synchronous event sink (``TurnRunner._notify_request``)
+    while this one is sent from the stream, so either can reach the page first."""
+    call = chunk.content if isinstance(chunk.content, dict) else {}
+    frame = {
+        "type": "tool_requested",
+        "name": call.get("name"),
+        "arguments": call.get("arguments"),
+        "round": chunk.iteration,
+    }
+    return _with_call_keys(frame, call)
+
+
+def _with_call_keys(frame: dict, call: dict) -> dict:
+    for key in ("id", "toolset"):
+        if call.get(key):
+            frame[key] = call[key]
     return frame
 
 
@@ -132,6 +159,8 @@ class _CatchUpRecord:
         self._items: list[dict] = []
         self._thinking: Optional[dict] = None
         self._partial: Optional[dict] = None
+        # Announced tool calls whose result has not arrived, by tool-call id: the item each result completes.
+        self._pending_tools: dict[str, dict] = {}
 
     def record_user(self, text: str, image_references: list[str], ts: str) -> None:
         """Open the record with the turn's own user bubble, which the page renders locally on send and
@@ -170,6 +199,19 @@ class _CatchUpRecord:
             self._close_partial(ts)
         if kind == "done":
             return  # a terminator has no rendered form to replay
+        if kind == "tool_requested":
+            # Replayed as the pending tool card the page drew for it, which the result fills in.
+            item = {**frame, "type": "tool", "pending": True, "ts": ts}
+            self._items.append(item)
+            if frame.get("id"):
+                self._pending_tools[frame["id"]] = item
+            return
+        pending = self._pending_tools.pop(frame.get("id"), None) if kind == "tool" else None
+        if pending is not None:
+            # One item for the call, where it was announced, as the page has one card for it.
+            del pending["pending"]
+            pending.update({key: value for key, value in frame.items() if key != "type"})
+            return
         item = {**frame, "ts": ts}
         self._items.append(item)
 
@@ -256,6 +298,11 @@ class WebChannel(BaseWebChannel):
         frame_type = frame.get("type")
         if frame_type == "subagent" and "task" in frame and "parent" not in frame:
             self._cards_awaiting_call[frame["task"]] += 1
+        elif frame_type == "tool_requested":
+            # Never announced: the spawn's card opens only once its worker starts, after this frame,
+            # so there is no card yet to count against, and the card stands in for the call anyway.
+            if spawn_task(frame.get("name"), frame.get("arguments")) is not None:
+                return
         elif frame_type == "tool":
             task = spawn_task(frame.get("name"), frame.get("arguments"))
             if task is not None and self._cards_awaiting_call[task] > 0:
@@ -454,6 +501,8 @@ class WebChannel(BaseWebChannel):
                         await self.send_frame({"type": "token", "text": chunk.content})
             elif chunk.phase == StreamingContentType.THINKING and chunk.content:
                 await self.send_frame({"type": "thinking", "text": chunk.content})
+            elif chunk.phase == StreamingContentType.TOOL_REQUESTED:
+                await self.send_frame(_tool_requested_frame(chunk))
             elif chunk.phase == StreamingContentType.TOOL_CALLING:
                 await self.send_frame(_tool_frame(chunk.content))
             elif chunk.phase == StreamingContentType.CONTINUING:
@@ -471,14 +520,19 @@ class WebChannel(BaseWebChannel):
         return "".join(parts)
 
     async def _forward_own_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
-        """Pass ``chunks`` on to the base ``send`` loop, sending the one frame that loop cannot produce.
+        """Pass ``chunks`` on to the base ``send`` loop, sending the frames that loop cannot produce.
 
         A tool call is sent here instead and *not* passed on, because the base loop's ``tool`` frame has no
-        ``toolset`` (see :func:`_tool_frame`) and sending both would draw the call twice. An image a tool
-        generates is not spotted here: the tool publishes it to the turn (``core/artifacts.py``), which
-        reaches the page as an ``artifact`` frame from any agent, a worker included.
+        ``toolset`` or ``id`` (see :func:`_tool_frame`) and sending both would draw the call twice; the
+        base loop has no frame at all for a call's announcement. An image a tool generates is not spotted
+        here: the tool publishes it to the turn (``core/artifacts.py``), which reaches the page as an
+        ``artifact`` frame from any agent, a worker included.
         """
         async for chunk in chunks:
+            if chunk.phase == StreamingContentType.TOOL_REQUESTED:
+                if self.stream_tools:
+                    await self.send_frame(_tool_requested_frame(chunk))
+                continue
             if chunk.phase == StreamingContentType.TOOL_CALLING:
                 if self.stream_tools:
                     await self.send_frame(_tool_frame(chunk.content))

@@ -178,39 +178,71 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_page_tools_the_web_toolset_builds():
-    """The surface today is ``aimu.tools.builtin.make_page_tools``, first released in 0.39.0.
+def test_the_probe_targets_the_announcement_phase_tool_cards_are_drawn_from():
+    """The surface today is ``StreamingContentType.TOOL_REQUESTED``, on AIMU main and in no release yet.
 
-    It is a name lookup: the factory is a new export, so its presence alone dates a checkout. It landed
-    after every 0.38.0 capability, so a sibling that has it has the rest of what the floor names.
+    A membership check: the enum is far older than this floor, so only whether it carries the member
+    dates a checkout. ``channels/ui.py`` and ``channels/web.py`` read the member by attribute, so an AIMU
+    without it would raise ``AttributeError`` on a turn's first chunk rather than here.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    assert callable(getattr(module, aimu_compat._PROBE_SYMBOL, None))
-    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
+    assert "TOOL_REQUESTED" in getattr(module, aimu_compat._PROBE_SYMBOL).__members__
+    assert aimu_compat._PROBE_MODULE == "aimu.models"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "make_page_tools"
+    assert aimu_compat._PROBE_SYMBOL == "StreamingContentType"
     assert aimu_compat._PROBE_PARAMETER is None
-    assert aimu_compat._PROBE_MEMBER is None
-    assert aimu_compat._PROBE_UNRELEASED is None
+    assert aimu_compat._PROBE_MEMBER == "TOOL_REQUESTED"
+    assert aimu_compat._PROBE_UNRELEASED == "0.40.0"
 
 
-def test_a_release_at_the_floor_without_page_tools_is_sent_to_pypi(monkeypatch):
-    """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
-    checkout, and installing the floor from PyPI is a real remedy again."""
+def _phases_without_tool_requested(monkeypatch):
+    from enum import Enum
+
+    class _Phases(str, Enum):
+        TOOL_CALLING = "tool_calling"
+
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
-        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/builtin.py"),
+        lambda name: SimpleNamespace(__file__="/site-packages/aimu/models/__init__.py", StreamingContentType=_Phases),
     )
+
+
+def test_a_release_at_the_floor_without_the_announcement_phase_is_told_no_release_has_it(monkeypatch):
+    """While no release carries the phase, a PyPI AIMU at the floor lacks it, and the message names the
+    member rather than the enum (which every AIMU has) and does not recommend the install that just failed."""
+    _phases_without_tool_requested(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "make_page_tools" in message and "predates that release" in message
+    assert "StreamingContentType.TOOL_REQUESTED" in message
+    assert "no AIMU release" in message and "0.40.0" in message
+    assert "predates that release" not in message
+    assert "--no-sources" not in message
+
+
+def test_a_release_at_the_floor_without_the_probe_is_sent_to_pypi_once_one_has_it(monkeypatch):
+    """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
+    checkout, and installing the floor from PyPI is a real remedy again."""
+    monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
+    _phases_without_tool_requested(monkeypatch)
+    with pytest.raises(AimuVersionError) as excinfo:
+        require_aimu()
+    message = str(excinfo.value)
+    assert "TOOL_REQUESTED" in message and "predates that release" in message
     assert "--no-sources" in message
     assert "no AIMU release" not in message
+
+
+def test_the_floor_covers_the_page_tools_the_probe_no_longer_grips():
+    """0.39.0's probe surface is the floor's job now that ``TOOL_REQUESTED`` holds the one probe slot. An
+    AIMU without it fails the first ``web`` build with an ``AttributeError``: loud, but naming a symbol."""
+    from aimu.tools import builtin
+
+    assert callable(builtin.make_page_tools)
 
 
 def test_a_probe_ahead_of_every_release_is_told_no_release_has_it(monkeypatch):

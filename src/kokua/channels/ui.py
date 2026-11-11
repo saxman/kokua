@@ -31,6 +31,8 @@ from aimu.aio import Channel
 from aimu.aio.channels.base import ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
 
+_TOOL_PHASES = (StreamingContentType.TOOL_REQUESTED, StreamingContentType.TOOL_CALLING)
+
 
 def ending_line(ending: dict) -> str:
     """One line saying how an agent's tool loop ended. Every surface counts rounds from 1 (AIMU's own
@@ -131,14 +133,11 @@ class ChannelUI:
 
         Added here, once, rather than by each channel, because naming a toolset takes the live registry,
         which the core holds and a channel must not reach for. The key rides AIMU's own chunk, so a
-        channel that does not read it renders the call exactly as before.
+        channel that does not read it renders the call exactly as before. Both of a call's chunks get
+        it: the announcement made before the tool runs, and the result after.
         """
         async for chunk in chunks:
-            if (
-                self._toolset_of is not None
-                and chunk.phase == StreamingContentType.TOOL_CALLING
-                and isinstance(chunk.content, dict)
-            ):
+            if self._toolset_of is not None and chunk.phase in _TOOL_PHASES and isinstance(chunk.content, dict):
                 toolset = self._toolset_of(chunk.content.get("name") or "")
                 if toolset:
                     chunk = chunk._replace(content={**chunk.content, "toolset": toolset})

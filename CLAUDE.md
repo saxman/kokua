@@ -423,6 +423,11 @@ Consequences for working in this repo:
   pinned in `tests/test_aimu_compat.py`. 0.39.0 is also when Ollama clients stopped downloading a missing
   model on construction, so a missing model reaches a turn as `ModelNotInstalledError`, imported at module
   scope by `core/turns.py` (loud when absent, so the floor's job).
+  **The probe has since run ahead again, onto `StreamingContentType.TOOL_REQUESTED`, the phase a streamed
+  loop yields for each tool call before it runs, which the web page draws a call's card from.** It is a
+  membership check (the enum is far older than the floor), the floor stays at 0.39.0 so a sibling on AIMU
+  main can start, and `_PROBE_UNRELEASED` names 0.40.0 until that is published, when the floor moves to it
+  and `_PROBE_UNRELEASED` returns to None. `make_page_tools` is pinned in `tests/test_aimu_compat.py` now.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

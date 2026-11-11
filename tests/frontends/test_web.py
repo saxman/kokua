@@ -3601,3 +3601,89 @@ def test_the_web_export_includes_each_agents_system_prompt(tmp_path):
     written = (config.downloads_path / frame["name"]).read_text(encoding="utf-8")
     assert "**System prompt (assistant):**" in written
     assert "be exact" in written
+
+
+# --- a tool call announced before it returns ----------------------------------------------------------
+
+_REQUESTED = {"name": "generate_image", "arguments": {"prompt": "a giraffe"}, "id": "call-1", "toolset": "image"}
+_RETURNED = {**_REQUESTED, "response": "Generated image, shown to the user."}
+
+
+@pytest.mark.parametrize("path", ["send", "stream_activity"])
+async def test_web_channel_announces_a_tool_call_before_it_returns(path):
+    """AIMU's TOOL_REQUESTED arrives before the tool runs, so the page can draw the call while a slow
+    tool works; the result's `tool` frame carries the same id so the page fills that card in place."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_REQUESTED, _REQUESTED, iteration=2)
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, _RETURNED, iteration=2)
+
+    await getattr(channel, path)(gen())
+    tools = [frame for frame in ws.frames if frame["type"] in ("tool_requested", "tool")]
+    # `round` says which round's request button belongs on the card, since arrival order cannot.
+    assert tools == [{"type": "tool_requested", **_REQUESTED, "round": 2}, {"type": "tool", **_RETURNED}]
+
+
+@pytest.mark.parametrize("path", ["send", "stream_activity"])
+@pytest.mark.parametrize("tool_name", sorted(SPAWN_TOOL_NAMES))
+async def test_web_channel_never_announces_a_spawn_call(path, tool_name):
+    """A spawn's own card stands in for its call, and opens only after the announcement would have, so
+    an announced spawn would be a pending card nothing ever fills."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(
+            StreamingContentType.TOOL_REQUESTED, {"name": tool_name, "arguments": {"task": "t"}, "id": "s"}
+        )
+
+    await getattr(channel, path)(gen())
+    assert not [frame for frame in ws.frames if frame["type"] == "tool_requested"]
+
+
+async def test_web_channel_withholds_announcements_when_tools_are_not_streamed():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.stream_tools = False
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_REQUESTED, _REQUESTED)
+
+    await channel.send(gen())
+    assert ws.frames == [{"type": "done"}]
+
+
+async def test_a_muted_turns_catch_up_shows_a_running_call_and_then_its_result():
+    """Switching into a turn whose tool is still running shows that call as pending, and once it has
+    returned, as one card carrying its result rather than an announcement and a result side by side."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "other"
+    channel.begin_catch_up("running", "draw a giraffe")
+
+    async def announce():
+        yield StreamChunk(StreamingContentType.TOOL_REQUESTED, _REQUESTED)
+
+    async def finish():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, _RETURNED)
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.stream_activity(announce())
+        channel.active_conversation_id = "running"
+        await channel.send_history([], {})
+        running = [item for item in ws.frames[-1]["items"] if item["type"] == "tool"]
+        channel.active_conversation_id = "other"
+        await channel.stream_activity(finish())
+        channel.active_conversation_id = "running"
+        await channel.send_history([], {})
+        returned = [item for item in ws.frames[-1]["items"] if item["type"] == "tool"]
+    finally:
+        streaming_conversation.reset(token)
+
+    assert running == [{"type": "tool", **_REQUESTED, "round": 0, "pending": True, "ts": ANY}]
+    assert returned == [{"type": "tool", **_RETURNED, "round": 0, "ts": ANY}]

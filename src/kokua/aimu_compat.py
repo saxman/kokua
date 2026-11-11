@@ -356,8 +356,23 @@ from typing import Optional
 
 MINIMUM_AIMU = (0, 39, 0)
 
-# The surface is `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds beside AIMU's
-# `builtin.web` group. It was the first probe to grip something newer than every published AIMU: until
+# The surface is `StreamingContentType.TOOL_REQUESTED`, the phase a streamed agent loop yields for each
+# tool call before it is approved or run. Kokua's web page draws a call from it while the tool works and
+# fills that card in when the call's `TOOL_CALLING` result arrives with the same `id`; without it, a call
+# that takes a minute (an image generation) shows nothing for that minute. It runs ahead of every release
+# the way `make_page_tools` did below: it is on AIMU's main branch, the floor stays at 0.39.0 so a sibling
+# on main (still reporting 0.39.0) can start, and `_PROBE_UNRELEASED` names 0.40.0 until that ships.
+#
+# The shape is a membership check, the fourth time (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` and
+# `compaction`, `StreamingContentType`'s `CONTINUING`): the enum is far older than this floor, so only
+# whether it carries the member dates a checkout. Left unprobed it is loud rather than silent,
+# `channels/ui.py` reading the member by attribute on a turn's first chunk, but mid-turn and naming a
+# symbol rather than the fix. What it leaves to the floor: that both drivers announce every call on every
+# dispatch path, and that `TOOL_CALLING` carries the `id` pairing the two (without it a result draws a
+# card of its own beside a pending one that never completes). `make_page_tools` is the floor's job now.
+#
+# Previously, from 0.39.0: the surface was `aimu.tools.builtin.make_page_tools`, which the `web` toolset
+# builds beside AIMU's `builtin.web` group. It was the first probe to grip something newer than every published AIMU: until
 # 0.39.0 shipped it was only on AIMU's main branch, the floor sat at 0.38.0 so a sibling on main (which
 # still reported 0.38.0) could start, and `_PROBE_UNRELEASED` kept the message from recommending the
 # PyPI install that had just failed. 0.39.0 is published now, so the floor is that release and
@@ -453,14 +468,14 @@ MINIMUM_AIMU = (0, 39, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.tools.builtin"
+_PROBE_MODULE = "aimu.models"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "make_page_tools"
+_PROBE_SYMBOL = "StreamingContentType"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "TOOL_REQUESTED"
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None
 #: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
-_PROBE_UNRELEASED: Optional[str] = None
+_PROBE_UNRELEASED: Optional[str] = "0.40.0"
 
 
 class AimuVersionError(RuntimeError):
@@ -482,11 +497,17 @@ def _release(text: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def _probe_name() -> str:
+    """What the probe asks for, as a reader would look it up: the member when there is one, since a
+    member's enum or set is older than the floor and naming that alone would say nothing."""
+    return f"{_PROBE_SYMBOL}.{_PROBE_MEMBER}" if _PROBE_MEMBER is not None else _PROBE_SYMBOL
+
+
 def _message(problem: str) -> str:
     floor = ".".join(str(n) for n in MINIMUM_AIMU)
     if _PROBE_UNRELEASED is not None:
         return (
-            f"Kokua needs AIMU's {_PROBE_SYMBOL}, but {problem}. It is on AIMU's main branch and no AIMU "
+            f"Kokua needs AIMU's {_probe_name()}, but {problem}. It is on AIMU's main branch and no AIMU "
             f"release contains it yet; {_PROBE_UNRELEASED} will be the first.\n"
             f"  Use the sibling checkout: confirm what it is on with git -C ../aimu log -1, pull AIMU main, "
             f"and run `uv sync --all-extras`. Installing AIMU from PyPI cannot supply it until "
@@ -541,7 +562,7 @@ def require_aimu() -> None:
         raise AimuVersionError(
             _message(
                 f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} has no "
-                f"{_PROBE_MEMBER!r} entry, so it predates that release"
+                f"{_PROBE_MEMBER!r} entry" + (", so it predates that release" if _PROBE_UNRELEASED is None else "")
             )
         )
     if _PROBE_PARAMETER is None:

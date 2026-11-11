@@ -491,6 +491,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer
     that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
     card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
     `tool_call_id`, since concurrent dispatch appends results in completion order.
+  - **A tool call shows while it runs.** The card is drawn as the call starts, reading `running…`, and
+    the result fills that same card when it returns, so a slow tool (an image generation takes about a
+    minute) is on screen the whole time rather than appearing only after its image. It rides AIMU's
+    `TOOL_REQUESTED` phase, which is why the preflight now requires it (on AIMU's main branch; the
+    first release to carry it will be 0.40.0). The two frames pair by tool-call id. A call still
+    running when its turn stops reads `no result`. The announcement carries its round, so a tool
+    round's `{ }` button lands on its own call's card whichever of the two frames reaches the page
+    first. Before this, the second round of a turn that loaded a toolset and then called its tool put
+    its button on the first round's card, which held two until the call returned. A sub-agent card's
+    calls still appear as each one returns.
   - **A tool call names the toolset it came from**, as `toolset.tool` (`web.get_web_content`,
     `core.spawn_subagent`, `github.create_issue` for an MCP server named `github`): the name an
     `available` list or a `confirm` / `review` entry would use, so what you watch matches what you
