@@ -499,8 +499,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer
     running when its turn stops reads `no result`. The announcement carries its round, so a tool
     round's `{ }` button lands on its own call's card whichever of the two frames reaches the page
     first. Before this, the second round of a turn that loaded a toolset and then called its tool put
-    its button on the first round's card, which held two until the call returned. A sub-agent card's
-    calls still appear as each one returns.
+    its button on the first round's card, which held two until the call returned. A worker's calls
+    inside a sub-agent card behave the same way, and the stored card keeps one complete entry per call
+    where it was announced, so a reload shows what the live card ended with.
   - **A tool call names the toolset it came from**, as `toolset.tool` (`web.get_web_content`,
     `core.spawn_subagent`, `github.create_issue` for an MCP server named `github`): the name an
     `available` list or a `confirm` / `review` entry would use, so what you watch matches what you

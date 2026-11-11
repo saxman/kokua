@@ -149,6 +149,10 @@ class SubagentReporter:
         # dicts above, because a chunk callback carries only the spawn id.
         self._toolset_of = toolset_of
         self._agent_types: dict[str, Optional[str]] = {}
+        # (spawn id, tool-call id) for each worker call announced and not yet returned: the recorded entry
+        # its result completes. Keyed by spawn as well because two workers' providers can mint the same
+        # call id. Settled in `finished`, like the dicts above.
+        self._announced: dict[tuple[str, str], dict] = {}
 
     async def spawned(self, spawn_id: str, agent_type: Optional[str], task: str) -> None:
         """Open the card, naming the model this worker runs on and the reasoning effort it runs at, so the
@@ -229,6 +233,8 @@ class SubagentReporter:
         elif chunk.phase == StreamingContentType.THINKING:
             if chunk.content:
                 await self._report({"id": spawn_id, "append": {"kind": "reasoning", "text": chunk.content}})
+        elif chunk.phase == StreamingContentType.TOOL_REQUESTED:
+            await self._announce(spawn_id, chunk)
         elif chunk.phase == StreamingContentType.TOOL_CALLING:
             call = chunk.content if isinstance(chunk.content, dict) else {}
             task = spawn_task(call.get("name"), call.get("arguments"))
@@ -239,12 +245,48 @@ class SubagentReporter:
                 if not self._children_awaiting_call[key]:
                     del self._children_awaiting_call[key]
                 return
-            await self._report({"id": spawn_id, "append": self._tool_append(spawn_id, call)})
+            append = self._tool_append(spawn_id, call)
+            recorded = self._announced.pop((spawn_id, append.get("call_id")), None)
+            if recorded is None:
+                await self._report({"id": spawn_id, "append": append})
+                return
+            # Completed where it was announced, so the stored card has one entry for the call; the result
+            # is only shown, filling the card the announcement drew.
+            del recorded["pending"]
+            recorded.update(append)
+            await self._ui.show_subagent({"id": spawn_id, "append": append})
         elif chunk.phase == StreamingContentType.GENERATING:
             if chunk.content:
                 self._streamed_answers.add(spawn_id)
                 await self._report({"id": spawn_id, "append": {"kind": "answer", "text": chunk.content}})
         # Image/audio progress from a sub-agent is not surfaced.
+
+    async def _announce(self, spawn_id: str, chunk: StreamChunk) -> None:
+        """Draw a worker's tool call as it starts, the way the top level does, so a slow tool inside a
+        sub-agent is on its card while it runs rather than only once it returns.
+
+        ``round`` is the worker's loop round that asked for the call, which the card's round button needs
+        for the same reason the top level's does: the card's ``request`` entries arrive from AIMU's event
+        sink and this from the worker's stream, so either can land first. A spawn call is never announced,
+        since the child card it opens stands in for it, and nor is a call with no id, whose result could
+        not find the entry and would draw a second one beside it.
+        """
+        call = chunk.content if isinstance(chunk.content, dict) else {}
+        if not call.get("id") or spawn_task(call.get("name"), call.get("arguments")) is not None:
+            return
+        entry = {"kind": "tool", "name": call.get("name"), "arguments": call.get("arguments")}
+        toolset = self._toolset_of(self._agent_types.get(spawn_id), call.get("name") or "")
+        if toolset:
+            entry["toolset"] = toolset
+        entry.update({"call_id": call["id"], "round": chunk.iteration, "pending": True})
+        # Recorded as its own copy: the result completes the recorded entry in place, and the sent frame
+        # must keep saying "pending", since a switch-in's catch-up replays it and the live result is what
+        # fills it. The catch-up record copies a frame shallowly, so a shared entry would arrive complete
+        # there and the result would then draw a second card beside it.
+        recorded = dict(entry)
+        self._record({"id": spawn_id, "append": recorded})
+        self._announced[(spawn_id, entry["call_id"])] = recorded
+        await self._ui.show_subagent({"id": spawn_id, "append": entry})
 
     def _tool_append(self, spawn_id: str, call: dict) -> dict:
         """One tool call as a card entry, spilling an oversized response to a payload file.
@@ -257,6 +299,9 @@ class SubagentReporter:
         toolset = self._toolset_of(self._agent_types.get(spawn_id), call.get("name") or "")
         if toolset:
             append["toolset"] = toolset
+        # The provider's tool-call id, which pairs this result with the entry `_announce` drew for it.
+        if call.get("id"):
+            append["call_id"] = call["id"]
         response = call.get("response")
         if not isinstance(response, str) or len(response) <= RESPONSE_PREVIEW_CHARS:
             append["response"] = response
@@ -305,6 +350,10 @@ class SubagentReporter:
         self._agent_types.pop(spawn_id, None)
         for key in [key for key in self._children_awaiting_call if key[0] == spawn_id]:
             del self._children_awaiting_call[key]
+        # A call still running when its worker ended (stopped, or failed mid-dispatch) gets no result, and
+        # is stored the way any call with no recorded result is, rather than as running forever.
+        for key in [key for key in self._announced if key[0] == spawn_id]:
+            del self._announced.pop(key)["pending"]
         streamed = spawn_id in self._streamed_answers
         self._streamed_answers.discard(spawn_id)
         event: dict

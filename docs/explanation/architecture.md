@@ -2135,8 +2135,8 @@ base frame) and the provider's tool-call `id`, the key the page uses to find the
 it in place (`renderToolResult`). It pairs by id rather than by position because concurrent dispatch
 reports results together after every call has run. An error, an argument-binding failure, and a denied
 approval are results too and arrive on that same key, so the page needs no separate failure path. A
-result with no announced card (a sub-agent's call, whose card entries still arrive only once each call
-returns) is drawn complete, as every call was before announcements existed, and a turn that ends with a
+result with no announced card (a call announced before the page loaded, or one AIMU gave no id) is drawn
+complete, as every call was before announcements existed, and a turn that ends with a
 call still running (stopped mid-dispatch) leaves that card reading `no result` rather than `running…`. A
 spawn call is never announced, since its sub-agent card stands in for it. The announcement also carries
 its `round`, which the round buttons need: the `request` frame for that round is scheduled from AIMU's
@@ -2144,6 +2144,18 @@ synchronous event sink while the announcement comes down the stream, so either c
 first, and `adoptRoundButton` refuses to move a round's button onto a card from a different round. A
 switch into a turn mid-call replays the call as the catch-up record holds it, `pending` until its result
 arrives, when that same item takes the result rather than a second one being added.
+
+A worker's calls inside a sub-agent card take the same two steps, as card entries rather than frames of
+their own. AIMU's observer hands `SubagentReporter` the worker's `TOOL_REQUESTED` chunk, which becomes
+a `tool` entry carrying `call_id`, `round`, and `pending`, recorded and shown at once; the matching
+`TOOL_CALLING` completes that recorded entry in place (spilling an oversized response as before) and
+is only shown, as an entry with the same `call_id` that the page uses to fill the pending one. The
+stored card therefore holds one complete entry per call, at the position it was announced, so a reload
+draws what the live card ended up showing. Two details keep that true: the recorded entry is a copy of
+the one sent, because the catch-up record copies a frame shallowly and a shared entry would turn the
+switch-in's pending item complete before its result arrived, which would then draw a second card; and
+a page keys a card's pending calls within that card, since two workers' providers can mint the same id.
+A worker that ends with a call still running stores it with no result, as any call missing one is.
 `renderTool` puts the result in a nested foldable of its own below the arguments, filled
 on first expand and clamped to `OUTPUT_CLAMP` characters with a button for the rest, as plain text --
 never markdown, since a tool result is untrusted input. Output travels whole and only the DOM clamps, so

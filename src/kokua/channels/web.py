@@ -299,9 +299,10 @@ class WebChannel(BaseWebChannel):
         if frame_type == "subagent" and "task" in frame and "parent" not in frame:
             self._cards_awaiting_call[frame["task"]] += 1
         elif frame_type == "tool_requested":
-            # Never announced: the spawn's card opens only once its worker starts, after this frame,
-            # so there is no card yet to count against, and the card stands in for the call anyway.
-            if spawn_task(frame.get("name"), frame.get("arguments")) is not None:
+            # Never announced: a spawn call, whose card opens only once its worker starts, after this
+            # frame, so there is no card yet to count against, and the card stands in for the call anyway;
+            # and a call with no id, whose result could not find the card and would draw a second one.
+            if not frame.get("id") or spawn_task(frame.get("name"), frame.get("arguments")) is not None:
                 return
         elif frame_type == "tool":
             task = spawn_task(frame.get("name"), frame.get("arguments"))

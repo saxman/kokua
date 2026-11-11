@@ -874,3 +874,108 @@ async def test_a_workers_spawn_call_is_left_to_the_child_card_it_opened():
     )
     sent = [frame for frame in channel.subagent_frames if frame.get("append", {}).get("kind") == "tool"]
     assert len(sent) == 1
+
+
+# --- a worker's tool call announced before it returns ---------------------------------------------------
+
+
+def _announced(name, arguments, call_id, iteration=0):
+    return StreamChunk(
+        StreamingContentType.TOOL_REQUESTED,
+        {"name": name, "arguments": arguments, "id": call_id},
+        iteration=iteration,
+    )
+
+
+def _returned(name, arguments, call_id, response):
+    return StreamChunk(
+        StreamingContentType.TOOL_CALLING, {"name": name, "arguments": arguments, "response": response, "id": call_id}
+    )
+
+
+async def test_a_workers_call_is_shown_as_it_starts_and_completed_where_it_was_announced():
+    """The card draws the call while the worker's tool runs, and the stored card holds one entry for it,
+    complete, at the place it was announced, so a reload shows what the live card ended up showing."""
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "look it up")
+    await reporter.chunk("r-1", _announced("search", {"q": "kauai"}, "c1", iteration=2))
+    await reporter.chunk("r-1", _thinking("not shown between, but possible"))
+    await reporter.chunk("r-1", _returned("search", {"q": "kauai"}, "c1", "three results"))
+
+    tools = [frame["append"] for frame in channel.subagent_frames if frame.get("append", {}).get("kind") == "tool"]
+    assert tools == [
+        {"kind": "tool", "name": "search", "arguments": {"q": "kauai"}, "call_id": "c1", "round": 2, "pending": True},
+        {"kind": "tool", "name": "search", "arguments": {"q": "kauai"}, "call_id": "c1", "response": "three results"},
+    ]
+    recorded = [event["append"] for event in events if event.get("append", {}).get("kind") == "tool"]
+    assert recorded == [
+        {
+            "kind": "tool",
+            "name": "search",
+            "arguments": {"q": "kauai"},
+            "call_id": "c1",
+            "round": 2,
+            "response": "three results",
+        }
+    ]
+    assert (
+        events.index(next(e for e in events if e.get("append", {}).get("kind") == "tool")) == 1
+    )  # before the reasoning
+
+
+async def test_completing_a_recorded_call_leaves_the_frame_already_sent_alone():
+    """The catch-up record copies frames shallowly, so a recorded entry shared with its sent frame would
+    turn the switch-in's pending item complete and the live result would then draw a second card."""
+    reporter, channel = _reporter()
+    _collect()
+    await reporter.spawned("r-1", "researcher", "look it up")
+    await reporter.chunk("r-1", _announced("search", {}, "c1"))
+    announced = channel.subagent_frames[-1]["append"]
+    await reporter.chunk("r-1", _returned("search", {}, "c1", "done"))
+    assert announced["pending"] is True and "response" not in announced
+
+
+async def test_a_call_still_running_when_its_worker_finishes_is_stored_without_a_result():
+    reporter, _channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "look it up")
+    await reporter.chunk("r-1", _announced("search", {}, "c1"))
+    await reporter.finished("r-1", "", asyncio.CancelledError())
+    recorded = next(event["append"] for event in events if event.get("append", {}).get("kind") == "tool")
+    assert "pending" not in recorded and "response" not in recorded
+
+
+async def test_a_workers_spawn_call_is_never_announced():
+    """Its child's card stands in for it, exactly as at the top level."""
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "delegate")
+    await reporter.chunk("r-1", _announced("spawn_subagent", {"agent_type": "w", "task": "t"}, "c1"))
+    assert not [frame for frame in channel.subagent_frames if frame.get("append", {}).get("kind") == "tool"]
+    assert not [event for event in events if event.get("append", {}).get("kind") == "tool"]
+
+
+async def test_a_workers_call_with_no_id_is_drawn_once_when_it_returns():
+    """Its result could not find an announced entry, so announcing it would leave one that never completes."""
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "look it up")
+    await reporter.chunk("r-1", _announced("search", {}, None))
+    await reporter.chunk("r-1", _tool_call("search", {}, "found"))
+    recorded = [event["append"] for event in events if event.get("append", {}).get("kind") == "tool"]
+    assert recorded == [{"kind": "tool", "name": "search", "arguments": {}, "response": "found"}]
+    assert len([f for f in channel.subagent_frames if f.get("append", {}).get("kind") == "tool"]) == 1
+
+
+async def test_an_oversized_result_still_spills_when_its_call_was_announced(tmp_path):
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS + 1)
+    await reporter.spawned("r-1", "researcher", "read it")
+    await reporter.chunk("r-1", _announced("read", {}, "c1"))
+    await reporter.chunk("r-1", _returned("read", {}, "c1", response))
+    recorded = next(event["append"] for event in events if event.get("append", {}).get("kind") == "tool")
+    assert recorded["response_bytes"] == len(response)
+    assert payloads.read_text(payloads_path, recorded["response_ref"]) == response
