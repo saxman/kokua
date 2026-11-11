@@ -29,16 +29,24 @@ class ArtifactSink:
 
     ``position`` answers where in the conversation's message list the publishing call sits: the
     index of the newest assistant message, the one whose tool call is running. Replay places the
-    artifact after that message's tool items.
+    artifact after that message's tool items. A position that cannot be found is recorded as ``None``,
+    which replay places at the turn's end.
     """
 
-    def __init__(self, ui: "ChannelUI", position: Callable[[], int]):
+    def __init__(self, ui: "ChannelUI", position: Callable[[], Optional[int]]):
         self._ui = ui
         self._position = position
         self.items: list[dict] = []
 
     async def publish(self, url: str, *, filename: str, mime: str, path: Path) -> None:
-        record = {"url": url, "filename": filename, "mime": mime, "after": self._position()}
+        try:
+            after = self._position()
+        except Exception:
+            # The file is saved whether or not its place is known, so a failed lookup must not become a
+            # tool error. No anchor replays at the turn's end, which is where an unplaced file belongs.
+            logger.warning("An artifact's position was not found; it replays at the turn's end.", exc_info=True)
+            after = None
+        record = {"url": url, "filename": filename, "mime": mime, "after": after}
         # Recorded before it is shown, and a failed show is swallowed: the file exists either way, and
         # a closed socket must not turn a finished image into a tool error the model reports as failure.
         self.items.append(record)

@@ -56,3 +56,18 @@ def test_a_failed_send_still_records_and_does_not_raise():
 
     assert _run(go()) is True
     assert len(sink.items) == 1
+
+
+def test_a_failed_position_lookup_records_no_anchor_and_does_not_raise():
+    ui = _UI()
+
+    def position():
+        raise RuntimeError("conversation dropped")
+
+    sink = ArtifactSink(ui, position=position)
+
+    _run(sink.publish("/images/a.png", filename="cat.png", mime="image/png", path=Path("/x/a.png")))
+
+    record = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png", "after": None}
+    assert sink.items == [record]
+    assert ui.shown == [(record, Path("/x/a.png"))]

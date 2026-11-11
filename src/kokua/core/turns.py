@@ -1093,7 +1093,8 @@ class TurnRunner:
         """A turn's sink, placing each artifact by the conversation's newest assistant message.
 
         The agent is looked up when an artifact arrives rather than captured here, because the
-        registry may rebuild a conversation's agent between the turn opening and a tool publishing.
+        unattended path sets the sink before it fetches the agent, so there is none to capture yet. The
+        turn pins its conversation (invariant 2), so the agent found then is the one running the turn.
         """
         return ArtifactSink(
             self._ui,

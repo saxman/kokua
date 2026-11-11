@@ -420,7 +420,8 @@ def replay_items(
 
     ``artifacts`` is keyed the same way and holds the files the turn's tools published for the user
     (``core/artifacts.py``). Each is placed after the tool items of the message it records as
-    ``after``, which for a worker's image is the call that opened the worker's card; one whose
+    ``after``, which for a worker's image is the call that opened the worker's card, and after that
+    round's ``request`` marker as well as the call's tool items; one whose
     ``after`` names no assistant message with tool calls in its turn is placed at the turn's end.
     A direct call's image therefore replays just below its tool row, where live it arrived just above
     it (AIMU reports a call only once it returns). A turn with no record still has its tool results

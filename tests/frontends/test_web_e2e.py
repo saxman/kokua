@@ -2733,7 +2733,16 @@ _REQUEST_BODY = {
 
 
 def _request_seed(
-    body=None, *, call=None, ending=None, subagent=None, saved=True, response=None, messages=None, rounds=None
+    body=None,
+    *,
+    call=None,
+    ending=None,
+    subagent=None,
+    saved=True,
+    response=None,
+    messages=None,
+    rounds=None,
+    artifacts=None,
 ):
     """A seeded conversation whose one turn recorded its requests and its ending, as `replay_items` reads them.
 
@@ -2788,6 +2797,8 @@ def _request_seed(
         }
         if subagent:
             metadata["subagent"] = {"0": subagent}
+        if artifacts:
+            metadata["artifacts"] = {"0": artifacts}
         TinyDBSessionStore(str(config.sessions_path)).save(
             Session(
                 key="seeded",
@@ -3352,6 +3363,39 @@ def test_a_round_button_looks_past_a_mid_turn_message_to_the_output_above_it(pag
     )
     expect(page.locator("#log .round-orphan")).to_have_count(0)
     expect(page.locator("#log > .bubble.assistant .round-button")).to_have_count(2)
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_a_reloaded_image_does_not_take_a_rounds_button_from_its_tool_row(page, live_server, with_image):
+    """Live, a generated image arrives between a round's request and its tool row, and on reload after
+    both. The image bubble is looked past either way, so the button sits on the tool row with or without
+    the image in the turn."""
+    name = hashlib.sha256(_solid_png(40, 40)).hexdigest() + ".png"
+    call = {
+        "id": "1",
+        "type": "function",
+        "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "a cat"})},
+    }
+    messages = [
+        {"role": "user", "content": "draw a cat"},
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "1", "name": "generate_image", "content": "Generated image."},
+        {"role": "assistant", "content": "Here it is."},
+    ]
+    record = {"url": f"/images/{name}", "filename": "cat.png", "mime": "image/png", "after": 1}
+    # The count is what lets a dispatch result adopt the round's button, so it is what the image must not do.
+    base = _request_seed(messages=messages, call={"tool_call_count": 1}, artifacts=[record] if with_image else None)
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        (config.images_path / name).write_bytes(_solid_png(40, 40))
+        base(config)
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    expect(page.locator("#log > .bubble.image")).to_have_count(1 if with_image else 0)
+    expect(page.locator("#log > .bubble.image .round-button")).to_have_count(0)
+    expect(page.locator("#log .round-button")).to_have_count(1)
+    expect(page.locator("#log > .bubble.tool > .round-slot > .round-button")).to_have_count(1)
 
 
 def test_a_turn_opening_user_bubble_still_orphans_a_round(page, live_server):

@@ -58,7 +58,9 @@ COPY_TITLE_PREFIX = "Copy of "
 # turn's user message, so a key a prefix cut keeps brings values that are still inside the kept
 # transcript, and a key it drops takes its values with it. Nothing points across the cut either way.
 # `undelivered` does not share that further argument: its values are sender/selector/text dicts, not
-# indices, so it only needs the argument every other entry here already makes.
+# indices, so it only needs the argument every other entry here already makes. `artifacts` records carry a
+# message index (`after`) too, and the further argument does not hold for it on a reviewed `/plan` turn,
+# whose executor messages are replaced; replay tolerates an `after` that names nothing.
 TURN_KEYED_METADATA = (
     "subagent",
     "trace",
