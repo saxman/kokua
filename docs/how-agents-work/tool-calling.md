@@ -106,7 +106,7 @@ tool and the declaration that offers it, trimmed here to those two things:
 
 ```python
     @tool
-    def generate_image(prompt: str):
+    async def generate_image(prompt: str):
         """Generate an image from a text prompt; the image is shown to the user and saved.
 
         This tool is offered only when AIMU_IMAGE_MODEL is configured, so seeing it means one is set.
@@ -117,7 +117,8 @@ tool and the declaration that offers it, trimmed here to those two things:
             prompt: A description of the desired image.
         """
         ...
-        return f"Generated image, shown to the user inline (/images/{name})."
+        await publish(reference, ...)  # the file reaches the user here (core/artifacts.py)
+        yield _final(f"Generated image, shown to the user ({reference}).")
 
     return [generate_image]
 
@@ -132,9 +133,11 @@ TOOLSET = Toolset(
 Read it as three separate contracts. The signature, `prompt: str`, becomes the parameter schema. The
 docstring's first paragraph becomes the tool's description, and its `Args:` section becomes the
 description of `prompt`; both are what the model reads when deciding whether this tool answers the
-question in front of it. The `return` is a string because the result is going into the conversation as a
-message, so it is written to be read: it tells the model the image was already shown, which stops it
-from trying to show it again.
+question in front of it. The final text the tool yields is a string because the result is going into the
+conversation as a message, so it is written to be read: it tells the model the image was already shown,
+which stops it from trying to show it again. That sentence is only for the model. The image reaches the
+person another way: the tool *publishes* the file to the running turn (`core/artifacts.py`), and the
+turn shows it, so nothing depends on the model or the channel noticing a reference in the text.
 
 The second paragraph is worth reading twice on a page arguing that a docstring is a promise, because an
 earlier version of it broke one. That version told the model that without `AIMU_IMAGE_MODEL` the tool

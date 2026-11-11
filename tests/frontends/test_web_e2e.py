@@ -979,6 +979,131 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
 
 
+def _solid_png(width: int, height: int) -> bytes:
+    """A single-colour PNG of the given size, built by hand so the suite needs no imaging library."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    row = b"\x00" + b"\xcc\x44\x44" * width
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(row * height))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_a_workers_image_replays_in_the_main_log_right_after_its_card(page, live_server):
+    """A composed worker's image is recorded on the turn, not the card, so it shows without opening
+    the card, directly below it."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    name = hashlib.sha256(_solid_png(240, 160)).hexdigest() + ".png"
+    arguments = {"name": "cat-image-maker", "tools": ["image"], "instructions": "Make images.", "task": "draw a cat"}
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        (config.images_path / name).write_bytes(_solid_png(240, 160))
+        call = {
+            "id": "1",
+            "type": "function",
+            "function": {"name": "compose_subagent", "arguments": json.dumps(arguments)},
+        }
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[
+                    {"role": "user", "content": "generate an image of a cat"},
+                    {"role": "assistant", "content": "", "tool_calls": [call]},
+                    {"role": "tool", "tool_call_id": "1", "content": "Done."},
+                    {"role": "assistant", "content": "Here's your cat."},
+                ],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-10-08T00:00:00",
+                    "updated_at": "2026-10-08T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "c-1", "role": "cat-image-maker", "task": "draw a cat", "status": "running"},
+                            {"id": "c-1", "status": "done", "append": {"kind": "answer", "text": "Done."}},
+                        ]
+                    },
+                    "artifacts": {
+                        "0": [{"url": f"/images/{name}", "filename": "a-cat.png", "mime": "image/png", "after": 1}]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    image = page.locator("#log > .bubble.image img")
+    expect(image).to_have_count(1)
+    expect(image).to_have_attribute("src", f"/images/{name}")
+    expect(image).to_have_attribute("alt", "a-cat.png")
+    order = page.eval_on_selector_all(
+        "#log > .bubble",
+        "blocks => blocks.map((b) => b.classList.contains('subagent') ? 'card' : "
+        "b.classList.contains('image') ? 'image' : 'other')",
+    )
+    assert order.index("image") == order.index("card") + 1
+
+    bubble = page.locator("#log > .bubble.image")
+    bubble.hover()
+    link = bubble.locator("a.image-download")
+    expect(link).to_be_visible()
+    expect(link).to_have_attribute("download", "a-cat.png")
+    expect(link).to_have_attribute("href", f"/images/{name}")
+    with page.expect_download() as info:
+        link.click()
+    assert info.value.suggested_filename == "a-cat.png"
+
+
+def test_images_keep_their_full_height_in_a_transcript_taller_than_the_window(page, live_server):
+    """The transcript is a scrolling flex column, and an image block clips its overflow. A clipping
+    flex item may shrink to nothing, so once the transcript outgrew the window every image was squeezed:
+    only its top showed, and with enough other content (an expanded sub-agent card) none of it did."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    names = [f"generated-{i}.png" for i in range(3)]
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (config.images_path / name).write_bytes(_solid_png(400, 300))
+        messages = [{"role": "user", "content": "draw three cats"}]
+        for i, name in enumerate(names):
+            call = {"id": str(i), "type": "function", "function": {"name": "generate_image", "arguments": "{}"}}
+            messages.append({"role": "assistant", "content": "", "tool_calls": [call]})
+            messages.append({"role": "tool", "tool_call_id": str(i), "content": f"Generated (/images/{name})."})
+        messages.append({"role": "assistant", "content": "\n\n".join(f"Paragraph {i}." for i in range(40))})
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=messages,
+                metadata={"title": "seeded", "created_at": "2026-10-08T00:00:00", "updated_at": "2026-10-08T00:00:00"},
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    images = page.locator(".bubble.image img")
+    expect(images).to_have_count(3)
+    page.wait_for_function("[...document.querySelectorAll('.bubble.image img')].every((img) => img.complete)")
+    heights = page.eval_on_selector_all(
+        ".bubble.image",
+        "blocks => blocks.map((block) => [block.getBoundingClientRect().height,"
+        " block.querySelector('img').getBoundingClientRect().height])",
+    )
+    for block_height, image_height in heights:
+        assert image_height == 300
+        assert block_height >= image_height
+
+
 def test_a_composed_card_replays_in_place_of_its_call_naming_the_tool_and_capabilities(page, live_server):
     """A card stands in for the call that opened it, where that call was made: after the reasoning
     that led to it, not straight under the user's message, and with no tool block beside it. It names
@@ -2608,7 +2733,16 @@ _REQUEST_BODY = {
 
 
 def _request_seed(
-    body=None, *, call=None, ending=None, subagent=None, saved=True, response=None, messages=None, rounds=None
+    body=None,
+    *,
+    call=None,
+    ending=None,
+    subagent=None,
+    saved=True,
+    response=None,
+    messages=None,
+    rounds=None,
+    artifacts=None,
 ):
     """A seeded conversation whose one turn recorded its requests and its ending, as `replay_items` reads them.
 
@@ -2663,6 +2797,8 @@ def _request_seed(
         }
         if subagent:
             metadata["subagent"] = {"0": subagent}
+        if artifacts:
+            metadata["artifacts"] = {"0": artifacts}
         TinyDBSessionStore(str(config.sessions_path)).save(
             Session(
                 key="seeded",
@@ -3227,6 +3363,39 @@ def test_a_round_button_looks_past_a_mid_turn_message_to_the_output_above_it(pag
     )
     expect(page.locator("#log .round-orphan")).to_have_count(0)
     expect(page.locator("#log > .bubble.assistant .round-button")).to_have_count(2)
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_a_reloaded_image_does_not_take_a_rounds_button_from_its_tool_row(page, live_server, with_image):
+    """Live, a generated image arrives between a round's request and its tool row, and on reload after
+    both. The image bubble is looked past either way, so the button sits on the tool row with or without
+    the image in the turn."""
+    name = hashlib.sha256(_solid_png(40, 40)).hexdigest() + ".png"
+    call = {
+        "id": "1",
+        "type": "function",
+        "function": {"name": "generate_image", "arguments": json.dumps({"prompt": "a cat"})},
+    }
+    messages = [
+        {"role": "user", "content": "draw a cat"},
+        {"role": "assistant", "content": "", "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "1", "name": "generate_image", "content": "Generated image."},
+        {"role": "assistant", "content": "Here it is."},
+    ]
+    record = {"url": f"/images/{name}", "filename": "cat.png", "mime": "image/png", "after": 1}
+    # The count is what lets a dispatch result adopt the round's button, so it is what the image must not do.
+    base = _request_seed(messages=messages, call={"tool_call_count": 1}, artifacts=[record] if with_image else None)
+
+    def seed(config):
+        config.images_path.mkdir(parents=True, exist_ok=True)
+        (config.images_path / name).write_bytes(_solid_png(40, 40))
+        base(config)
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    expect(page.locator("#log > .bubble.image")).to_have_count(1 if with_image else 0)
+    expect(page.locator("#log > .bubble.image .round-button")).to_have_count(0)
+    expect(page.locator("#log .round-button")).to_have_count(1)
+    expect(page.locator("#log > .bubble.tool > .round-slot > .round-button")).to_have_count(1)
 
 
 def test_a_turn_opening_user_bubble_still_orphans_a_round(page, live_server):

@@ -79,7 +79,7 @@ _TURN_FRAMES = frozenset(
         "done",
         "loop",
         "inbox",
-        "image",
+        "artifact",
         "plan",
         "phase",
         "subagent",
@@ -108,22 +108,6 @@ def _tool_frame(call: Any) -> dict:
     if call.get("toolset"):
         frame["toolset"] = call["toolset"]
     return frame
-
-
-def _image_frame_for(chunk: StreamChunk) -> Optional[dict]:
-    """Return an ``image`` frame for a final IMAGE_GENERATING chunk, else None.
-
-    The chunk's ``result`` is the absolute path the image client wrote (the image toolset directs it into
-    ``images_path``); the page loads it by its /images/<name> reference."""
-    if chunk.phase != StreamingContentType.IMAGE_GENERATING:
-        return None
-    content = chunk.content if isinstance(chunk.content, dict) else {}
-    if not content.get("final"):
-        return None
-    result = content.get("result")
-    if not isinstance(result, str):
-        return None
-    return {"type": "image", "url": ROUTE_PREFIX + Path(result).name}
 
 
 class _CatchUpRecord:
@@ -187,8 +171,6 @@ class _CatchUpRecord:
         if kind == "done":
             return  # a terminator has no rendered form to replay
         item = {**frame, "ts": ts}
-        if kind == "image":
-            item["from"] = "assistant"  # a live image frame is always generated; replay aligns on this
         self._items.append(item)
 
     def _close_partial(self, ts: str) -> None:
@@ -486,30 +468,21 @@ class WebChannel(BaseWebChannel):
                 # so a planned turn's delivery frame and a plain turn's are one type for one handler.
                 sent = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "inbox", "text": sent.get("text", "")})
-            else:
-                image = _image_frame_for(chunk)
-                if image is not None:
-                    await self.send_frame(image)
         return "".join(parts)
 
     async def _forward_own_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
-        """Pass ``chunks`` on to the base ``send`` loop, sending the frames that loop cannot produce.
+        """Pass ``chunks`` on to the base ``send`` loop, sending the one frame that loop cannot produce.
 
-        Two kinds. An image-progress chunk gets an ``image`` frame and is still passed on, since the base
-        loop has no branch for it and no per-chunk hook. A tool call is sent here instead and *not*
-        passed on, because the base loop's ``tool`` frame has no ``toolset`` (see :func:`_tool_frame`) and
-        sending both would draw the call twice. Loop boundaries used to be inferred here from a rise in
-        ``StreamChunk.iteration``; AIMU now yields a ``CONTINUING`` chunk carrying the injected prompt
-        itself, which the base loop maps, so nothing is guessed on this path any more.
+        A tool call is sent here instead and *not* passed on, because the base loop's ``tool`` frame has no
+        ``toolset`` (see :func:`_tool_frame`) and sending both would draw the call twice. An image a tool
+        generates is not spotted here: the tool publishes it to the turn (``core/artifacts.py``), which
+        reaches the page as an ``artifact`` frame from any agent, a worker included.
         """
         async for chunk in chunks:
             if chunk.phase == StreamingContentType.TOOL_CALLING:
                 if self.stream_tools:
                     await self.send_frame(_tool_frame(chunk.content))
                 continue
-            image = _image_frame_for(chunk)
-            if image is not None:
-                await self.send_frame(image)
             yield chunk
 
     async def send_conversations(self, items: list[dict]) -> None:
@@ -546,6 +519,7 @@ class WebChannel(BaseWebChannel):
             undelivered=meta.get("undelivered"),
             requests=meta.get("requests"),
             toolsets=meta.get("toolsets"),
+            artifacts=meta.get("artifacts"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:
@@ -732,6 +706,14 @@ class WebChannel(BaseWebChannel):
 
         Muted for a background turn (see the module docstring)."""
         await self.send_frame({"type": "subagent", **event})
+
+    async def send_artifact(self, record: dict) -> None:
+        """Show a file a tool made for the user. ``after`` stays behind: it is how replay places a
+        stored artifact, and a live frame is already in place by arriving when it does.
+
+        Muted for a background turn (see the module docstring)."""
+        frame = {key: record[key] for key in ("url", "filename", "mime")}
+        await self.send_frame({"type": "artifact", **frame})
 
     async def send_request(self, record: dict) -> None:
         """Mark one completed model call. Only the entry agent's run (no ``parent_run_id``) is sent; a

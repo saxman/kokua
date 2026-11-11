@@ -1959,12 +1959,17 @@ alone. The case that does cost something is a configured MCP server, which conne
 ### Images
 
 - Attach images and the assistant reads them (needs a vision-capable model); it can generate them when
-  `AIMU_IMAGE_MODEL` is set. In the web UI, attach via the composer's paperclip or by pasting, with
-  thumbnails previewed before send and images rendered inline live and on reload; in the CLI, `/attach`.
+  `AIMU_IMAGE_MODEL` is set, and a generated image shows in the transcript live and on reload whichever
+  agent made it, a delegated worker included. In the web UI, attach via the composer's paperclip or by
+  pasting, with thumbnails previewed before send and images rendered inline live and on reload; in the
+  CLI, `/attach`.
 - Uploaded and generated images are stored content-addressed under `data/images/` and served at
   `GET /images/<name>`. A conversation keeps only a short `/images/<name>` reference, so the session
   store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
   localhost URL is not fetchable by the provider.
+- Generated images are stored content-addressed like uploads (the image client's own timestamp name is
+  replaced), and each is recorded on the turn that made it, with a readable download name taken from the
+  prompt.
 
 ### Payloads
 

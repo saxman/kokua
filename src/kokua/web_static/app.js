@@ -238,7 +238,7 @@ function tickWorking(spinner, elapsed) {
 // a `const` read before its line has run throws: each container's (the log's, or a card body's) most
 // recent round, and what counts as a dispatch result.
 const latestRound = new WeakMap();
-const DISPATCH_RESULT = ".bubble.tool, .bubble.subagent, .bubble.image";
+const DISPATCH_RESULT = ".bubble.tool, .bubble.subagent, .bubble.image:not(.artifact)";
 
 function appendToLog(el, parent) {
   if (parent) parent.appendChild(el);
@@ -1280,6 +1280,37 @@ function addImageBubble(src, cls, ts) {
   return el;
 }
 
+// A file a tool made for the user (see core/artifacts.py), live or replayed. An image is drawn
+// inline; anything else is a link that saves under the artifact's own filename.
+function renderArtifact(item, ts) {
+  if ((item.mime || "").startsWith("image/")) {
+    // The `artifact` class has to be on at creation: appendToLog consults a block's class as it lands.
+    const bubble = addImageBubble(item.url, "assistant artifact", ts);
+    bubble.querySelector("img").alt = item.filename || "image";
+    // Same-origin, so the `download` attribute alone saves the file under its readable name; the
+    // stored name is a content hash nobody would recognize in a downloads folder.
+    const save = document.createElement("a");
+    save.className = "image-download";
+    save.href = item.url;
+    save.download = item.filename || "";
+    save.textContent = "Download";
+    save.title = `Download ${item.filename || "image"}`;
+    bubbleBody(bubble).appendChild(save);
+    return bubble;
+  }
+  const el = document.createElement("div");
+  el.className = "bubble assistant artifact";
+  const link = document.createElement("a");
+  link.href = item.url;
+  link.download = item.filename || "";
+  link.textContent = item.filename || item.url;
+  bubbleBody(el).appendChild(link);
+  stampBubble(el, ts);
+  appendToLog(el);
+  autoscroll();
+  return el;
+}
+
 // --- Markdown rendering (vendored marked + DOMPurify) -------------------------------------
 // marked parses full GFM (incl. tables); DOMPurify sanitizes its HTML, since the assistant and
 // tool output are untrusted. Force links to open safely. If the libs failed to load, fall back
@@ -1725,8 +1756,10 @@ const ROUND_OUTPUT = ".bubble:not(.user, .phase, .notice, .approval, .inbox, .lo
 // typed into the running turn (`.sent-mid-turn` is added when the page draws it, since the server's
 // `.mid-turn` mark only arrives later), the injected-round marker, a delivered note, and the page's own
 // notices and approval prompts. Anything else that is not output (a turn-opening user bubble, a phase
-// divider) ends the search.
-const ROUND_PASSTHROUGH = ".mid-turn, .sent-mid-turn, .inbox, .loop, .notice, .approval";
+// divider) ends the search. A published file (`.artifact`) is one too: live it arrives between a round's
+// request and its tool row, and on reload after both, so looking past it puts the button on the tool row
+// in both views instead of on the image.
+const ROUND_PASSTHROUGH = ".mid-turn, .sent-mid-turn, .inbox, .loop, .notice, .approval, .artifact";
 
 // The model's own output a request describes: the nearest one above the end of `container`, looking past
 // ROUND_PASSTHROUGH blocks. Null when a turn boundary comes first (the round produced nothing).
@@ -2179,11 +2212,11 @@ function handleFrame(event) {
     // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
     finalizeStreaming();
     renderPhase(frame.label, frame.detail, new Date());
-  } else if (frame.type === "image") {
-    // A generated image finished (or the assistant surfaced one). It lands below the answer so far, and
-    // closes it: whatever the assistant writes about the image belongs under the image.
+  } else if (frame.type === "artifact") {
+    // A tool published a file (a generated image, say). It lands below the answer so far, and
+    // closes it: whatever the assistant writes about it belongs under it.
     thinkingBlock = null;
-    addImageBubble(frame.url, "assistant", new Date());
+    renderArtifact(frame, new Date());
   } else if (frame.type === "message") {
     addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
     // A reactive message ends the turn (e.g. "(stopped)" / an error) and takes the indicator with it.
@@ -2350,6 +2383,7 @@ function handleFrame(event) {
           stampTurnStart(bubble);
         }
       }
+      else if (item.type === "artifact") renderArtifact(item, item.ts);
       else if (item.type === "request") renderRequest(item);
       else if (item.type === "ending") renderEnding(item);
       else if (item.type === "thinking") {

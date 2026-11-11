@@ -110,6 +110,19 @@ def derive_title(messages: list[dict]) -> Optional[str]:
     return text[:TITLE_MAX] if text else None
 
 
+def last_assistant_index(messages: list[dict]) -> int:
+    """Where the newest assistant message sits, or -1 if there is none.
+
+    A scan rather than "the last message", because AIMU runs a message's streaming tool calls one at
+    a time and appends each result before the next call starts, so while the second call runs the
+    last message is the first call's result, not the message that asked for both.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") == "assistant":
+            return index
+    return -1
+
+
 def resolve_user_index(messages: list[dict], base_len: int) -> int:
     """Where a turn's user message sits in ``messages``, or -1 if the turn committed none.
 

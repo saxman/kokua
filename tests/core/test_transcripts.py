@@ -400,3 +400,49 @@ def test_a_mixed_message_is_not_part_of_what_was_said_either():
         [message for message in _MIXED_MESSAGE_TURN if message.get(PROVENANCE_KEY) != PROVENANCE_MIXED]
     )
     assert not any("and the index" in line for line in flatten_transcript(_MIXED_MESSAGE_TURN))
+
+
+def _call(call_id, name):
+    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": "{}"}}
+
+
+def _turn_with_two_tool_rounds():
+    return [
+        {"role": "user", "content": "draw a cat"},  # 0
+        {"role": "assistant", "content": "", "tool_calls": [_call("1", "list_capabilities")]},  # 1
+        {"role": "tool", "tool_call_id": "1", "content": "image"},  # 2
+        {"role": "assistant", "content": "", "tool_calls": [_call("2", "generate_image")]},  # 3
+        {"role": "tool", "tool_call_id": "2", "content": "Generated image, shown to the user (/images/a.png)."},
+        {"role": "assistant", "content": "Here's your cat."},  # 5
+    ]
+
+
+ARTIFACT = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png"}
+
+
+def test_an_artifact_replays_after_the_tool_calls_of_the_message_it_was_published_after():
+    items = replay_items(_turn_with_two_tool_rounds(), artifacts={"0": [{**ARTIFACT, "after": 3}]})
+    kinds = [(item["type"], item.get("name") or item.get("url") or item.get("text")) for item in items]
+    assert kinds == [
+        ("user", "draw a cat"),
+        ("tool", "list_capabilities"),
+        ("tool", "generate_image"),
+        ("artifact", "/images/a.png"),
+        ("message", "Here's your cat."),
+    ]
+
+
+def test_an_artifact_whose_anchor_is_not_a_tool_call_replays_at_the_turns_end():
+    items = replay_items(_turn_with_two_tool_rounds(), artifacts={"0": [{**ARTIFACT, "after": 99}]})
+    assert items[-1]["type"] == "artifact"
+
+
+def test_a_recorded_turn_does_not_also_regex_its_tool_results():
+    items = replay_items(_turn_with_two_tool_rounds(), artifacts={"0": [{**ARTIFACT, "after": 3}]})
+    assert [item["type"] for item in items].count("artifact") == 1
+    assert "image" not in [item["type"] for item in items]
+
+
+def test_a_turn_stored_before_artifacts_were_recorded_still_shows_its_image():
+    items = replay_items(_turn_with_two_tool_rounds())
+    assert {"type": "image", "url": "/images/a.png", "from": "assistant"} in items

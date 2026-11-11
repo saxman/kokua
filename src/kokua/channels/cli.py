@@ -7,8 +7,9 @@ pair that is genuinely about the terminal: making up for what it cannot draw, an
 what the web composer offers as a control.
 
 The terminal can't render images, so ``/attach <path>`` stages a local image file onto the next message
-(``ChannelMessage.images``), which the model then reads. Generated images are reported by the assistant as
-an ``/images/<name>`` reference into ``images_path``; the file lives under ``$KOKUA_HOME/data/images``.
+(``ChannelMessage.images``), which the model then reads. A generated image is published to the turn, and
+``ChannelUI.show_artifact`` falls back here to an "Image saved: <path>" line naming the file under
+``$KOKUA_HOME/data/images``.
 
 ``/think <level>`` is the terminal's half of the per-turn reasoning effort the web composer offers as a
 picker. It rides ``ChannelMessage.metadata``, which is the transport-neutral seam the core reads, so

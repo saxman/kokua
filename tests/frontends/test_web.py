@@ -7,6 +7,7 @@ import queue
 import threading
 import time
 from datetime import datetime
+from unittest.mock import ANY
 
 import pytest
 
@@ -910,9 +911,9 @@ async def test_a_conversation_with_no_running_turn_replays_only_the_store():
     assert [item["type"] for item in ws.frames[-1]["items"]] == ["user"]
 
 
-async def test_catch_up_records_the_turns_uploaded_images_and_generated_ones():
-    """A user's upload replays under their bubble and a generated image as the assistant's, matching how
-    `replay_items` aligns each when the same turn is later replayed from the store."""
+async def test_catch_up_records_the_turns_uploaded_images_and_artifacts():
+    """A user's upload replays under their bubble and a tool's artifact in the order it arrived; the
+    artifact's replay-only `after` never reaches the frame or the record."""
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
@@ -922,17 +923,50 @@ async def test_catch_up_records_the_turns_uploaded_images_and_generated_ones():
 
     token = streaming_conversation.set("running")
     try:
-        await channel.send_frame({"type": "image", "url": "/images/generated.png"})
+        await channel.send_artifact(
+            {"url": "/images/generated.png", "filename": "cat.png", "mime": "image/png", "after": 3}
+        )
     finally:
         streaming_conversation.reset(token)
     channel.active_conversation_id = "running"
     await channel.send_history([], {})
 
-    images = [item for item in ws.frames[-1]["items"] if item["type"] == "image"]
-    assert images == [
-        {"type": "image", "url": "/images/abc.png", "from": "user", "ts": images[0]["ts"]},
-        {"type": "image", "url": "/images/generated.png", "from": "assistant", "ts": images[1]["ts"]},
+    assert [item for item in ws.frames[-1]["items"] if item["type"] in ("image", "artifact")] == [
+        {"type": "image", "url": "/images/abc.png", "from": "user", "ts": ANY},
+        {"type": "artifact", "url": "/images/generated.png", "filename": "cat.png", "mime": "image/png", "ts": ANY},
     ]
+
+
+async def test_send_artifact_emits_one_frame_without_after():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_artifact({"url": "/images/a.png", "filename": "a.png", "mime": "image/png", "after": 1})
+    assert ws.frames == [{"type": "artifact", "url": "/images/a.png", "filename": "a.png", "mime": "image/png"}]
+
+
+async def test_send_artifact_on_a_background_turn_sends_nothing():
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    token = streaming_conversation.set("other")
+    try:
+        await channel.send_artifact({"url": "/images/a.png", "filename": "a.png", "mime": "image/png"})
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == []
+
+
+async def test_a_final_image_generating_chunk_emits_no_image_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.IMAGE_GENERATING, {"final": True, "result": "A sentence for the model."})
+
+    await channel.send(gen())
+    assert [frame for frame in ws.frames if frame["type"] in ("image", "artifact")] == []
 
 
 async def test_a_background_turns_sidebar_refresh_is_not_muted():

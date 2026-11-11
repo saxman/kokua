@@ -1067,6 +1067,16 @@ def test_a_mixed_message_is_exported_as_mixed_not_user_end_to_end():
     assert "**User (mid-turn):**" not in out
 
 
+def test_render_item_names_an_artifact_by_its_filename_and_reference():
+    item = {"type": "artifact", "url": "/images/a.png", "filename": "cat.png", "mime": "image/png"}
+    assert _render_item(item, None) == ["_[image: cat.png (/images/a.png)]_"]
+
+
+def test_render_item_names_a_non_image_artifact_as_a_file():
+    item = {"type": "artifact", "url": "/download/x.pdf", "filename": "x.pdf", "mime": "application/pdf"}
+    assert _render_item(item, None) == ["_[file: x.pdf (/download/x.pdf)]_"]
+
+
 def test_an_ending_renders_as_one_italic_line_inside_its_turn_and_a_request_renders_nothing():
     session = _session(
         [

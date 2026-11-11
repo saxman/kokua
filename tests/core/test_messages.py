@@ -12,6 +12,7 @@ from kokua.core.messages import (
     derive_title,
     first_user_text,
     is_user_turn,
+    last_assistant_index,
     message_text,
     resolve_message_indices,
 )
@@ -162,3 +163,12 @@ def test_resolve_message_indices_of_a_turn_that_committed_no_user_message_is_emp
 def test_resolve_message_indices_of_a_turn_with_no_mid_turn_messages_is_empty():
     messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "done"}]
     assert resolve_message_indices(messages, 0) == []
+
+
+def test_last_assistant_index_skips_trailing_tool_results():
+    messages = [{"role": "user"}, {"role": "assistant", "tool_calls": [{}]}, {"role": "tool"}]
+    assert last_assistant_index(messages) == 1
+
+
+def test_last_assistant_index_is_minus_one_without_an_assistant_message():
+    assert last_assistant_index([{"role": "user"}]) == -1

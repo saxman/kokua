@@ -58,7 +58,9 @@ COPY_TITLE_PREFIX = "Copy of "
 # turn's user message, so a key a prefix cut keeps brings values that are still inside the kept
 # transcript, and a key it drops takes its values with it. Nothing points across the cut either way.
 # `undelivered` does not share that further argument: its values are sender/selector/text dicts, not
-# indices, so it only needs the argument every other entry here already makes.
+# indices, so it only needs the argument every other entry here already makes. `artifacts` records carry a
+# message index (`after`) too, and the further argument does not hold for it on a reviewed `/plan` turn,
+# whose executor messages are replaced; replay tolerates an `after` that names nothing.
 TURN_KEYED_METADATA = (
     "subagent",
     "trace",
@@ -70,6 +72,7 @@ TURN_KEYED_METADATA = (
     "messages",
     "undelivered",
     "toolsets",
+    "artifacts",
 )
 
 
@@ -779,6 +782,7 @@ class ConversationBook:
         messages: Optional[list[int]] = None,
         requests: Optional[dict] = None,
         toolsets: Optional[dict[str, str]] = None,
+        artifacts: Optional[list[dict]] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
         reasoning effort it ran at, why it stopped early if it did, what it cost, which of its
@@ -823,9 +827,12 @@ class ConversationBook:
         replayed call reads ``toolset.tool`` as it did live. A message's own ``tool_calls`` are not the
         place for it, for ``failure``'s reason: the messages are what this conversation's agent rebuilds
         its context from, so a key added there would travel to the provider on every later request.
+
+        ``artifacts`` are the files the turn's tools published for the user (``core/artifacts.py``),
+        each with the message index it was published after, which is what replay places it by.
         """
         if user_index < 0 or not (
-            events or model or thinking is not None or failure or usage or messages or requests or toolsets
+            events or model or thinking is not None or failure or usage or messages or requests or toolsets or artifacts
         ):
             return
         session = self._store.get(conversation_id)
@@ -845,6 +852,8 @@ class ConversationBook:
             session.metadata.setdefault("messages", {})[str(user_index)] = list(messages)
         if toolsets:
             session.metadata.setdefault("toolsets", {})[str(user_index)] = dict(toolsets)
+        if artifacts:
+            session.metadata.setdefault("artifacts", {}).setdefault(str(user_index), []).extend(artifacts)
         self._store.save(session)
 
     def record_undelivered(self, conversation_id: str, user_index: int, reports: list[dict]) -> None:

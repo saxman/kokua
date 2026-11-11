@@ -1542,6 +1542,17 @@ persisted session must stay small and a localhost URL is not fetchable by the pr
 `core/messages.py` rewrites data URLs to references on persist and re-inlines them before each
 `agent.restore`.
 
+A generated image reaches the user by being *published*, not returned. A tool result has two
+audiences: the model reads the text the tool returns, and the person wants the file. `core/artifacts.py`
+is the second half: the running turn's `ArtifactSink`, bound through a ContextVar like
+`subagent_events`, records the file and shows it through `ChannelUI.show_artifact` (an `artifact` frame
+on the web, an "Image saved: <path>" line in the terminal). Because a spawned worker inherits the turn's context, a
+worker's image reaches the page with no plumbing through the spawn, which is what its own stream could
+not do: that stream ends at its card. The turn persists the records under
+`metadata["artifacts"][<user index>]`, each with the message it was published after, and replay places
+it there. The image toolset moves AIMU's timestamp-named output to its content address
+(`images.adopt_file`) before publishing, so generated images are stored by content like uploads.
+
 ## Payloads
 
 `payloads.py` solves the same problem `images.py` does, for oversized text instead of image bytes:
@@ -2141,7 +2152,8 @@ export renders the same items as prose instead.
 
 Muting a background turn happens per frame, in `WebChannel.send_frame`, which every live frame passes
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
-thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
+thinking, tool calls, the message, `done`, loop markers, mid-turn `inbox` messages, artifacts, plan
+bubbles, phases, sub-agent cards, and the `request` and `ending` markers behind the round buttons)
 and is dropped when `streaming_conversation` names a conversation other than the one being viewed;
 everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out

@@ -145,6 +145,9 @@ class RichChannel(Protocol):
     async def send_subagent(self, event: dict) -> None:
         """Render a sub-agent (reviewer) activity card, updated in place by its ``id``."""
 
+    async def send_artifact(self, record: dict) -> None:
+        """Show a file a tool made for the user (``url``, ``filename``, ``mime``)."""
+
     async def send_request(self, record: dict) -> None:
         """Mark one completed model call of the entry agent's run (round, endpoint, stop reason, and a
         ``payload_ref`` to the exact request). Optional: a channel without it shows no markers."""

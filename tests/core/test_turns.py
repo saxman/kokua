@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -3289,6 +3290,62 @@ def test_the_undelivered_cap_is_the_same_number_a_read_caps_one_message_at():
     # And the cut string, which is copied rather than shared, says the same thing in the same shape.
     long_text = "x" * (UNDELIVERED_TEXT_CHARS + 1)
     assert _capped_message_text(long_text).endswith(f"... [message truncated, {len(long_text)} chars total]")
+
+
+class _PublishingClient(MockAsyncModelClient):
+    """Publishes one artifact from inside the turn, as a tool dispatched during it would.
+
+    Runs in the turn's own context (the mock fakes tool rounds rather than dispatching), which is the
+    only thing the sink's reach depends on.
+    """
+
+    def __init__(self, url: str, reply: str = "made."):
+        super().__init__([reply])
+        self._url = url
+        self._published = False
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if not stream and not self._published:
+            self._published = True
+            from kokua.core.artifacts import publish
+
+            await publish(self._url, filename="a.png", mime="image/png", path=Path("a.png"))
+            await asyncio.sleep(0)  # yield, so a concurrent turn's publish interleaves here
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
+async def test_an_artifact_published_during_a_turn_is_recorded_under_its_user_index(tmp_path):
+    client = _PublishingClient("/images/a.png")
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+
+    await assistant._handle(ChannelMessage(text="make it", channel="fake"), conversation_id=assistant._active_id)
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [item["url"] for item in metadata["artifacts"]["0"]] == ["/images/a.png"]
+
+
+async def test_two_conversations_concurrent_artifacts_stay_isolated(tmp_path):
+    clients = []
+
+    def factory(conversation_id):
+        clients.append(_PublishingClient(f"/images/{len(clients)}.png"))
+        return clients[-1]
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    conv_a = assistant._active_id
+    conv_b = assistant._book.new_session().key
+
+    await asyncio.gather(
+        assistant._handle(ChannelMessage(text="a", channel="fake"), conversation_id=conv_a),
+        assistant._handle(ChannelMessage(text="b", channel="fake"), conversation_id=conv_b),
+    )
+
+    urls = {
+        conversation_id: [item["url"] for item in assistant._store.get(conversation_id).metadata["artifacts"]["0"]]
+        for conversation_id in (conv_a, conv_b)
+    }
+    assert all(len(found) == 1 for found in urls.values())
+    assert sorted(found[0] for found in urls.values()) == ["/images/0.png", "/images/1.png"]
 
 
 class _DelegatingRecordingClient(_RecordingClient):
