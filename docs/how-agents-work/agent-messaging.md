@@ -232,7 +232,7 @@ way AIMU's spawn tool labels it.
 **The capability is two tools, declared like every other.**
 [`toolsets/messaging.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/messaging.py)
 registers `send_message(to, text)` and `list_agents()` through the `kokua.toolsets` entry point, and an
-agent holds them because its `[agents.<name>].tools` names `messaging`. The shipped config names it on
+agent holds them because its `[agents.<name>.tools].available` names `messaging`. The shipped config names it on
 the entry agent and on all three shipped workers, and the two cases are declared for different reasons,
 which is worth separating because it is easy to say "both directions need it" and be wrong. **Being a
 recipient needs no toolset at all**: a worker receives because the loop drains the reader its spec
@@ -248,11 +248,11 @@ One did, asking `report-writer#1` to check a file it believed `report-writer#1` 
 `report-writer#1`; its own words came back on the next drain, and it read them as an echo.
 
 ```toml
-[agents.assistant]
-tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark", "messaging"]
+[agents.assistant.tools]
+available = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark", "messaging"]
 
-[agents.researcher]
-tools = ["web", "misc", "time", "messaging"]
+[agents.researcher.tools]
+available = ["web", "misc", "time", "messaging"]
 ```
 
 **The sender's own address is not an argument, and cannot be.** A tool is a plain callable; nothing in
@@ -385,6 +385,6 @@ which is also why its answer grows as the turn goes on rather than describing a 
   the bus, the two cursors, invariants 9 and 10, and what each channel does with a delivery.
 - [Auto-approval](../explanation/auto-approval.md): the reviewer whose view of the request an agent's
   message is kept out of.
-- [Configuration reference](../reference/configuration.md#tools): the `tools` list, and
+- [Configuration reference](../reference/configuration.md#agentsnametools): the `available` list, and
   [`[agents.<name>]`](../reference/configuration.md#agentsname) for the two names an agent may not be
   given, because the bus already uses them.

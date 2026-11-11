@@ -354,9 +354,71 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 34, 0)
+MINIMUM_AIMU = (0, 38, 0)
 
-# The surface is `aimu.agents.Inbox`: AIMU renamed its mid-turn-message seam from `Steering` to `Inbox`,
+# The surface is `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds beside AIMU's
+# `builtin.web` group, and which no AIMU release contains yet: it is on AIMU's main branch, and 0.39.0
+# will be its first release. That is the first time the probe has gripped something newer than every
+# published AIMU, and it is a deliberate choice rather than a slip: the floor stays at 0.38.0 because an
+# editable sibling on main still reports 0.38.0, and a 0.39.0 floor would refuse it. The cost is that an
+# AIMU installed from PyPI passes the floor and fails here, so Kokua does not start from PyPI alone
+# until 0.39.0 is published. `_PROBE_UNRELEASED` is what keeps the message honest about that: the usual
+# remedy, installing the floor from PyPI, is exactly the install that just failed. When 0.39.0 ships,
+# raise the floor to it and set `_PROBE_UNRELEASED` back to None.
+#
+# The shape is a plain name lookup, the seventh time: the factory is a new export, so its presence
+# alone dates a checkout. It also subsumes the probe it replaces, which is why moving the one slot costs
+# nothing here: it landed after every 0.38.0 capability and after 0.36.0's `RunEvent.run_id`, so a
+# sibling that has it has those too. Without the probe, an older AIMU fails at the first `web` build with
+# an `AttributeError`, which is loud but names a symbol rather than the fix.
+#
+# `RunEvent.run_id` (a signature check) is the floor's job now, in its turn; `tests/test_aimu_compat.py`
+# pins it, since its failure is the silent kind.
+
+# 0.38.0 raised the floor for two capabilities, neither with a handle, so the probe stays where it is.
+# `calculate` evaluates an allowlisted syntax tree instead of `eval()` with an empty builtins dict, which
+# any expression could climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves
+# `compute.calculate` ungated on the premise that it runs no code of the model's, and only 0.38.0 makes
+# that true. And the spawn tools put a note in front of a worker's result when its round cap ended it,
+# which is how a delegating agent learns the work is partial. Both are silent when missing (an older
+# `calculate` still answers sums, an older spawn still returns text), but the first is a function body and
+# the second a private helper and a string: no name, parameter, or set member dates either one. By the
+# rule for that case, the probe stays on `RunEvent.run_id` and this says what it leaves uncovered: a
+# checkout claiming 0.38.0 without either change passes. `tests/test_aimu_compat.py` pins both behaviors.
+#
+# 0.37.0 raised the floor before that, also without moving the probe. The capability Kokua uses from it is the
+# `"tool_approval"` member of `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes so each worker's
+# calls are judged by its own approval policy. That key set is closed, so an AIMU predating it raises
+# `ValueError` naming the key when the spawn factory is called, which `wire_agent` reaches while building
+# a conversation's agent: loud, and at the one moment it matters. By the reasoning recorded for 0.28.0's
+# `"max_iterations"` key, the single probe slot stays on a capability that fails in silence, which is
+# `RunEvent.run_id` below. `aimu.tools.ToolGroup` also arrived in 0.37.0, unused when the floor moved and
+# now what residency rides (`core/build.py`'s `tool_groups_for`). It does not get the probe either, by the
+# same reasoning: `core/build.py` imports it at module scope, so a checkout without it raises
+# `ImportError` as soon as the core is imported, which is after this preflight and before any
+# conversation exists. Loud, so it is the floor's job.
+
+# The surface is `aimu.events.RunEvent`'s `run_id` field. 0.36.0 gave every run event the identity of
+# the run that emitted it (`run_id`) and of the run that started that one (`parent_run_id`), and Kokua's
+# record of what each model call was sent (`core/requests.py`) is keyed by it: calls pair with their
+# responses by run, a sub-agent's rounds reach its card because its run id is its card's id, and the
+# entry agent's rounds are told from a critic's by the run id the turn assigned. Left unprobed it is the
+# silent-degradation case: an older AIMU's events carry no `run_id`, the sink raises on every event, AIMU
+# logs and swallows each failure, and the turn completes with nothing recorded.
+#
+# The shape is a signature check, but on a dataclass rather than a function: a dataclass field is a
+# constructor parameter, so `inspect.signature(RunEvent)` lists it, and the existing shape asks exactly
+# the question with no new one taught to `require_aimu`. A name lookup could not: `RunEvent` predates this
+# floor by many releases, so only whether it carries this field dates a checkout. The field landed in
+# 0.36.0's last event commit, so passing it implies the rest of what Kokua reads off that release's
+# events, which `tests/test_aimu_compat.py` pins directly because no single probe reaches them:
+# `RequestPrepared.endpoint` and its JSON-safe payload, `ModelTurnFinished.stop_reason` / `tool_calls` /
+# `thinking`, `RunFinished.ended_by` / `max_iterations`, the spawn tools passing `parent_run_id`, and
+# `Runner.as_tool()` parenting the runs it starts.
+#
+# `aimu.agents.Inbox` (a name lookup) is the floor's job now, in its turn.
+#
+# Previously, from 0.34.0: the surface was `aimu.agents.Inbox`: AIMU renamed its mid-turn-message seam from `Steering` to `Inbox`,
 # with no legacy path, and taught it which agent is opening each reader. `Inbox.reader(agent=...)` is
 # called once per run, at its start, and `agent` is the run's own name, offered so a host can route a
 # message to one run rather than to every run's drain; AIMU attaches no meaning to the string beyond
@@ -382,11 +444,14 @@ MINIMUM_AIMU = (0, 34, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.agents"
+_PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "Inbox"
+_PROBE_SYMBOL = "make_page_tools"
 _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
+#: The first AIMU release that will carry the probed surface, when no published release does yet; None
+#: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
+_PROBE_UNRELEASED: Optional[str] = "0.39.0"
 
 
 class AimuVersionError(RuntimeError):
@@ -410,6 +475,14 @@ def _release(text: str) -> tuple[int, ...]:
 
 def _message(problem: str) -> str:
     floor = ".".join(str(n) for n in MINIMUM_AIMU)
+    if _PROBE_UNRELEASED is not None:
+        return (
+            f"Kokua needs AIMU's {_PROBE_SYMBOL}, but {problem}. It is on AIMU's main branch and no AIMU "
+            f"release contains it yet; {_PROBE_UNRELEASED} will be the first.\n"
+            f"  Use the sibling checkout: confirm what it is on with git -C ../aimu log -1, pull AIMU main, "
+            f"and run `uv sync --all-extras`. Installing AIMU from PyPI cannot supply it until "
+            f"{_PROBE_UNRELEASED} is published."
+        )
     return (
         f"Kokua needs AIMU {floor} or newer, but {problem}.\n"
         f"  Using the sibling checkout (the default here): confirm what it is actually on with "
@@ -447,8 +520,8 @@ def require_aimu() -> None:
     if probed is None:
         raise AimuVersionError(
             _message(
-                f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}, "
-                f"so it predates that release"
+                f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}"
+                + (", so it predates that release" if _PROBE_UNRELEASED is None else "")
             )
         )
     # `in` reads a frozenset directly and an enum class by name through `__members__`. The fallback is

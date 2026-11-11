@@ -675,7 +675,7 @@ ENTRY_SOURCE = _ContextSource(entry=True)
 #: sends on every round gets roughly twice its cap, and one that sends only on its last permitted
 #: round gets up to about ``max_iterations`` times it. Bounded either way, which is what makes leaving
 #: this defensible, and worth stating as the number it actually is. ``send_message`` is also a declared
-#: capability (``[agents.<name>].tools``), so no agent holds it by default.
+#: capability (``[agents.<name>.tools].available``), so no agent holds it by default.
 #:
 #: One comparison this used to make is withdrawn, and so is the mitigation that rested on it. "A
 #: sender reaches the same ceiling a person reaches by typing repeatedly" is numerically close and

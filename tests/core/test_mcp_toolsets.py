@@ -17,7 +17,7 @@ class FakeConnection:
 
 def _config(**kwargs) -> AssistantConfig:
     return AssistantConfig(
-        agents={"assistant": AgentConfig(tools=["stocks"])},
+        agents={"assistant": AgentConfig(available=["stocks"])},
         entry_agent="assistant",
         mcp_servers=[MCPServerConfig(url="https://broker.example.com/mcp", name="stocks")],
         **kwargs,
@@ -56,7 +56,7 @@ def test_a_server_toolset_is_not_cross_cutting():
 
 def test_a_server_whose_name_collides_with_a_shipped_toolset_is_rejected():
     config = AssistantConfig(
-        agents={"assistant": AgentConfig(tools=["memory"])},
+        agents={"assistant": AgentConfig(available=["memory"])},
         entry_agent="assistant",
         mcp_servers=[MCPServerConfig(url="https://example.com/mcp", name="memory")],
     )
@@ -75,7 +75,7 @@ def test_two_servers_colliding_under_the_same_provider_label_name_their_urls():
     so the label alone can't tell them apart; each toolset's description (which for a server is its URL)
     is what still lets a user find both entries in config.toml."""
     config = AssistantConfig(
-        agents={"assistant": AgentConfig(tools=["shared"])},
+        agents={"assistant": AgentConfig(available=["shared"])},
         entry_agent="assistant",
         mcp_servers=[
             MCPServerConfig(url="https://one.example.com/mcp", name="shared"),
@@ -95,7 +95,7 @@ def test_two_servers_colliding_under_the_same_provider_label_name_their_urls():
 def test_a_server_without_a_name_is_a_config_error(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(
-        '[assistant]\nagent = "assistant"\n\n[agents.assistant]\ntools = ["time"]\n\n'
+        '[assistant]\nagent = "assistant"\n\n[agents.assistant.tools]\navailable = ["time"]\n\n'
         '[[mcp.server]]\nurl = "https://example.com/mcp"\n'
     )
     from kokua.config.file import load
@@ -103,3 +103,17 @@ def test_a_server_without_a_name_is_a_config_error(tmp_path):
     with pytest.raises(ConfigError) as excinfo:
         AssistantConfig(**load(str(path), table=core_table()))
     assert "name" in str(excinfo.value)
+
+
+def test_mcp_server_description_is_optional_and_named_in_the_catalogue():
+    from kokua.core.agents import mcp_toolsets
+
+    config = AssistantConfig(
+        mcp_servers=[
+            MCPServerConfig(url="https://a/mcp", name="stocks", description="Quotes and fundamentals."),
+            MCPServerConfig(url="https://b/mcp", name="plain"),
+        ]
+    )
+    toolsets = {t.name: t for t in mcp_toolsets(config)}
+    assert toolsets["stocks"].description == "Quotes and fundamentals."
+    assert toolsets["plain"].description == "Tools from the MCP server at https://b/mcp."

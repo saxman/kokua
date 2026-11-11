@@ -44,15 +44,15 @@ Every rule here was learned from a bug. Read them before changing anything in th
    be set before a turn's first ``await`` and reset only in the ``finally`` alongside
    ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
    (or into no list at all) instead of the turn that owns it. ``current_metrics`` (``core/metrics.py``)
-   follows the identical discipline for the same reason: set before the first ``await``, reset only in
-   the ``finally``, so a model call racing the window is never attributed to a finished turn's record or
-   to no turn at all. ``current_artifacts`` (``core/artifacts.py``) is set and reset beside
-   ``subagent_events`` in both paths (on the unattended one that is ``_run_unattended``, not
-   ``_unattended_body``), and what races its window is a tool's publish rather than a model call.
-   An unattended run cannot share the reactive path's ``finally`` (it runs in a child
-   task with no such block of its own), so ``_unattended_body`` opens and resets its own
-   ``current_metrics`` scope around its whole body, the same way it opens its own catch-up record rather
-   than reusing the caller's. The channel's catch-up record is opened
+   and ``current_requests`` (``core/requests.py``) follow the identical discipline for the same reason:
+   set before the first ``await``, reset only in the ``finally``, so a model call racing the window is
+   never attributed to a finished turn's record or to no turn at all. ``current_artifacts``
+   (``core/artifacts.py``) is set and reset beside ``subagent_events`` in both paths (on the unattended
+   one that is ``_run_unattended``, not ``_unattended_body``), and what races its window is a tool's
+   publish rather than a model call. An unattended run cannot share the reactive
+   path's ``finally`` (it runs in a child task with no such block of its own), so ``_unattended_body`` opens and
+   resets its own ``current_metrics`` and ``current_requests`` scopes around its whole body, the same way it opens its
+   own catch-up record rather than reusing the caller's. The channel's catch-up record is opened
    in the same place and for the same reason, but it is *ended by ``_persist``* rather than by the
    ``finally``: the store and the record stand for the same output, so ending it next to the write that
    supersedes it is what keeps a switch-in from replaying both. Every turn opens one, unattended runs
@@ -284,6 +284,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
     ``test_a_stopped_turn_still_records_an_undelivered_agent_message``,
     ``test_a_stopped_firing_still_records_an_undelivered_agent_message``,
     ``test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation``.)
+
+Request and ending frames (``TurnRequests``' ``notify``) are scheduled from AIMU's synchronous sink
+onto the event loop as tasks that copy the turn's context. Markers are emitted when a call completes, so
+each follows the output it explains; delivery relative to other frames is not guaranteed.
 """
 
 from __future__ import annotations
@@ -293,6 +297,7 @@ import logging
 import time
 from dataclasses import dataclass, replace
 from typing import Optional, Union
+from uuid import uuid4
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio import ModelConnectionError, ModelRefusalError, RunHandle
@@ -303,6 +308,7 @@ from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
+from kokua.core.conversations import turn_numbers
 from kokua.core.errors import describe_error
 from kokua.core.artifacts import ArtifactSink, current_artifacts
 from kokua.core.messages import (
@@ -314,6 +320,7 @@ from kokua.core.messages import (
 )
 from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
+from kokua.core.requests import TurnRequests, current_requests
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -433,6 +440,31 @@ def _capped_message_text(text: str) -> str:
     return f"{text[:UNDELIVERED_TEXT_CHARS]}... [message truncated, {len(text)} chars total]"
 
 
+def _new_run_id(agent_name: Optional[str]) -> str:
+    return f"{agent_name or 'assistant'}-{uuid4().hex[:8]}"
+
+
+def _card_request_entry(record: dict) -> dict:
+    keys = (
+        "round",
+        "payload_ref",
+        "payload_chars",
+        "message_count",
+        "tool_count",
+        "endpoint",
+        "model",
+        "stop_reason",
+        "response_ref",
+        "tool_call_count",
+    )
+    return {"kind": "request", **{key: record[key] for key in keys}, "error": record["error"], "agent": record["agent"]}
+
+
+def _card_ending_entry(record: dict) -> dict:
+    keys = ("ended_by", "round", "max_iterations", "error")
+    return {"kind": "ending", **{key: record[key] for key in keys}}
+
+
 class TurnRunner:
     def __init__(
         self,
@@ -447,8 +479,14 @@ class TurnRunner:
         delete_conversation,
         spawn_title,
         state=None,
+        reporter=None,
+        toolset_of=lambda agent, tool: None,
     ):
         self._book = book
+        # Where a sub-agent's request and ending entries are appended to its card.
+        self._reporter = reporter
+        # Frame tasks scheduled from AIMU's synchronous sink, held until done so none is garbage collected.
+        self._frame_tasks: set[asyncio.Task] = set()
         # Where a firing registers itself while it runs, so a stop can reach it. The reactive path's own
         # entries are added by the serve loop, which owns the handle it starts.
         self._tracker = tracker
@@ -466,9 +504,47 @@ class TurnRunner:
         # placeholder one. The assistant's, because the task outlives this turn and shutdown has to be
         # able to end it; all this module knows is the moment a conversation first gets a title.
         self._spawn_title = spawn_title
+        # Names the toolset that gave an agent a tool, so each of the entry agent's calls is recorded
+        # under the toolset that served it (see `_call_toolsets`).
+        self._toolset_of = toolset_of
         # Shared toolset state, passed through to a workflow's context. Assigned after construction by
         # the composition root, which builds it later (see Assistant.create).
         self.state = state
+
+    def _notify_request(self, kind: str, record: dict) -> None:
+        """Show one request or ending record: on the channel for the entry agent's run, and in the
+        card whose id is the run's id for a sub-agent's. Called synchronously from AIMU's sink, so the
+        frames are scheduled; each task copies the current context, which is what carries the turn's
+        ``streaming_conversation`` (background muting) and ``subagent_events`` (recording)."""
+        requests = current_requests.get()
+        # A record counts as the entry's only when the turn named one: a workflow-shaped turn names none, and
+        # a record with no run id would otherwise match that None.
+        is_entry = (
+            requests is not None and requests.entry_run_id is not None and record["run_id"] == requests.entry_run_id
+        )
+        in_card = record["parent_run_id"] is not None
+        if not is_entry and not in_card:
+            return  # a critic's run, or any run of a turn with no named entry: recorded, not shown live
+        loop = asyncio.get_running_loop()
+        coroutines = []
+        if kind == "request":
+            if is_entry:
+                coroutines.append(self._ui.show_request(record))
+            elif self._reporter is not None:
+                coroutines.append(self._reporter.append(record["run_id"], _card_request_entry(record)))
+        else:
+            coroutines.append(self._ui.show_ending(record))
+            if in_card and self._reporter is not None:
+                coroutines.append(self._reporter.append(record["run_id"], _card_ending_entry(record)))
+        for coroutine in coroutines:
+            task = loop.create_task(coroutine)
+            self._frame_tasks.add(task)
+            task.add_done_callback(self._frame_task_done)
+
+    def _frame_task_done(self, task: asyncio.Task) -> None:
+        self._frame_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("Showing a request or ending frame failed.", exc_info=task.exception())
 
     # --- reactive -------------------------------------------------------------------------------
 
@@ -499,6 +575,16 @@ class TurnRunner:
         artifacts_token = current_artifacts.set(self._artifact_sink(conversation_id))
         metrics = TurnMetrics()
         metrics_token = current_metrics.set(metrics)
+        # Named before the run so the entry agent's records can be told from a critic's, which is also
+        # unparented. Only a plain turn has one: a workflow drives its own agents.
+        entry_run_id = _new_run_id(self._config.entry_agent) if workflow is None else None
+        requests = TurnRequests(
+            payloads_path=self._config.payloads_path,
+            capture=self._config.capture_requests,
+            notify=self._notify_request,
+            entry_run_id=entry_run_id,
+        )
+        requests_token = current_requests.set(requests)
         # The turn's auto-approval budget and request text, opened here so a gated tool call reached
         # from anywhere inside the turn can find both. Reactive only: an unattended turn auto-denies a
         # gated call before a reviewer is ever consulted, so a budget there would never be spent.
@@ -521,11 +607,16 @@ class TurnRunner:
         # Recorded on the tracker entry the serve loop already added for this conversation, so routing
         # can find this turn's bus by conversation id alone.
         self._tracker.attach_bus(conversation_id, bus)
-        # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
-        # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
-        # above is what keeps concurrent turns on other conversations out of this record. Assigned
-        # here rather than at agent build time only because a test may inject its own client.
+        # The forwarder is wired twice, and each does a different job. The client carries it for events
+        # emitted outside a run. The agent carries it so AIMU's loop installs it as the run's scoped sink,
+        # which stamps the agent's name, round, and run id on every event (the client's included) and
+        # sends the loop's own events (`RunFinished`, `ToolCalled`) there; wired on the client alone, the
+        # entry agent's ending never reached Kokua. The forwarder holds no turn state, so it is safe as a
+        # durable setting; the contextvar above is what keeps concurrent turns on other conversations out
+        # of this record. Assigned here rather than at agent build time only because a test may inject
+        # its own client.
         agent.model_client.events = record_event
+        agent.events = record_event
         # Record this turn's output for a user who switches into its conversation before it finishes;
         # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
         self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
@@ -546,6 +637,13 @@ class TurnRunner:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
+                    # Counted here, inside the gate, because the stored transcript holds every earlier
+                    # turn by now (each persists before releasing it) and this turn's own message is not
+                    # in it yet; the number is therefore one past what is stored, and `_persist` reads
+                    # the same count back from the stored transcript once this turn is in it.
+                    if self._ui.shows_turn:
+                        session = self._book.get(conversation_id)
+                        await self._ui.show_turn(1 + len(turn_numbers(session.messages, session.metadata)))
                     if workflow is not None:
                         ctx = self._workflow_context(agent, msg, workflow)
                         runner = workflow.build(ctx)
@@ -590,6 +688,7 @@ class TurnRunner:
                                 images=msg.images,
                                 thinking=thinking,
                                 inbox=ENTRY_SOURCE,
+                                run_id=entry_run_id,
                             )
                             await self._ui.send(stream, reply_to=msg)
                         finally:
@@ -614,6 +713,7 @@ class TurnRunner:
                         user_index,
                         thinking=thinking,
                         metrics=metrics,
+                        requests=requests,
                         started=started,
                         message_indices=message_indices,
                     )
@@ -637,6 +737,7 @@ class TurnRunner:
                         user_index,
                         thinking=thinking,
                         metrics=metrics,
+                        requests=requests,
                         started=started,
                         message_indices=message_indices,
                     )
@@ -652,6 +753,7 @@ class TurnRunner:
                         user_index,
                         thinking=thinking,
                         metrics=metrics,
+                        requests=requests,
                         started=started,
                         message_indices=message_indices,
                     )
@@ -667,6 +769,7 @@ class TurnRunner:
                         user_index,
                         thinking=thinking,
                         metrics=metrics,
+                        requests=requests,
                         started=started,
                         message_indices=message_indices,
                     )
@@ -679,6 +782,7 @@ class TurnRunner:
                         user_index,
                         thinking=thinking,
                         metrics=metrics,
+                        requests=requests,
                         started=started,
                         message_indices=message_indices,
                     )
@@ -687,6 +791,7 @@ class TurnRunner:
                 await self._persist(conversation_id, user_index, token=bubble_token)
         finally:
             current_metrics.reset(metrics_token)
+            current_requests.reset(requests_token)
             current_review_context.reset(review_token)
             current_bus.reset(bus_token)
             resubmit, undeliverable = bus.close()
@@ -934,6 +1039,7 @@ class TurnRunner:
         *,
         thinking: Optional[Union[bool, str]],
         metrics: Optional[TurnMetrics],
+        requests: Optional[TurnRequests],
         started: Optional[float],
         message_indices: list[int],
     ) -> None:
@@ -959,6 +1065,11 @@ class TurnRunner:
         required on the same principle as the two above: a caller that forgot it would record the turn
         as having received no messages, and nothing downstream could tell that apart from a turn that
         genuinely received none.
+
+        ``requests`` is the turn's request accumulator, keyword-only and required like ``metrics``: a
+        caller that forgot it would record a turn as having made no calls and ended no loops. It is
+        drained here, at the same moment as ``metrics``, so a failure path records what happened up to
+        the point it stopped.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -973,6 +1084,8 @@ class TurnRunner:
             failure=failure,
             usage=usage,
             messages=message_indices,
+            requests=requests.record() if requests is not None else None,
+            toolsets=self._call_toolsets(conversation_id, user_index),
             artifacts=sink.items if sink is not None else [],
         )
 
@@ -986,6 +1099,26 @@ class TurnRunner:
             self._ui,
             position=lambda: last_assistant_index(self._book.agent_for(conversation_id).model_client.messages),
         )
+
+    def _call_toolsets(self, conversation_id: str, user_index: int) -> dict[str, str]:
+        """The toolset behind each of this turn's tool calls, by call id, for a reload or an export to
+        show as ``toolset.tool``.
+
+        Resolved now, while the registry still holds the tools the turn ran with, because asking again
+        on reload would answer for whatever is installed by then: a removed MCP server would turn its
+        calls bare, and a renamed toolset would claim calls it never served. Only the entry agent's own
+        calls are here; a worker's ride its card's entries (``SubagentReporter``). A call no toolset
+        recorded is left out rather than stored as a guess.
+        """
+        if user_index < 0:
+            return {}
+        toolsets: dict[str, str] = {}
+        for message in self._book.agent_for(conversation_id).model_client.messages[user_index:]:
+            for call in message.get("tool_calls") or []:
+                toolset = self._toolset_of(self._config.entry_agent, call.get("function", {}).get("name") or "")
+                if toolset and call.get("id"):
+                    toolsets[call["id"]] = toolset
+        return toolsets
 
     def _record_undelivered(self, conversation_id: str, user_index: int, messages: list[Message]) -> None:
         """Persist what one of this turn's own agents sent and no reader took, so a reload still shows it.
@@ -1293,6 +1426,14 @@ class TurnRunner:
         # this runs in ends by returning or raising, not by falling through a shared teardown block.
         metrics = TurnMetrics()
         metrics_token = current_metrics.set(metrics)
+        entry_run_id = _new_run_id(self._config.entry_agent)
+        requests = TurnRequests(
+            payloads_path=self._config.payloads_path,
+            capture=self._config.capture_requests,
+            notify=self._notify_request,
+            entry_run_id=entry_run_id,
+        )
+        requests_token = current_requests.set(requests)
         try:
             # The run's conversation reaches the sidebar here, at the start, marked as running: it is what
             # the task panel offers a Stop button against, and a firing that only pushed on success left a
@@ -1310,6 +1451,7 @@ class TurnRunner:
             # See the identical assignment (and its comment) in `reactive`: the forwarder is the durable,
             # client-wide setting, and the contextvar above is what keeps this run's record isolated.
             agent.model_client.events = record_event
+            agent.events = record_event
             # The agent doesn't reset on run (the system prompt lives on the client), so the
             # pre-run length is a stable start index for the exchange.
             start = len(agent.model_client.messages)
@@ -1328,7 +1470,7 @@ class TurnRunner:
                 # The conversation's own cursor, not a worker's independent one: what a user who
                 # switched into this conversation types is the conversation having seen it, and `close`
                 # measures the leftovers from this cursor's position.
-                reply = await agent.run(prompt, inbox=ENTRY_SOURCE)
+                reply = await agent.run(prompt, inbox=ENTRY_SOURCE, run_id=entry_run_id)
                 if spec.echo_reply:
                     await self._ui.send(reply)
             except asyncio.CancelledError:
@@ -1368,6 +1510,7 @@ class TurnRunner:
                 # effort is both what it would run at and what it did.
                 thinking=self._config.thinking_for(self._config.entry_agent),
                 metrics=metrics,
+                requests=requests,
                 started=started,
                 message_indices=message_indices,
             )
@@ -1383,6 +1526,7 @@ class TurnRunner:
                 raise error
         finally:
             current_metrics.reset(metrics_token)
+            current_requests.reset(requests_token)
 
     @staticmethod
     def _tag_echoed_firing(messages: list[dict], start: int, prompt_index: int) -> None:
@@ -1439,8 +1583,8 @@ class TurnRunner:
         """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived, and
         publish where the turn starts so a front end can offer an action on it.
 
-        The publication is deliberately after the write and reads the *stored* transcript through
-        ``branchable``: a front end offering to branch a turn must never be offered one the store does
+        The publication is deliberately after the write and reads the *stored* transcript, once, through
+        ``saved_turn``: a front end offering to branch a turn must never be offered one the store does
         not hold, and an index that names no user turn there (an unattended run whose only user-role
         message was a loop injection, or a turn that committed none at all) is no turn to act on.
 
@@ -1458,5 +1602,7 @@ class TurnRunner:
             # After the push, not instead of it: the truncated title shows now and the generated one
             # replaces it (with a push of its own) whenever the model answers.
             self._spawn_title(conversation_id)
-        if self._book.branchable(conversation_id, user_index):
-            await self._ui.turn_saved(conversation_id, user_index, token=token)
+        if self._ui.shows_saved_turn:
+            branchable, turn = self._book.saved_turn(conversation_id, user_index)
+            if branchable:
+                await self._ui.turn_saved(conversation_id, user_index, token=token, turn=turn)

@@ -1,10 +1,14 @@
 """Unit tests for ChatOAuth: it posts the authorization link into the chat channel."""
 
+import errno
+import socket
 from pathlib import Path
 
+import pytest
 from fastmcp.client.auth.oauth import OAuth
 
-from kokua.mcp.auth import ChatOAuth, OAuthSettings, build_chat_oauth
+from kokua.mcp import auth
+from kokua.mcp.auth import CallbackUnavailable, ChatOAuth, OAuthSettings, build_chat_oauth
 
 
 async def test_build_chat_oauth_creates_storage_and_provider(tmp_path: Path):
@@ -121,6 +125,8 @@ async def test_redirect_handler_names_the_callback_url(tmp_path: Path, monkeypat
     async def fake_super_redirect(self, authorization_url: str) -> None: ...
 
     monkeypatch.setattr(OAuth, "redirect_handler", fake_super_redirect)
+    # kokua.lan resolves nowhere the suite runs, so the real bind check would refuse it.
+    monkeypatch.setattr(auth, "_bind_error", lambda host, port: None)
 
     provider = build_chat_oauth(
         "https://svc/mcp",
@@ -130,3 +136,105 @@ async def test_redirect_handler_names_the_callback_url(tmp_path: Path, monkeypat
     await provider.redirect_handler("https://auth.svc/authorize?x=1")
 
     assert "http://kokua.lan:8765/callback" in posted[0]
+
+
+@pytest.fixture
+def held_port():
+    """A loopback port another program is listening on, which is how the collision arrives in life."""
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen()
+        yield holder.getsockname()[1]
+
+
+async def test_redirect_handler_refuses_a_callback_port_another_program_holds(tmp_path: Path, monkeypatch, held_port):
+    """Regression: with the pinned port taken, the user was sent to approve, the provider delivered the
+    code to whichever program held the port, and the failed bind then exited the whole process. The
+    refusal comes before the link is posted or the browser opened, so nobody approves a doomed flow."""
+    posted: list[tuple[str, str | None]] = []
+
+    async def notify(message: str, *, url: str | None = None) -> None:
+        posted.append((message, url))
+
+    opened: list[str] = []
+
+    async def fake_super_redirect(self, authorization_url: str) -> None:
+        opened.append(authorization_url)
+
+    monkeypatch.setattr(OAuth, "redirect_handler", fake_super_redirect)
+
+    provider = build_chat_oauth(
+        "https://svc/mcp",
+        notify=notify,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth", callback_host="127.0.0.1", callback_port=held_port),
+    )
+    with pytest.raises(CallbackUnavailable) as excinfo:
+        await provider.redirect_handler("https://auth.svc/authorize?x=1")
+
+    assert opened == []
+    assert len(posted) == 1
+    (message, url) = posted[0]
+    assert url is None and "https://auth.svc/authorize" not in message  # the link itself is never offered
+    assert message == str(excinfo.value)
+    assert f"127.0.0.1:{held_port}" in message
+    assert "another program" in message and "oauth_callback_port" in message
+
+
+async def test_callback_server_exit_becomes_callback_unavailable(tmp_path: Path, monkeypatch, held_port):
+    """The backstop for a port taken between the check and the bind: uvicorn's sys.exit arrives as a
+    SystemExit inside FastMCP's task group, and must surface as an ordinary error rather than end the
+    process."""
+    posted: list[str] = []
+
+    async def notify(message: str, *, url: str | None = None) -> None:
+        posted.append(message)
+
+    async def exiting_callback_server(self):
+        raise BaseExceptionGroup("unhandled errors in a TaskGroup", [SystemExit(1)])
+
+    monkeypatch.setattr(OAuth, "callback_handler", exiting_callback_server)
+
+    provider = build_chat_oauth(
+        "https://svc/mcp",
+        notify=notify,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth", callback_host="127.0.0.1", callback_port=held_port),
+    )
+    with pytest.raises(CallbackUnavailable) as excinfo:
+        await provider.callback_handler()
+
+    assert isinstance(excinfo.value.cause, OSError)  # the bind is re-checked so the message can say why
+    assert posted == [str(excinfo.value)]
+
+
+async def test_callback_handler_passes_other_failures_through(tmp_path: Path, monkeypatch):
+    async def notify(message: str, *, url: str | None = None) -> None: ...
+
+    async def failing_callback_server(self):
+        raise ExceptionGroup("unhandled errors in a TaskGroup", [ValueError("state mismatch")])
+
+    monkeypatch.setattr(OAuth, "callback_handler", failing_callback_server)
+
+    provider = build_chat_oauth("https://svc/mcp", notify=notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth"))
+    with pytest.raises(ExceptionGroup):
+        await provider.callback_handler()
+
+
+def test_bind_error_ignores_a_free_port_and_reports_a_held_one(held_port):
+    with socket.socket() as spare:
+        spare.bind(("127.0.0.1", 0))
+        free_port = spare.getsockname()[1]
+    assert auth._bind_error("127.0.0.1", free_port) is None
+    assert auth._bind_error("127.0.0.1", held_port) is not None
+
+
+def test_callback_unavailable_message_does_not_read_as_a_registration_failure():
+    """connect_mcp turns any OAuth failure mentioning registration into a "provide a bearer token" reply,
+    which would send the user after the wrong fix entirely."""
+    from kokua.mcp.servers import _looks_like_registration_unsupported
+
+    for cause in (
+        OSError(errno.EADDRINUSE, "Address already in use"),
+        OSError(errno.EADDRNOTAVAIL, "Cannot assign"),
+        None,
+    ):
+        assert not _looks_like_registration_unsupported(CallbackUnavailable("localhost", 8765, cause))

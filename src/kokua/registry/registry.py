@@ -93,10 +93,10 @@ class ToolsetRegistry(dict):
     """A ``dict[str, Toolset]`` that also remembers which source registered each name.
 
     Every ordinary consumer (``select``, ``build_tools``, ``LiveState.registry``) only ever needs the
-    mapping, so this stays a plain dict for all of them. ``providers`` exists solely for the startup
-    warning that has to tell a name nobody provisioned (an AIMU built-in group, a core subsystem) from
-    a name the user provisioned and then never referenced (a plugin, a configured MCP server); that
-    distinction has to come from provenance, not from anything a ``Toolset`` itself carries.
+    mapping, so this stays a plain dict for all of them. ``providers`` answers the questions that have to
+    come from provenance rather than from anything a ``Toolset`` itself carries: which names are skills
+    (``core.agents.without_skill_names``), what order ``available = "all"`` lists toolsets in
+    (``core.agents.TRUST_ORDER``), and how ``--list-toolsets`` groups them.
     """
 
     def __init__(self, toolsets: Mapping[str, Toolset], providers: Mapping[str, str]):
@@ -104,12 +104,16 @@ class ToolsetRegistry(dict):
         self.providers: dict[str, str] = dict(providers)
 
 
-#: The ``[security].confirm_tools`` prefix for the tools no toolset builds: ``spawn_subagent``, attached
+#: The approval-entry prefix (``confirm`` and ``review``) for the tools no toolset builds: ``spawn_subagent``, attached
 #: to the entry agent after its toolsets are, and ``activate_skill``, which AIMU gives a ``SkillAgent``.
 #: Reserved here rather than only in the gate's own parser, because a registered toolset of this name
 #: would make those two gates unwritable, and a gate nobody can write is the failure this whole check
 #: exists to prevent. See ``core.agents.gateable_tools``.
 RESERVED_GATE_NAMESPACE = "core"
+
+#: The string ``available = "all"`` is written with. A toolset of this name could never be declared on its
+#: own: the bare string means every toolset, and the parser refuses it inside a list.
+ALL_DECLARATION = "all"
 
 
 def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistry:
@@ -122,7 +126,8 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
     for an MCP server that already names its URL, so both entries in the config are identifiable without
     a new field.
 
-    One name is refused outright rather than on collision: :data:`RESERVED_GATE_NAMESPACE`.
+    Two names are refused outright rather than on collision: :data:`RESERVED_GATE_NAMESPACE` and
+    :data:`ALL_DECLARATION`.
     """
     registry: dict[str, Toolset] = {}
     provider: dict[str, str] = {}
@@ -131,8 +136,13 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
             if toolset.name == RESERVED_GATE_NAMESPACE:
                 raise ToolsetError(
                     f"toolset name {RESERVED_GATE_NAMESPACE!r} (from {label}) is reserved. It is the "
-                    "[security].confirm_tools prefix for the tools no toolset provides, so a toolset "
+                    "approval-entry prefix (confirm and review) for the tools no toolset provides, so a toolset "
                     "holding it would leave those gates with no name to write. Rename it."
+                )
+            if toolset.name == ALL_DECLARATION:
+                raise ToolsetError(
+                    f'toolset name {ALL_DECLARATION!r} (from {label}) is reserved. available = "all" means '
+                    "every installed toolset, so no agent could declare a toolset holding that name. Rename it."
                 )
             if toolset.name in registry:
                 existing = registry[toolset.name]
@@ -151,6 +161,15 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
             registry[toolset.name] = toolset
             provider[toolset.name] = label
     return ToolsetRegistry(registry, provider)
+
+
+def entry_point_only_reason(entry_point: str) -> str:
+    """Why an ``entry_point_only`` toolset is refused on any other agent, as the end of a sentence.
+
+    Shared so a list declaration naming one and an ``available = "all"`` agent's ``resident`` naming one
+    are refused in the same words.
+    """
+    return f"which only works on the entry point agent ({entry_point!r}). Spawned agents cannot host it."
 
 
 def select(
@@ -176,10 +195,7 @@ def select(
             available = ", ".join(sorted(registry)) or "(none)"
             raise ToolsetError(f"agent {agent!r} declares unknown toolset {name!r}. Available toolsets: {available}.")
         if toolset.entry_point_only and agent != entry_point:
-            raise ToolsetError(
-                f"agent {agent!r} declares toolset {name!r}, which only works on the entry point agent "
-                f"({entry_point!r}). Spawned agents cannot host it."
-            )
+            raise ToolsetError(f"agent {agent!r} declares toolset {name!r}, {entry_point_only_reason(entry_point)}")
         seen.add(name)
         selected.append(toolset)
     return selected
@@ -192,7 +208,7 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
     tool name declares that toolset earlier.
 
     Each name is also recorded on ``ctx.state`` **under the toolset that offered it**, which is what
-    lets startup resolve a ``[security].confirm_tools`` entry written as ``toolset.tool`` and reject one
+    lets startup resolve a ``confirm`` or ``review`` entry written as ``toolset.tool`` and reject one
     that names no real tool. This is the only place that recording can happen once: every agent's
     registry-provided tools are built through this function, the entry agent's and a spawned worker's
     alike, and a nested worker's are built by a recursion that lands here too. Collecting at any of the
@@ -206,6 +222,9 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
     tools: list = []
     seen: set[str] = set()
     for toolset in toolsets:
+        # What this call built, kept apart from the shared record below: a concurrent build of the same
+        # toolset in another worker thread may be adding to that set while the hook reads.
+        built: set[str] = set()
         # Seeded even when the build returns nothing, so a workflow-only toolset like `planning` is
         # known-and-empty to the gate check rather than indistinguishable from a name nobody declared.
         provided = ctx.state.tools_by_toolset.setdefault(toolset.name, set())
@@ -214,9 +233,14 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
             if not name:
                 continue
             provided.add(name)
+            built.add(name)
             if name not in seen:
                 seen.add(name)
                 tools.append(fn)
+        # After recording and before the tools go back to the caller: approval has to cover a toolset
+        # however late, and by whomever, it is built, and a raising hook refuses the whole build.
+        if ctx.state.toolset_built is not None:
+            ctx.state.toolset_built(toolset.name, frozenset(built))
     return tools
 
 

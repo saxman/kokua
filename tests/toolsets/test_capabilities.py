@@ -13,6 +13,7 @@ from kokua.toolsets.capabilities import (
     make_capability_tools,
 )
 from kokua.registry.context import LiveState, ToolsetContext
+from tests.helpers import allow_all_gates
 from kokua.registry.registry import Toolset, ToolsetError, register
 
 
@@ -36,11 +37,11 @@ def _state(tmp_path, *, sources=None, **config_kwargs) -> LiveState:
     """A LiveState over a small registry, with one agent so `select` has an entry point to compare to."""
     config = AssistantConfig(
         data_dir=tmp_path,
-        agents={"assistant": AgentConfig(tools=["capabilities"])},
+        agents={"assistant": AgentConfig(available=["capabilities"])},
         **config_kwargs,
     )
     sources = sources if sources is not None else [("AIMU capability", [_toolset("web"), _toolset("fs")])]
-    return LiveState(config=config, registry=register(sources))
+    return LiveState(gate_for=allow_all_gates, config=config, registry=register(sources))
 
 
 def _tools_by_name(state) -> dict:
@@ -73,7 +74,7 @@ class _RecordingSpawn:
     def __call__(self, model, **kwargs):
         self.calls.append({"model": model, **kwargs})
 
-        async def spawn_subagent(agent_type: str, task: str) -> str:
+        async def spawn_subagent(agent_type: str, task: str, ctx=None) -> str:
             return f"{agent_type} ran: {task}"
 
         return spawn_subagent
@@ -124,7 +125,7 @@ async def test_compose_subagent_declares_its_call_to_the_card_for_the_length_of_
     seen = []
 
     def factory(model, **kwargs):
-        async def spawn_subagent(agent_type: str, task: str) -> str:
+        async def spawn_subagent(agent_type: str, task: str, ctx=None) -> str:
             seen.append(spawn_call.get())
             return "ran"
 
@@ -146,6 +147,33 @@ async def test_compose_subagent_declares_its_call_to_the_card_for_the_length_of_
         }
     ]
     assert spawn_call.get() is None, "the declaration must not outlive the spawn"
+
+
+async def test_compose_subagent_hands_the_calling_run_to_the_worker_as_its_parent(tmp_path, monkeypatch):
+    """A composed worker's run is parented to the run that called compose_subagent, the way AIMU's own
+    spawn tool parents a named sub-agent; without it the worker's rounds never reach its card."""
+    import kokua.core.agents  # noqa: F401  (see `_recording` for why this import comes first)
+    from aimu.tools.context import ToolContext
+
+    received = []
+
+    def factory(model, **kwargs):
+        async def spawn_subagent(agent_type: str, task: str, ctx=None) -> str:
+            received.append(ctx)
+            return "ran"
+
+        return spawn_subagent
+
+    monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", factory)
+    compose = _tools_by_name(_state(tmp_path))["compose_subagent"]
+    await compose("quote-checker", "Check AAPL.", ["web"], "Check quotes.", ctx=ToolContext(run_id="lead-1"))
+
+    assert [ctx.run_id for ctx in received] == ["lead-1"]
+
+
+def test_compose_subagent_does_not_show_its_context_to_the_model(tmp_path):
+    spec = _tools_by_name(_state(tmp_path))["compose_subagent"].__tool_spec__
+    assert "ctx" not in spec["function"]["parameters"]["properties"]
 
 
 async def test_list_capabilities_reports_every_name_with_its_provider_and_description(tmp_path):
@@ -396,12 +424,33 @@ async def test_compose_subagent_forwards_the_approval_gate_and_the_observer(tmp_
     """Every tool a composed worker holds must still route to the human through confirm_tools, and the
     run must still reach the web sub-agent card."""
     state = _state(tmp_path)
-    state.tool_approval = lambda *a, **k: True
+    state.gate_for = lambda agent: ("gate", agent)
     state.observer = object()
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
-    assert spawn.calls[0]["tool_approval"] is state.tool_approval
+    assert spawn.calls[0]["tool_approval"] == ("gate", "composed:w")
     assert spawn.calls[0]["observer"] is state.observer
+
+
+async def test_a_composed_worker_named_like_an_agent_gets_the_default_tier(tmp_path, monkeypatch):
+    """The gate is bound to the composed label, never the bare name, so a worker composed as "coder"
+    is not judged by the declared coder's policy."""
+    from kokua.core.approval import DEFAULT_POLICY, ApprovalPolicies, ApprovalPolicy
+
+    empty = frozenset()
+    declared = ApprovalPolicy(agent="coder", source="[agents.coder.tools]", confirm=frozenset({"x"}), review=empty)
+    default = ApprovalPolicy(agent=DEFAULT_POLICY, source=DEFAULT_POLICY, confirm=empty, review=empty)
+    policies = ApprovalPolicies(by_agent={"coder": declared}, default=default)
+    state = _state(tmp_path)
+    state.gate_for = lambda agent: agent
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("coder", "Do it.", ["web"], "Instructions.")
+    call = spawn.calls[0]
+    # AIMU lets a spec's own "tool_approval" override the factory's, so the effective gate is the spec's
+    # when it carries one.
+    bound = call["agent_types"]["coder"].get("tool_approval", call["tool_approval"])
+    assert bound == "composed:coder"
+    assert policies.for_agent(bound).source == DEFAULT_POLICY
 
 
 async def test_compose_subagent_passes_events_for_turn_metrics(tmp_path, monkeypatch):
@@ -527,6 +576,45 @@ async def test_compose_subagent_reports_an_unknown_capability_as_text(tmp_path, 
     assert spawn.calls == []
 
 
+def _refusing_build(state, alerts: list) -> None:
+    """The approval hook refusing a build, as ``Assistant._on_toolset_built`` does for a dead gate entry."""
+    from kokua.config import ConfigError
+
+    def refuse(toolset, tool_names):
+        raise ConfigError(f"[assistant.tools].confirm names {toolset + '.nope'!r}, but the {toolset!r} toolset ...")
+
+    state.toolset_built = refuse
+    state.alert_soon = alerts.append
+
+
+async def test_compose_subagent_answers_a_refused_build_naming_the_entry(tmp_path, monkeypatch):
+    """A refusal raised from the build would otherwise reach the model as AIMU's generic "raised an
+    error", which names neither the entry nor the fix."""
+    state = _state(tmp_path)
+    _refusing_build(state, [])
+    compose, spawn = _compose(state, monkeypatch)
+
+    result = await compose("w", "Do it.", ["web"], "Instructions.")
+
+    assert result.startswith("Could not compose 'w':")
+    assert "'web.nope'" in result
+    assert spawn.calls == []
+
+
+async def test_compose_subagent_tells_the_user_when_a_build_is_refused(tmp_path, monkeypatch):
+    """The same card a refused load gets: a capability the user expected did not arrive, and the model's
+    tool result is not something the user reliably sees."""
+    state = _state(tmp_path)
+    alerts: list[str] = []
+    _refusing_build(state, alerts)
+    compose, _ = _compose(state, monkeypatch)
+
+    await compose("w", "Do it.", ["web"], "Instructions.")
+
+    assert len(alerts) == 1
+    assert alerts[0].startswith("Composing w failed: ") and "'web.nope'" in alerts[0]
+
+
 async def test_compose_subagent_asks_for_a_capability_when_given_none(tmp_path, monkeypatch):
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
     result = await compose("w", "Do it.", [], "Instructions.")
@@ -579,3 +667,39 @@ def test_a_composed_sub_agents_toolsets_are_built_under_its_own_label(tmp_path):
     _spec(state, name="quote-checker", tools=("probe",))
 
     assert holders == ["quote-checker"]
+
+
+async def test_compose_subagent_sees_a_skill_written_mid_session(tmp_path, monkeypatch):
+    """Discovery and composition read the registry once per call, so a skill authored after startup is
+    listable and composable on the very next call, with no restart."""
+    from kokua.core.assistant import Assistant
+    from tests.channels import FakeChannel, _config
+    from tests.helpers import MockAsyncModelClient
+
+    agents = {"assistant": AgentConfig(available=["capabilities", "skills", "time"])}
+    config = _config(tmp_path, agents=agents, default_confirm=[], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    tools = {getattr(fn, "__name__", ""): fn for fn in assistant._agent.tools}
+    spawn = _recording(monkeypatch)
+
+    await tools["author_skill"](name="weekly-digest", description="Digest the week.", body="Do the thing.")
+    listing = await tools["list_capabilities"]()
+    result = await tools["compose_subagent"](
+        name="digester", task="Digest this week.", tools=["weekly-digest"], instructions="Digest."
+    )
+
+    assert "weekly-digest [skill]: Digest the week." in listing
+    assert result == "digester ran: Digest this week."
+    assert "weekly-digest" in spawn.calls[-1]["agent_types"]["digester"]["system_message"]
+    assistant._state.close()
+
+
+def test_the_guidance_gives_both_reasons_to_compose():
+    assert TOOLSET.guidance == (
+        " You can see every capability installed on this machine, not only the ones you hold. Compose a sub-agent "
+        "for either of two reasons: the task needs a capability you do not hold, or its tool output would flood "
+        "your context (many pages, long files, verbose command output). First check whether one of your "
+        "`spawn_subagent` roles already covers it. If none does, call `list_capabilities` to find the capability "
+        "names, then `compose_subagent` to build a sub-agent holding exactly those and give it the task."
+    )

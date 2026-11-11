@@ -167,9 +167,9 @@ async def attach_server(connections: list, url: str, client: Any, auth_mode: str
     """Record a connected server and return the names of the tools it makes usable.
 
     This mounts nothing on any agent; it only records the connection. An agent reaches the server by
-    naming it in its ``[agents.*].tools``, which is resolved when that agent (or a sub-agent's spec) is
-    built, so recording the callables here is what lets a later build resolve against them without
-    re-fetching. The full tool-name list is returned for the caller's message.
+    naming it in its ``[agents.<name>.tools].available`` (or declaring ``"all"``), which is resolved when that
+    agent (or a sub-agent's spec) is built, so recording the callables here is what lets a later build
+    resolve against them without re-fetching. The full tool-name list is returned for the caller's message.
     """
     new_tools = await client.as_tools()
     added_names = [fn.__name__ for fn in new_tools]

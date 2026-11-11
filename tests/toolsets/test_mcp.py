@@ -80,6 +80,50 @@ async def test_add_says_a_new_server_reaches_nothing_until_a_restart(monkeypatch
     assert "restart" in message.lower()
 
 
+async def _added(monkeypatch, tmp_path, auth_mode):
+    class FakeClient:
+        async def as_tools(self):
+            return [_named("search_docs")]
+
+    async def fake_connect(url, **kw):
+        return FakeClient(), auth_mode
+
+    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", fake_connect)
+    add_mcp_server, _ = _tools(tmp_path)
+    return await add_mcp_server(url="https://svc/mcp")
+
+
+async def test_a_persisted_result_says_an_all_agent_gets_it_after_a_restart(monkeypatch, tmp_path):
+    message = await _added(monkeypatch, tmp_path, "none")
+
+    assert 'available = "all"' in message
+    assert "restart" in message.lower()
+
+
+async def test_a_persisted_result_names_both_cases_it_cannot_tell_apart(monkeypatch, tmp_path):
+    """A server already in config.toml at startup but unreachable then is in the registry, so a worker
+    naming it (or declaring "all") reaches it on its next spawn; a server new to this session reaches
+    nothing until a restart. The tool cannot tell which it has, so the result states both, and never the
+    old hedge that read as if a worker could use a new server this session."""
+    message = await _added(monkeypatch, tmp_path, "none")
+
+    assert "If this server was already in config.toml when Kokua started" in message
+    assert "Otherwise nothing can use them this session" in message
+    assert "A sub-agent you spawn can, but only if" not in message
+
+
+async def test_a_bearer_result_promises_no_reach_and_says_no_restart_brings_it_back(monkeypatch, tmp_path):
+    message = await _added(monkeypatch, tmp_path, "bearer")
+
+    assert 'available = "all"' not in message
+    assert "no restart brings it back" in message
+    assert "[[mcp.server]]" in message and "token_env" in message
+    assert "[mcp]" not in message
+    assert "no agent can name a server added at runtime, so nothing can use it" in message
+    assert "A sub-agent you spawn can" not in message
+    assert "with url, name and token_env" in message and "and restarts Kokua." in message
+
+
 async def test_remove_reports_an_unconnected_server(tmp_path):
     _, remove_mcp_server = _tools(tmp_path)
 

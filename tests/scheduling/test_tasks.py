@@ -47,7 +47,7 @@ _noop_fire.task_ids = []
 EVERY_MINUTE = {"type": "interval", "seconds": 60}
 DAILY_NINE = {"type": "daily", "at": "09:00"}
 
-_MINIMAL = "[agents.assistant]\ntools = []\n"
+_MINIMAL = "[agents.assistant.tools]\navailable = []\n"
 
 
 def _make(tmp_path, fire=_noop_fire, default_max=0, body: str = _MINIMAL, **kwargs):

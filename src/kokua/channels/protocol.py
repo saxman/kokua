@@ -39,7 +39,9 @@ class RichChannel(Protocol):
         A duration rather than a flag plus a duration, so "idle, and it has been going 12 seconds"
         cannot be expressed."""
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
+    async def send_turn_saved(
+        self, conversation_id: str, message_index: int, *, token: Optional[str] = None, turn: Optional[int] = None
+    ) -> None:
         """Say that a turn's transcript has reached the store, and where that turn starts.
 
         The index is the position of the turn's user message, which is what identifies a turn to
@@ -48,7 +50,9 @@ class RichChannel(Protocol):
 
         ``token`` is whatever the front end sent with the message this turn was made of, echoed back
         so it can match the two. None for a turn no front end started, which is why a front end that
-        mints tokens must treat an absent one as "not mine" rather than as the next one waiting."""
+        mints tokens must treat an absent one as "not mine" rather than as the next one waiting.
+
+        ``turn`` is the turn's 1-based ordinal in its conversation, for a front end that captions turns."""
 
     async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
         """Say that a message has joined the turn already running instead of starting one of its own.
@@ -75,8 +79,11 @@ class RichChannel(Protocol):
         conversation to open, the URL to follow, and the group whose next card supersedes this one.
         """
 
-    async def send_approval_request(self, name: str, arguments: Any) -> None:
-        """Prompt for tool-call approval. The reply arrives through the ordinary inbound path."""
+    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+        """Prompt for tool-call approval. The reply arrives through the ordinary inbound path.
+
+        ``agent`` is the name of the agent asking, or None when unknown.
+        """
 
     async def send_auto_approval(
         self,
@@ -87,6 +94,7 @@ class RichChannel(Protocol):
         reason: str,
         model: str,
         conversation_id: Optional[str] = None,
+        agent: Optional[str] = None,
     ) -> None:
         """Report that a reviewer answered for a gated tool call, whichever way it answered.
 
@@ -120,6 +128,19 @@ class RichChannel(Protocol):
 
     async def send_artifact(self, record: dict) -> None:
         """Show a file a tool made for the user (``url``, ``filename``, ``mime``)."""
+
+    async def send_request(self, record: dict) -> None:
+        """Mark one completed model call of the entry agent's run (round, endpoint, stop reason, and a
+        ``payload_ref`` to the exact request). Optional: a channel without it shows no markers."""
+
+    async def send_ending(self, ending: dict) -> None:
+        """Say how an agent's tool loop ended (``ended_by``, ``round``, ``max_iterations``). May receive a
+        sub-agent's ending as well as the entry agent's (``parent_run_id`` tells them apart; the web
+        channel drops the sub-agent's, since its card shows it). Optional: a channel without it gets one
+        plain ``send()`` line for a ``wrap_up`` or ``error`` ending only."""
+
+    async def send_turn(self, number: int) -> None:
+        """Announce which turn is starting. Optional: a channel without it says nothing."""
 
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream an agentic loop live without terminating it, returning the generated text."""

@@ -183,3 +183,12 @@ def test_sanitize_blank_string_omitted():
 
 def test_sanitize_of_nothing_is_empty():
     assert _table().sanitize({}) == {}
+
+
+def test_core_runtime_settings_are_the_two_the_core_reads_per_conversation_or_turn():
+    from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting
+
+    assert CORE_RUNTIME_SETTINGS == (
+        RuntimeSetting("generate_titles", "assistant", bool),
+        RuntimeSetting("capture_requests", "assistant", bool),
+    )

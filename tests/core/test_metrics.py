@@ -151,3 +151,11 @@ def test_explicit_none_in_one_token_field_leaves_it_absent():
     assert record["calls"] == 1
     assert record["input_tokens"] == 100
     assert "output_tokens" not in record
+
+
+def test_an_unattributed_call_is_labelled_unattributed_not_as_the_entry_agent():
+    metrics = TurnMetrics()
+    metrics(_finished(agent=None))
+    metrics(_finished(agent="researcher"))
+
+    assert set(metrics.record(wall_seconds=1.0)["by_agent"]) == {"unattributed", "researcher"}

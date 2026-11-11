@@ -25,11 +25,29 @@ are not "call it if present" -- they change what the core *does*:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union
 
 from aimu.aio import Channel
 from aimu.aio.channels.base import ChannelMessage
-from aimu.models import StreamChunk
+from aimu.models import StreamChunk, StreamingContentType
+
+
+def ending_line(ending: dict) -> str:
+    """One line saying how an agent's tool loop ended. Every surface counts rounds from 1 (AIMU's own
+    counter starts at 0, hence the ``+ 1``), and a forced wrap-up names the cap instead of a round."""
+    limit = ending["max_iterations"]
+    of_limit = f" of {limit}" if limit is not None else ""
+    position = f"round {ending['round'] + 1}{of_limit}"
+    if ending["ended_by"] == "answered":
+        rule = f"answered at {position}"
+    elif ending["ended_by"] == "wrap_up":
+        cap = f"limit of {limit} rounds" if limit is not None else "limit"
+        rule = f"tool-use {cap} reached; answered on a forced wrap-up call"
+    elif ending["ended_by"] == "error":
+        rule = f"error ({ending['error']}) at {position}" if ending["error"] else f"error at {position}"
+    else:
+        return f"[{ending['agent']}] ended at {position}"
+    return f"[{ending['agent']}] ended: {rule}"
 
 
 def _bullets(issues: list[str]) -> str:
@@ -39,8 +57,11 @@ def _bullets(issues: list[str]) -> str:
 class ChannelUI:
     """Adapts any ``aimu.aio.Channel`` to the full surface the core wants to use."""
 
-    def __init__(self, channel: Channel):
+    def __init__(self, channel: Channel, *, toolset_of: Optional[Callable[[str], Optional[str]]] = None):
         self._channel = channel
+        # Names the toolset a streamed tool call came from, written into the chunk as ``toolset`` so a
+        # channel can show the call as ``toolset.tool``. None, or a None answer, streams the call bare.
+        self._toolset_of = toolset_of
         self._conversations = getattr(channel, "send_conversations", None)
         self._notification = getattr(channel, "send_notification", None)
         self._approval_request = getattr(channel, "send_approval_request", None)
@@ -51,12 +72,15 @@ class ChannelUI:
         self._done = getattr(channel, "send_done", None)
         self._subagent = getattr(channel, "send_subagent", None)
         self._artifact = getattr(channel, "send_artifact", None)
+        self._request = getattr(channel, "send_request", None)
+        self._ending = getattr(channel, "send_ending", None)
         self._stream_activity = getattr(channel, "stream_activity", None)
         self._begin_catch_up = getattr(channel, "begin_catch_up", None)
         self._end_catch_up = getattr(channel, "end_catch_up", None)
         self._history = getattr(channel, "send_history", None)
         self._working = getattr(channel, "send_working", None)
         self._turn_saved = getattr(channel, "send_turn_saved", None)
+        self._turn = getattr(channel, "send_turn", None)
         self._message_frame = getattr(channel, "send_message_frame", None)
 
     @property
@@ -97,7 +121,27 @@ class ChannelUI:
         *,
         reply_to: Optional[ChannelMessage] = None,
     ) -> None:
+        if not isinstance(content, str):
+            content = self._with_toolsets(content)
         await self._channel.send(content, reply_to=reply_to)
+
+    async def _with_toolsets(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Yield ``chunks``, each tool call carrying the ``toolset`` it came from where one is known.
+
+        Added here, once, rather than by each channel, because naming a toolset takes the live registry,
+        which the core holds and a channel must not reach for. The key rides AIMU's own chunk, so a
+        channel that does not read it renders the call exactly as before.
+        """
+        async for chunk in chunks:
+            if (
+                self._toolset_of is not None
+                and chunk.phase == StreamingContentType.TOOL_CALLING
+                and isinstance(chunk.content, dict)
+            ):
+                toolset = self._toolset_of(chunk.content.get("name") or "")
+                if toolset:
+                    chunk = chunk._replace(content={**chunk.content, "toolset": toolset})
+            yield chunk
 
     def receive(self) -> AsyncIterator[ChannelMessage]:
         return self._channel.receive()
@@ -132,7 +176,9 @@ class ChannelUI:
         if self._working is not None:
             await self._working(elapsed)
 
-    async def turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
+    async def turn_saved(
+        self, conversation_id: str, message_index: int, *, token: Optional[str] = None, turn: Optional[int] = None
+    ) -> None:
         """Publish the position of a turn whose transcript has just been stored.
 
         A front end uses it to offer an action on the turn that only makes sense once the store has
@@ -142,9 +188,30 @@ class ChannelUI:
         ``token`` is whatever the front end sent with the message this turn was made of, so it can
         match the message it drew to the turn that was made of it. None whenever no front end sent
         one, which is every turn nobody typed.
+
+        ``turn`` is the turn's ordinal in the conversation (``conversations.turn_numbers``), so a page
+        that drew the turn live can caption it with the same number a reload will.
         """
         if self._turn_saved is not None:
-            await self._turn_saved(conversation_id, message_index, token=token)
+            await self._turn_saved(conversation_id, message_index, token=token, turn=turn)
+
+    @property
+    def shows_saved_turn(self) -> bool:
+        """Whether the channel takes a saved-turn frame, so a caller can skip the store read that builds it."""
+        return self._turn_saved is not None
+
+    @property
+    def shows_turn(self) -> bool:
+        """Whether the channel renders a turn number, so a caller can skip the store read that computes it
+        for a channel that would discard it."""
+        return self._turn is not None
+
+    async def show_turn(self, number: int) -> None:
+        """Announce which turn of the conversation is starting, before its reply streams. A no-op for a
+        channel with no ``send_turn``: the terminal channel defines one that prints ``[turn N]``, and a
+        page learns the number from ``turn_saved`` and history instead."""
+        if self._turn is not None:
+            await self._turn(number)
 
     async def message_taken(self, text: str, *, token: Optional[str] = None) -> None:
         """Report that this message joined the turn already running instead of starting one.
@@ -204,12 +271,23 @@ class ChannelUI:
         else:
             await self._channel.send(text)
 
-    async def ask_approval(self, name: str, arguments: Any) -> None:
-        """Prompt for tool approval, as a frame or as a plain-text question."""
+    async def ask_approval(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+        """Prompt for tool approval, as a frame or as a plain-text question.
+
+        ``agent`` names who is asking, since a delegated worker's call reaches the same prompt as the
+        entry agent's and the user is deciding whether *that* agent may act. The frame method always
+        receives ``agent`` (None when unknown), so a channel written against the older one-argument
+        method raises ``TypeError`` rather than being half-served: the frame change is a breaking one.
+
+        ``name`` is the label to show, ``toolset.tool`` where the toolset is known (``HumanGate`` composes
+        it), not an identifier to match on: nothing replies with it, since the answer is a bare yes or no.
+        """
         if self._approval_request is not None:
-            await self._approval_request(name, arguments)
-        else:
+            await self._approval_request(name, arguments, agent=agent)
+        elif agent is None:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
+        else:
+            await self._channel.send(f"[approve] Allow {agent} to run {name}({arguments})? [y/N]")
 
     async def show_auto_approval(
         self,
@@ -220,6 +298,7 @@ class ChannelUI:
         reason: str,
         model: str,
         conversation_id: Optional[str] = None,
+        agent: Optional[str] = None,
     ) -> None:
         """Report a reviewer's answer about a gated tool call, as a card or as a plain-text line.
 
@@ -241,6 +320,9 @@ class ChannelUI:
         screen when it arrives. The text fallback drops it: a channel with one conversation in view has
         nowhere else it could have landed.
 
+        ``agent`` names whose call was reviewed, for the reason :meth:`ask_approval` names it: a worker's
+        gated call and the entry agent's land in the same log.
+
         The reason is appended only when there is one. A reviewer that answered with an empty sentence
         is unlikely and not impossible, and this line is what a user reads about a gated call that was
         waved through, so it should not trail a bare colon.
@@ -253,13 +335,15 @@ class ChannelUI:
                 reason=reason,
                 model=model,
                 conversation_id=conversation_id,
+                agent=agent,
             )
             return
         because = f": {reason}" if reason else ""
+        call = f"{agent}'s {name}({arguments})" if agent else f"{name}({arguments})"
         if approved:
-            await self._channel.send(f"[auto-approval] {model} auto-approved {name}({arguments}){because}")
+            await self._channel.send(f"[auto-approval] {model} auto-approved {call}{because}")
         else:
-            await self._channel.send(f"[auto-approval] {model} is asking you to approve {name}({arguments}){because}")
+            await self._channel.send(f"[auto-approval] {model} is asking you to approve {call}{because}")
 
     async def ask_plan_review(self, plan: str, critique: Optional[list[str]] = None) -> None:
         """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh."""
@@ -301,7 +385,8 @@ class ChannelUI:
         which a renderer uses to place the card inside its parent's; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
         (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, ``"loop"``, or ``"error"`` for a
         spawn; a ``"tool"`` entry carries ``name``/``arguments``/``response``, the last being what the
-        call returned; a ``"loop"`` entry carries ``reason`` (``"continuation"`` or ``"final_answer"``,
+        call returned, plus ``toolset`` where the toolset that gave the worker the tool is known; a
+        ``"loop"`` entry carries ``reason`` (``"continuation"`` or ``"final_answer"``,
         naming which prompt the loop injected) and ``text`` (the prompt itself); a reviewer instead sends
         its verdict as ``issues`` alongside a terminal ``status`` and no ``append``); and closes with a
         terminal ``status``: ``"done"``, ``"stopped"``, or ``"error"`` for a spawn, ``"approved"`` or
@@ -329,6 +414,23 @@ class ChannelUI:
         kind = "Image" if record.get("mime", "").startswith("image/") else "File"
         await self._channel.send(f"{kind} saved: {path}")
 
+    async def show_request(self, record: dict) -> None:
+        """Mark one model call of the entry agent's run: its round, endpoint, stop reason, and a
+        reference to the exact request that was sent. A no-op where requests aren't rendered: the
+        terminal shows them only through ``kokua export --turn``."""
+        if self._request is not None:
+            await self._request(record)
+
+    async def show_ending(self, ending: dict) -> None:
+        """Say how an agent's tool loop ended (``ended_by``: ``"answered"``, ``"wrap_up"``, or
+        ``"error"``). A channel with no ``send_ending`` still gets one plain line for the two endings that
+        are not routine (``"wrap_up"`` and ``"error"``), so the cap being hit is never silent; an
+        ``"answered"`` ending is the ordinary case and says nothing there."""
+        if self._ending is not None:
+            await self._ending(ending)
+        elif ending["ended_by"] in ("wrap_up", "error"):
+            await self._channel.send(ending_line(ending))
+
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream an agentic loop live and return its generated text.
 
@@ -336,6 +438,7 @@ class ChannelUI:
         and returns "". A caller that needs the text (rather than just the completion) must check
         ``supports_streamed_activity`` and run non-streaming instead.
         """
+        chunks = self._with_toolsets(chunks)
         if self._stream_activity is not None:
             return await self._stream_activity(chunks, show_answer=show_answer)
         async for _ in chunks:

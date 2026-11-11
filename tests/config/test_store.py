@@ -135,7 +135,7 @@ def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
     from kokua.config.schema import AgentConfig, AssistantConfig
 
     config = AssistantConfig(
-        agents={"assistant": AgentConfig(tools=names)},
+        agents={"assistant": AgentConfig(available=names)},
         entry_agent="assistant",
         mcp_servers=servers,
     )
@@ -803,3 +803,10 @@ def test_reviewers_are_locked_by_default():
 def test_update_config_refuses_a_reviewer_section():
     with pytest.raises(settings.ConfigError, match="not editable with update_config"):
         settings.coerce_config_string("reviewers.approval", "system_message", "x", table=core_table())
+
+
+def test_default_locks_cover_assistant_tools():
+    locks = config_store.DEFAULT_LOCKED_CONFIG_KEYS
+    assert config_store.locked_by("assistant.tools", "confirm", locks) == "assistant.tools.*"
+    assert config_store.locked_by("assistant.tools", "review", locks) == "assistant.tools.*"
+    assert config_store.locked_by("agents.coder.tools", "confirm", locks) == "agents.*"

@@ -144,6 +144,37 @@ def test_a_tool_call_shows_its_name_arguments_and_result():
     assert "the contents" in out
 
 
+def test_a_tool_call_is_named_under_its_recorded_toolset():
+    messages = [
+        {"role": "user", "content": "read it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "function": {"name": "read_file", "arguments": "{}"}},
+                {"id": "c2", "function": {"name": "mystery", "arguments": "{}"}},
+            ],
+        },
+    ]
+    out = render_markdown(_session(messages, {"toolsets": {"0": {"c1": "fs"}}}))
+    assert "**Tool call: `fs.read_file`**" in out
+    assert "**Tool call: `mystery`**" in out
+
+
+def test_a_sub_agents_tool_entry_is_named_under_its_toolset():
+    messages = [
+        {"role": "user", "content": "look it up"},
+        {"role": "assistant", "content": "done"},
+    ]
+    events = [
+        {"id": "s1", "role": "researcher", "task": "find", "status": "running"},
+        {"id": "s1", "append": {"kind": "tool", "name": "get_web_content", "arguments": {}, "toolset": "web"}},
+        {"id": "s1", "status": "done"},
+    ]
+    out = render_markdown(_session(messages, {"subagent": {"0": events}}))
+    assert "**Tool call: `web.get_web_content`**" in out
+
+
 def test_a_payload_containing_a_fence_does_not_break_out_of_its_block():
     """The single most likely silent failure in the export.
 
@@ -444,6 +475,60 @@ def test_a_cards_message_entry_is_not_dropped():
     ]
     out = "\n".join(_render_subagent(events, None))
     assert "**Message (mid-turn):** [message from assistant] use the index" in out
+
+
+def test_a_cards_ending_is_rendered_and_its_request_adds_nothing():
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "request", "round": 0, "payload_ref": None}},
+        {
+            "id": "r-1",
+            "append": {"kind": "ending", "ended_by": "wrap_up", "round": 5, "max_iterations": 5, "error": None},
+        },
+        {"id": "r-1", "status": "done"},
+    ]
+    lines = _render_subagent(events, None)
+    assert "_[ended: tool-use limit of 5 rounds reached; answered on a forced wrap-up call]_" in lines
+    ending_at = lines.index("_[ended: tool-use limit of 5 rounds reached; answered on a forced wrap-up call]_")
+    assert lines[ending_at - 1] == ""
+    assert lines[ending_at - 2] != ""  # the request entry left no blank line of its own
+
+
+def test_the_export_words_every_ending_the_way_the_terminal_does():
+    from kokua.transcript_export import _ending_line
+
+    base = {"round": 0, "max_iterations": 10, "error": None}
+    assert _ending_line({**base, "ended_by": "answered"}) == "_[ended: answered at round 1 of 10]_"
+    assert _ending_line({**base, "ended_by": "wrap_up", "max_iterations": None}) == (
+        "_[ended: tool-use limit reached; answered on a forced wrap-up call]_"
+    )
+    assert _ending_line({**base, "ended_by": "error", "error": "boom"}) == "_[ended: error (boom) at round 1 of 10]_"
+    assert _ending_line({**base, "ended_by": "error"}) == "_[ended: error at round 1 of 10]_"
+    assert _ending_line({**base, "ended_by": None, "max_iterations": None}) == "_[ended at round 1]_"
+
+
+def test_a_payload_with_no_system_prompt_shape_says_so_once_per_agent_per_turn(tmp_path):
+    odd = _save(tmp_path, {"prompt": "raw"})
+    session = _session(
+        [
+            {"role": "user", "content": "q0"},
+            {"role": "assistant", "content": "a0"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ],
+        {
+            "requests": {
+                "2": {
+                    "entry_run_id": "e",
+                    "calls": [_call("e", "assistant", 0, odd), _call("e", "assistant", 1, odd)],
+                    "endings": [],
+                }
+            }
+        },
+    )
+    out = render_markdown(session, payloads_path=tmp_path)
+    note = "_(system prompt not found in the recorded request; see kokua export --turn 2)_"
+    assert out.count(note) == 1
 
 
 def test_a_cards_message_entry_is_capped_like_its_siblings():
@@ -990,3 +1075,220 @@ def test_render_item_names_an_artifact_by_its_filename_and_reference():
 def test_render_item_names_a_non_image_artifact_as_a_file():
     item = {"type": "artifact", "url": "/download/x.pdf", "filename": "x.pdf", "mime": "application/pdf"}
     assert _render_item(item, None) == ["_[file: x.pdf (/download/x.pdf)]_"]
+
+
+def test_an_ending_renders_as_one_italic_line_inside_its_turn_and_a_request_renders_nothing():
+    session = _session(
+        [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "partial"},
+        ],
+        {
+            "requests": {
+                "0": {
+                    "entry_run_id": "e",
+                    "calls": [{"run_id": "e", "parent_run_id": None, "round": 0, "endpoint": "m"}],
+                    "endings": [
+                        {
+                            "run_id": "e",
+                            "parent_run_id": None,
+                            "agent": "assistant",
+                            "ended_by": "wrap_up",
+                            "round": 10,
+                            "max_iterations": 10,
+                            "error": None,
+                        }
+                    ],
+                }
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "_[ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call]_" in out
+    assert out.index("partial") < out.index("_[ended:")
+    assert "unrendered" not in out
+
+
+def test_turn_headings_skip_a_mid_turn_message():
+    session = _session(
+        [
+            {"role": "user", "content": "one"},
+            {"role": "user", "content": "typed while it ran"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "b"},
+        ],
+        {"messages": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert "## Turn 1" in out and "## Turn 2" in out and "## Turn 3" not in out
+
+
+def test_system_prompt_of_reads_both_payload_shapes():
+    from kokua.transcript_export import system_prompt_of
+
+    assert system_prompt_of({"system": "be brief", "messages": []}) == "be brief"
+    assert system_prompt_of({"system": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}) == "a\n\nb"
+    assert (
+        system_prompt_of({"messages": [{"role": "system", "content": "be kind"}, {"role": "user", "content": "x"}]})
+        == "be kind"
+    )
+    assert system_prompt_of({"prompt": "raw"}) is None
+
+
+def _call(run_id, agent, round_, payload_ref, **extra):
+    call = {
+        "run_id": run_id,
+        "parent_run_id": None,
+        "agent": agent,
+        "round": round_,
+        "provider": "anthropic",
+        "endpoint": "https://api.example/v1/messages",
+        "model": "m",
+        "payload_ref": payload_ref,
+        "stop_reason": "end_turn",
+        "response_ref": None,
+        "error": None,
+    }
+    call.update(extra)
+    return call
+
+
+def _save(tmp_path, payload):
+    import json
+
+    from kokua import payloads
+
+    return payloads.save_text(tmp_path, json.dumps(payload))
+
+
+def test_system_prompts_appear_when_first_seen_and_when_changed(tmp_path):
+    first = _save(tmp_path, {"system": "be brief", "messages": []})
+    changed = _save(tmp_path, {"system": "be verbose", "messages": []})
+    messages = []
+    requests = {}
+    for turn, ref in enumerate([first, first, changed]):
+        requests[str(len(messages))] = {
+            "entry_run_id": f"e{turn}",
+            "calls": [_call(f"e{turn}", "assistant", 0, ref)],
+            "endings": [],
+        }
+        messages += [{"role": "user", "content": f"q{turn}"}, {"role": "assistant", "content": f"a{turn}"}]
+    session = _session(messages, {"requests": requests})
+    out = render_markdown(session, payloads_path=tmp_path)
+    assert out.count("**System prompt (assistant):**") == 2
+    assert out.index("be brief") < out.index("## Turn 2") < out.index("be verbose")
+    assert "be brief" not in render_markdown(session)
+
+
+def test_system_prompts_are_tracked_per_agent_and_a_missing_payload_is_skipped(tmp_path):
+    ref = _save(tmp_path, {"system": "same text", "messages": []})
+    session = _session(
+        [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}],
+        {
+            "requests": {
+                "0": {
+                    "entry_run_id": "e",
+                    "calls": [
+                        _call("e", "assistant", 0, ref),
+                        _call("w", "worker", 0, ref, parent_run_id="e"),
+                        _call("x", "other", 0, "/payloads/" + "0" * 64),
+                        _call("y", "none", 0, None),
+                    ],
+                    "endings": [],
+                }
+            }
+        },
+    )
+    out = render_markdown(session, payloads_path=tmp_path)
+    assert "**System prompt (assistant):**" in out
+    assert "**System prompt (worker):**" in out
+    assert "(other)" not in out and "(none)" not in out
+
+
+def _two_turn_session(tmp_path):
+    request_ref = _save(tmp_path, {"system": "sys", "messages": [{"role": "user", "content": "```x```"}]})
+    response_ref = _save(tmp_path, {"text": "the answer", "thinking": "hmm", "tool_calls": [{"name": "f"}]})
+    return _session(
+        [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "one"},
+            {"role": "user", "content": "second"},
+            {"role": "assistant", "content": "two"},
+        ],
+        {
+            "requests": {
+                "2": {
+                    "entry_run_id": "e",
+                    "calls": [
+                        _call("w", "worker", 0, None, parent_run_id="e", endpoint=None),
+                        _call("e", "assistant", 0, request_ref, response_ref=response_ref),
+                    ],
+                    "endings": [
+                        {
+                            "run_id": "e",
+                            "parent_run_id": None,
+                            "agent": "assistant",
+                            "ended_by": "answered",
+                            "round": 0,
+                            "max_iterations": 10,
+                            "error": None,
+                        }
+                    ],
+                }
+            }
+        },
+    )
+
+
+def test_turn_markdown_lists_runs_entry_first_with_request_and_response(tmp_path):
+    from kokua.transcript_export import render_turn_markdown
+
+    out = render_turn_markdown(_two_turn_session(tmp_path), 2, payloads_path=tmp_path)
+    assert "turn 2" in out.splitlines()[0]
+    assert "second" in out
+    assert out.index("### assistant · round 1") < out.index("### worker · round 1")
+    assert '"system": "sys"' in out
+    assert "````json" in out  # the payload holds a fence of its own
+    assert "the answer" in out and "hmm" in out
+    assert "no wire request" in out
+    assert "_not captured_" in out  # the worker's null payload_ref
+    assert "_[ended: answered at round 1 of 10]_" in out
+
+
+def test_turn_markdown_survives_an_unreadable_payload(tmp_path):
+    from kokua.transcript_export import render_turn_markdown
+
+    session = _two_turn_session(tmp_path)
+    session.metadata["requests"]["2"]["calls"][1]["payload_ref"] = "/payloads/" + "0" * 64
+    out = render_turn_markdown(session, 2, payloads_path=tmp_path)
+    assert out.count("_not captured_") >= 2
+
+
+def test_turn_markdown_says_when_the_turn_recorded_no_calls(tmp_path):
+    from kokua.transcript_export import render_turn_markdown
+
+    out = render_turn_markdown(_two_turn_session(tmp_path), 1, payloads_path=tmp_path)
+    assert out.endswith("**User:** first\n\n_No model calls were recorded for this turn._\n")
+
+
+def test_turn_markdown_rejects_a_turn_out_of_range(tmp_path):
+    import pytest
+
+    from kokua.transcript_export import render_turn_markdown
+
+    with pytest.raises(ValueError, match="turns 1 to 2"):
+        render_turn_markdown(_two_turn_session(tmp_path), 5, payloads_path=tmp_path)
+    with pytest.raises(ValueError, match="no turns"):
+        render_turn_markdown(_session([], {}), 1, payloads_path=tmp_path)
+
+
+def test_turn_markdown_fences_a_response_containing_backticks_and_tolerates_odd_types(tmp_path):
+    from kokua.transcript_export import render_turn_markdown
+
+    session = _two_turn_session(tmp_path)
+    calls = session.metadata["requests"]["2"]["calls"]
+    calls[1]["response_ref"] = _save(tmp_path, {"text": "```py\nx\n```", "thinking": 7, "tool_calls": None})
+    out = render_turn_markdown(session, 2, payloads_path=tmp_path)
+    assert "````\n```py\nx\n```\n````" in out
+    assert "\n7\n" in out

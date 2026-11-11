@@ -15,7 +15,7 @@ reported as an existing backup.
 The tool takes **no arguments**, and that is the whole safety argument. The repository, the branch, and
 the files copied all come from ``config.toml``, so the model cannot redirect the capability and there is
 nothing a per-call approval would protect. That is what earns it a place outside
-``[security].confirm_tools``, and being outside that list is what lets it run at all in the proactive
+``[assistant.tools]``'s ``confirm`` and ``review`` lists, and being outside them is what lets it run at all in the proactive
 turn a scheduled task fires, where gated tools auto-deny. A version of this tool taking a ``repo`` or a
 ``path`` argument would have to be gated, and a gated backup tool cannot be scheduled.
 

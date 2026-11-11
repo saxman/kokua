@@ -59,7 +59,7 @@ THIRD_PARTY = Toolset(
 
 def test_a_third_party_workflow_earns_its_command_by_declaration():
     agents = example_agents()
-    agents["assistant"].tools = ["summarise"]
+    agents["assistant"].available = ["summarise"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
 
     commands = build_command_map(config, register([("plugin", [THIRD_PARTY])]))

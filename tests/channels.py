@@ -28,6 +28,12 @@ class FakeChannel(Channel):
     def __init__(self, inbound: list[str] | None = None):
         self._inbound = inbound or []
         self.sent: list[str] = []
+        self.turns: list[int] = []
+
+    async def send_turn(self, number: int) -> None:
+        # Recorded apart from `sent` so a test of what the user was told is not about the turn marker;
+        # a bare channel with no `send_turn` hears nothing about turn numbers (see ChannelUI).
+        self.turns.append(number)
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
         for text in self._inbound:
@@ -59,9 +65,13 @@ class _TurnSavedChannel(FakeChannel):
     def __init__(self):
         super().__init__()
         self.turns_saved: list[tuple[str, int, str | None]] = []
+        self.turn_ordinals: list[int | None] = []
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: str | None = None) -> None:
+    async def send_turn_saved(
+        self, conversation_id: str, message_index: int, *, token: str | None = None, turn: int | None = None
+    ) -> None:
         self.turns_saved.append((conversation_id, message_index, token))
+        self.turn_ordinals.append(turn)
 
 
 class SubagentCapturingChannel(FakeChannel):
@@ -70,9 +80,17 @@ class SubagentCapturingChannel(FakeChannel):
     def __init__(self):
         super().__init__()
         self.subagent_frames: list[dict] = []
+        self.request_frames: list[dict] = []
+        self.ending_frames: list[dict] = []
 
     async def send_subagent(self, event: dict) -> None:
         self.subagent_frames.append(event)
+
+    async def send_request(self, record: dict) -> None:
+        self.request_frames.append(record)
+
+    async def send_ending(self, ending: dict) -> None:
+        self.ending_frames.append(ending)
 
 
 @lru_cache(maxsize=1)
@@ -88,7 +106,7 @@ def example_agents() -> dict[str, AgentConfig]:
     off the cached parse so a caller mutating one agent's `tools` list cannot corrupt another test's
     config.
     """
-    return {name: AgentConfig(**deepcopy(spec)) for name, spec in _shipped_agents().items()}
+    return {name: settings._parse_agent(name, deepcopy(spec)) for name, spec in _shipped_agents().items()}
 
 
 def planning_settings(**overrides) -> dict[str, dict]:

@@ -7,7 +7,9 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.38.0 or newer, plus the page tools the
+`web` toolset builds, which are on AIMU's main branch and in no release until 0.39.0. Until it is published,
+Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.
 
 ### Package and entry points
 
@@ -48,6 +50,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
 
 ### Conversations and turns
 
+- **System prompts in the export, and `kokua export --turn N`.** The conversation export now shows each
+  agent's system prompt the first time it appears and again whenever it changes, read from the recorded
+  request payloads (never the payloads themselves), in every route: the command, the web download, and
+  `export_conversation`. `kokua export <id> --turn N` writes one turn alone: the user's message, then every model call it
+  made grouped by run with the request exactly as sent, the response, and how each loop ended, to
+  `<id>.turn-N.md`. A payload that is missing reads `_not captured_`; a turn out of range exits 2 naming
+  the valid range.
 - **Conversation commands at the prompt: `/new`, `/conversations`, `/switch <id>`.** The terminal used
   to have no way to start a conversation or reach one it was not already in, which made every earlier
   conversation unreachable from the CLI and left restarting the process resuming the most recent one.
@@ -137,6 +146,48 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   on every exit branch of a turn: success, cancellation, a connection error, a generic error, with the
   wall-clock figure measured at the moment of recording, so a turn that raised still reports what it
   cost up to the point it stopped.
+- **A turn records every model call's request and every loop's ending.** `core/requests.py`'s
+  `TurnRequests`, fed by the same `record_event` sink as the cost record, stores each call's endpoint and
+  a reference to the exact request and response (files under `$KOKUA_HOME/data/payloads/`) and how each
+  agent loop ended, under `session.metadata["requests"][str(user_index)]`. Recorded on every exit
+  branch, unattended runs included, and dropped or kept with the turn when a conversation is branched or
+  truncated. `[assistant].capture_requests` (default `true`, hot) turns the payload files off; endings
+  are recorded either way. `CORE_RUNTIME_SETTINGS` now holds two entries.
+- **The web UI shows what the model saw.** A `{ }` button per model call on that round's own output, which
+  opens a collapsible right panel (it narrows the conversation, and overlays it below 900px; Escape, the
+  close button, or the same button closes it). Its summary is drawn without a fetch; the panel shows the
+  round's two halves, the request (fetched once and rendered a level at a time) and the response the model
+  returned (reasoning, requested tool calls, text), with long strings cut behind "show all", image data
+  labeled, and no inline request tree above two million characters. Each half links
+  `/payloads/<sha256>?download=<name>` (accepted only for `^[A-Za-z0-9._-]{1,100}\Z`, served as an
+  attachment). Each loop's `ended: ...` wording (as the terminal and export word it, rounds counted from 1)
+  appears in the panel of its last round, a wrap-up or error tinting that round's button, with the old
+  inline line kept only for an ending with no round to ride; the user bubble carries a `turn N` badge. No
+  marker rows or ending lines are drawn in the log, and the terminal still prints every ending. A tool
+  round's button ends on the last tool or sub-agent card it asked for, live as on reload, though its
+  record reaches the page before that card does: each call record carries `tool_call_count` (how many
+  tool calls its response requested), and only a round that asked for tools hands its button on.
+- **Those records reach the channel live.** `ChannelUI.show_request` / `show_ending` and the optional
+  `RichChannel.send_request` / `send_ending` carry a `request` frame per completed entry-agent call and an
+  `ending` frame per loop; a sub-agent's appear as `request` and `ending` entries in its own card
+  (`SubagentReporter.append`). That includes a worker built by `compose_subagent`, which hands the run
+  that called it to the spawn as the worker's parent (an injected `ToolContext`, invisible to the model),
+  the way AIMU's spawn tool does when the loop calls it. A channel without the frames shows no round button and gets one plain
+  line for a `wrap_up` or `error` ending only, such as `[assistant] ended: tool-use limit of 10 rounds
+  reached; answered on a forced wrap-up call`. Kokua's terminal channel defines `send_turn` and
+  `send_ending` itself and prints every ending and the `[turn N]` line; no other channel gets the turn
+  line. Every surface counts rounds from 1.
+- **Round buttons, turn badges, and tool character counts wait for a hover.** A round button's tooltip reads
+  `turn X, round Y`, and the button, the turn badge, and a tool card's character count are revealed when
+  their card is hovered or focused (a warning-tinted button stays visible, since endings now live in the
+  panel). On every row the right edge reads info, buttons, then the timestamp, in one column.
+- **Turns are numbered once, and replay shows the round buttons.** `core/conversations.py`'s `turn_numbers`
+  gives each turn its ordinal, skipping loop nudges, agents' messages, and messages typed mid-turn, and the
+  live `[turn N]` line (`ChannelUI.show_turn`; printed by the terminal channel only), the
+  `turn_saved` frame's new `turn` field, the history `user` item's `turn`, and the export's `## Turn N`
+  headings all read it. A reloaded conversation replays each entry-agent round's `request` item right
+  after that round's assistant message and the loop's `ending` at the turn's end, as the live frames
+  arrived; the export renders each ending, a sub-agent card's included, as `_[ended: answered at round 2 of 10]_` or `_[ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call]_`.
 - **Delegated and reviewed work counts toward that same total, with one named exception.** A spawned
   sub-agent and a workflow critic each build their own client, outside the family a turn's own scoped
   sink reaches, so both were invisible to `TurnMetrics` and a heavily delegating turn read as cheap.
@@ -153,6 +204,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   emits no turn event on any client, so wiring `client.events` closes the gap for every other direct
   client call but not this one. A `/plan` turn's recorded cost is short by exactly one call per review
   round, with no qualifier able to say so.
+- **The per-agent cost breakdown names the entry agent by its configured name.** The entry agent's own
+  event sink is now wired beside its client's, so its calls carry its name (`assistant` by default,
+  whatever `[assistant].agent` says otherwise) and a call no run claimed is labelled `unattributed`.
 - **`kokua export` writes a conversation as Markdown.** `transcript_export.render_markdown` renders a
   saved conversation's header, each turn's user message, reasoning, tool calls with their arguments
   and results, sub-agent cards, and what it cost, into one Markdown document a person can read, diff,
@@ -439,6 +493,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
     card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
     `tool_call_id`, since concurrent dispatch appends results in completion order.
+  - **A tool call names the toolset it came from**, as `toolset.tool` (`web.get_web_content`,
+    `core.spawn_subagent`, `github.create_issue` for an MCP server named `github`): the name an
+    `available` list or a `confirm` / `review` entry would use, so what you watch matches what you
+    configure. It shows on live cards, in the terminal's `[tool]` lines, inside sub-agent cards, on
+    approval and auto-approval prompts, on reload, and in a Markdown export. The toolset is resolved
+    for the agent that made the call (`core.agents.toolset_of`), since two toolsets can offer one tool
+    name, and recorded when the turn ends (`metadata["toolsets"]`, per call id; a worker's rides its card
+    entry), so a reload names the toolset that served the call rather than whatever is installed later.
+    A call stored before this, or one no toolset recorded, shows its bare name rather than a guess. The
+    request panel's tool calls stay bare: they show what the model returned, verbatim.
   - **Sub-agent work is visible.** A `spawn_subagent` call renders as
     `subagent  spawn_subagent(<role>)  <status>` over an argument line, then the nested thinking, tool calls,
     and answer the child produced, each individually foldable and built by the same builders and CSS as
@@ -519,6 +583,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     for a front end that wants to render them.) The model and the reasoning effort are not
     runtime-mutable at all: both are read at startup, from `[assistant].model` / `[assistant].thinking`
     or an agent's own `[agents.<name>]` keys. Change them in `config.toml` and restart.
+  - **The header says which model is answering.** A dim label beside the conversation title, carrying
+    the entry agent's resolved model string (`provider:model_id`, endpoint included, exactly the form
+    you could type back into `config.toml`), with every agent that declares its own on a line of the
+    label's tooltip. It arrives as a `models` frame once per connection, sent after `Assistant.start()`
+    returns, and is never refreshed: a model is read as the agents are built, so nothing in a session
+    can change it. Which is the reason to show it at all, since the bullet above is otherwise where
+    this question stops: a startup-only setting has no panel field, and until now the only surface in a
+    running session that named one was `/diag` in the chat. Both front ends ask
+    `build.model_record` rather than working it out apiece, so the page's label and `/diag`'s line
+    cannot drift; the record is fields and the words are each reader's own, the way the sidebar words a
+    task's status for a person and the scheduling tools word it for a model.
   - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
     generation fields anywhere in Kokua's settings. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
@@ -608,6 +683,170 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   mid-turn words as the run reads them.
 
 ### Agents and tools
+
+- **Tool access is three axes, and the config now says so: breaking, with no migration code.** What an
+  agent may call (availability), what is in its context (residency), and what asks before it runs
+  (approval) used to share one list per agent and two global lists. Availability and approval now have
+  their own keys, in one `[agents.<name>.tools]` subtable per agent with `[assistant.tools]` as the default
+  for the approval half, and residency has `resident` (below). The
+  explanation is [Tool access](https://saxman.info/kokua/explanation/tool-access/). The old keys fail
+  startup with a message naming their replacement:
+
+  | Old | New |
+  |---|---|
+  | `[agents.<name>].tools = [...]` | `[agents.<name>.tools].available = [...]` |
+  | `[security].confirm_tools` | `[assistant.tools].confirm`, minus any entry that moves to `review` |
+  | `[security.auto_approval].tools` | `[assistant.tools].review`, and remove those entries from `confirm` |
+
+  The shipped config splits what `confirm_tools` held: `skills.add_skill_script`, `mcp.add_mcp_server`, and
+  `config.update_config` stay in `confirm`, and `compute.run_command`, `compute.execute_python`, and
+  `fs_write` move to `review`, where they prompt you exactly as before unless you switch
+  [auto-approval](https://saxman.info/kokua/explanation/auto-approval/) on. A config that sets neither key
+  keeps the old six-entry gate. `--confirm-tools` now overrides `[assistant.tools].confirm`, and naming a
+  tool the file's `review` also names is refused. `assistant.tools.*` joins the default
+  `locked_config_keys` for newly scaffolded configs only. An existing config writes the list out in full
+  without it (the old `"security.*"` is what covered `confirm_tools`), so add `"assistant.tools.*"` to
+  `[security].locked_config_keys` by hand, or `update_config` can rewrite the default policy; the
+  removed-key message for `[security].confirm_tools` says so.
+- **Each agent's tool calls are judged by its own approval policy.** `confirm` and `review` are one pair:
+  an agent whose table declares either declares its whole policy (a key it leaves out is empty), and one
+  that declares neither inherits `[assistant.tools]`'s pair whole. A declared pair replaces the default and
+  never merges with it. Policies resolve once, after every agent is wired (`core/approval.py`), and the
+  gate is bound to each agent's name: a delegated worker carries its own through AIMU 0.37.0's
+  `"tool_approval"` spec key, and a composed worker is bound to `composed:<label>` and always gets the
+  default tier. So a worker's `fs_write` is held to the worker's policy, where it used to be held to one
+  global list.
+  `review` entries prompt you whether or not auto-approval is on, so switching it off never ungates a call;
+  a dead `review` entry fails startup even with it off; and `never_auto_approve` is checked only when it is
+  on. `[security.auto_approval]` keeps `enabled`, `reviewers`, `timeout_seconds`, and `max_per_turn`.
+  Enabling it with no `review` entry in any policy is a startup error.
+- **Residency: an agent loads part of its capability on demand.** `[agents.<name>.tools].resident` names
+  the toolsets from `available` whose tools are in the agent's context from its first turn. The rest are
+  deferred, and the agent gets AIMU 0.37.0's `available_tools` (every toolset it holds or can load, with
+  its description and which of its tools ask first) and `load_tools(name)`. Its prompt names the deferred
+  toolsets in one line, `Also available, load before use: ...`, and a deferred toolset's guidance arrives
+  with its tools when it loads, not in the prompt. Unset, every available toolset is resident, which is
+  how every shipped worker is declared; an entry outside `available` is a startup error, and
+  `update_config`'s dry run refuses it too. The shipped entry agent keeps `memory`, `config`,
+  `conversations`, `planning`, `capabilities`, `time`, and `messaging` resident and loads `documents`,
+  `skills`, `mcp`, `scheduling`, and `benchmark` on demand. Measured as the JSON of every tool spec it is
+  sent, its tool block falls from 30,560 bytes (all 37 tools) to 16,244 bytes (nineteen: seventeen
+  resident plus the two loaders), 46.8% smaller on every round that loads nothing; a turn that needs a
+  deferred toolset pays one round to load it. `available = "all"` (below) is the one declaration that
+  requires a `resident` list. See
+  [Tool access](https://saxman.info/kokua/explanation/tool-access/#residency-what-is-in-context-and-what-loads-on-demand).
+- **A load pays for the build, and checks approval, when it happens.** A deferred toolset is built when
+  it is loaded, through the same `build_tools` call a resident one gets, so a failure surfaces at load:
+  the model reads `Could not load '<name>': <error>`, you get an alert, and the toolset stays loadable
+  for a retry. A deferred MCP server that is not connected refuses to load rather than loading empty. An
+  approval entry naming a deferred toolset is checked for shape at startup and resolved when the toolset
+  is built, by whichever path builds it (a model's load, a composed worker, a rebuilt agent's preload);
+  one that then matches nothing refuses every build of that toolset, failing closed rather than letting
+  it load ungated. A refused load reads `Could not load`, and a refused `compose_subagent` reads
+  `Could not compose`, each naming the entry, and either raises an alert. With auto-approval enabled,
+  `[security].never_auto_approve` entries for a deferred toolset wait the same way, and a build after which a policy's `review` reaches the floor is refused.
+  A conflict the pending entries' text already settles (`review = ["mcp"]` against the floor's
+  `mcp.add_mcp_server`, or one tool reached by both halves of a pair) fails startup instead of every
+  load.
+  A skill the entry agent's `SkillAgent` holds (every skill when it declares `skills`, otherwise the skills it names) exists from the first turn, so a gate on
+  it resolves at startup, even when a worker could also load that skill later. The shipped gate covers the same
+  seven tools it did: `skills.add_skill_script` and `mcp.add_mcp_server` resolve when their toolset first
+  loads.
+- **A rebuilt agent preloads what its conversation loaded.** On restart, when switching among more than
+  eight conversations evicts an agent, and after a truncation, the rebuilt agent builds the toolsets its
+  transcript's `load_tools` calls loaded, in order, rather than replaying the calls (the builder is
+  synchronous and AIMU's load is async). Only a load whose stored result says it succeeded comes back: a
+  load the approval gate refused stays refused, rather than returning at the next restart, and a failed
+  or cancelled one stays loadable. `available_tools` then lists those as resident rather than
+  loaded. A preload that fails is logged at WARNING, not alerted, and the toolset stays deferred and
+  loadable; a preloaded tool whose name the agent already holds is skipped and logged.
+- **`core.available_tools` and `core.load_tools` are gate names.** Wherever some agent defers a toolset,
+  a bare `core` approval entry covers the two loaders as well as `spawn_subagent` and `activate_skill`,
+  and each can be named on its own.
+- **`[[mcp.server]].description`.** An optional string: the server's line in `available_tools`,
+  `list_capabilities`, and `--list-toolsets`, which is what an agent deferring the server decides by.
+  Unset, it reads `Tools from the MCP server at <url>.`; a non-string is a startup error.
+- **Agent names may not contain `:` or `[`.** The gate reserves them for `composed:<label>` and for the
+  default tier's own label, so an agent named either way would collide with them. Refused at startup.
+- **`kokua agents`, and a startup summary.** `kokua agents` prints each declared agent's availability,
+  residency, and `confirm` / `review` lists, marking which came from `[assistant.tools]`, reading the
+  config alone and building nothing, so it works with the model server down. Startup logs one line per
+  agent to `kokua.log` (for example `assistant: 12 available, 7 resident, 3 confirm, 3 review (from [assistant.tools])`), because a declared
+  policy replacing the default silently dropping its other entries is the one foot-gun the replace-whole
+  rule leaves, and this is where it shows. The same lines go to stderr only when the run logs at DEBUG
+  (`--debug`, or `[logging].level = "DEBUG"`), since `kokua agents` shows them in full on demand.
+- **`--debug`** logs at DEBUG for one run, overriding `[logging].level`, and prints the startup summary.
+- **The approval prompt and the auto-approval card name the agent asking** ("Allow coder to run ...",
+  "<model> auto-approved coder's ..."), on the terminal and on the web card (the `approval` and
+  `auto_approval` frames carry `"agent"`), since agents now hold different policies and a bare tool name no longer says whose call it is.
+- **Breaking for a third-party channel: `RichChannel.send_approval_request` and `send_auto_approval` take
+  an `agent` argument.** The signatures are now `send_approval_request(name, arguments, *, agent=None)`
+  and `send_auto_approval(..., agent=None)`, and `ChannelUI` always passes `agent=` (None when unknown),
+  so a channel still implementing the older form raises `TypeError` the first time a gated call asks. A
+  channel that does not show who is asking can accept and ignore it, which is what adding `agent=None`
+  to the signature does. It is keyword-only for the reason `send_turn_saved`'s `token`
+  is.
+- **The AIMU floor is 0.38.0**, for a `calculate` that evaluates arithmetic and nothing else (it was an
+  escapable `eval`, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
+  of a worker cut off at its round cap. Before it the floor was 0.37.0, for the spawn spec's
+  `"tool_approval"` key and for `ToolGroup`, which residency rides. See the floor history under
+  "Diagnostics and error reporting" below.
+- **A delegating agent hears when its worker ran out of rounds.** A worker's forced wrap-up answer
+  read like a finished one, and the assistant learned it was partial only if the worker said so. AIMU
+  0.38.0's wrap-up prompt asks the worker to name what it did not finish, and its spawn tool leads a
+  capped worker's result with a note naming the cap, so the assistant can say which part is missing
+  instead of relaying partial work as the whole answer.
+- **`available = "all"`: every installed toolset, still a declaration.** An agent's
+  `[agents.<name>.tools].available` takes the string `"all"` in place of a list. It expands, wherever
+  availability is read (`core/agents.py`'s `available_for`), to every registered toolset in trust order:
+  Kokua's own, then third-party plugins, then skills, then MCP servers, registration order kept within
+  each, so where toolsets built together offer one tool name a remote server's never shadows one Kokua
+  ships. It leaves out `entry_point_only` toolsets (`skills`) on any agent but the entry agent, never
+  covers the `core` tools (`spawn_subagent` is still earned by `delegates_to`), and requires a `resident`
+  list, each entry within the expansion; an entry nothing installs, or `skills` on a worker, fails startup
+  saying which. `["all"]`, `"All"`, and `"all"` in any casing inside a list fail startup with the fix, `all`
+  is a reserved toolset name, and `update_config` writes the string (with `[agents.*]` unlocked) and refuses
+  the same near misses. **Upgrading:** an existing skill, plugin, or MCP server named `all` now fails
+  startup, since the name is reserved; rename it. `kokua agents` prints `available: all (N): ...` and the startup summary
+  `name: all (N) available, ...`. The shipped config keeps every agent on a list, with a commented
+  `# available = "all"` line in `[agents.assistant.tools]`. See
+  [Tool access](https://saxman.info/kokua/explanation/tool-access/#available-all-every-installed-toolset-still-declared).
+- **A shadowed resident tool raises an alert at startup.** `build_tools` keeps the first of two
+  same-named tools among toolsets built together and used to say nothing of the other. Once every startup
+  build is done, each declared agent's resident toolsets are checked, and each hidden tool raises
+  `{agent}: {tool} from {shadowed!r} is shadowed by {kept!r} (the earlier resident toolset keeps the
+  name).` "Earlier" is the agent's declared order for a list and trust order for `"all"`. The shared
+  `activate_skill` every skill carries is not counted, since a second skill offering it hides nothing.
+  Startup builds the entry agent and every worker reachable from it by `delegates_to`, so an agent is skipped,
+  and logged at INFO rather than reported as clean, when any of its resident toolsets was built by no
+  agent. A deferred toolset loaded later keeps whichever tool arrived first, and AIMU's load result names
+  the skipped tool and its holder (a group only when the holder was loaded; a resident holder reads
+  `a tool given to this agent directly`).
+- **A skill written mid-session reaches workers.** After each `author_skill`, `add_skill_script`, or
+  `update_skill`, the registry's skill toolsets are rescanned from disk (every other entry kept as startup
+  registered it) and every live agent's `spawn_subagent` is rebuilt, so the skill reaches an
+  `available = "all"` worker on its next spawn and `compose_subagent` on its next call. The entry agent
+  still gets it immediately through its `SkillAgent`. A worker declaring a list gains no new skill, but a
+  skill it already names reaches its next spawn as now written, new scripts included. A gate naming the
+  skill covers those new scripts: every build re-matches each `confirm`, `review`, and
+  `[security].never_auto_approve` entry naming its toolset, adding names and never removing one, and a
+  script write reports each skill's tools as a build before any delegate is rebuilt, so
+  `review = ["weekly-digest"]` holds back a script added mid-session for every agent, the entry agent
+  included. A refresh that fails for any reason is reported in the tool's result, after the write,
+  rather than raised. MCP servers added at
+  runtime still wait for a restart: a new server is a new trust path, a remote host's tools arriving after
+  a person approved only its URL, where a skill's prose and its approved scripts are not. `author_skill`
+  and `add_skill_script` both rebuild the skill tools workers use, retiring the previous skills MCP server
+  rather than closing it, since a worker spawned before may still be calling it; `update_skill` changes no
+  tools and so retires nothing.
+- **`author_skill` refuses a name already taken, before writing anything.** A toolset's name, an MCP
+  server's `name` on file in `config.toml` (including one `add_mcp_server` wrote this session, which the
+  running registry has not seen), `core`, and `all` are refused with a sentence the model can act on.
+  Before, a skill named `web` was written and then stopped the next start as a registry collision. A
+  collision the check cannot see (a skill directory made by hand) comes back with the tool's result.
+- **Composition guidance gives two reasons to compose.** `CAPABILITIES_GUIDANCE` and `list_capabilities`
+  now say to compose a sub-agent when a task needs a capability you do not hold, or when its tool output
+  would flood your context. On an `available = "all"` agent only the second applies.
 
 - **An individual skill is a name in the same namespace as everything else.** A `[agents.*]` table lists
   `"citation-check"` beside `"web"` and `"stocks"` without saying which kind each is, and `--list-toolsets`
@@ -704,10 +943,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   (could the answer have moved since training, could the user check it against a source: current events,
   prices, releases, published figures, who holds a role, what a page says today) rather than as the
   model's own confidence, which is the signal it is worst at reporting. A delegating agent is told to
-  delegate those "even when you think you know"; the `web` toolset, the one AIMU group carrying guidance
-  of its own, tells whoever holds the tools to look it up rather than recall it and to say where the
-  answer came from. The two reach different agents: the shipped `[agents.assistant]` holds no web tools
-  and gets the first, `[agents.researcher]` does not delegate and gets the second.
+  delegate those "even when you think you know"; the `web` toolset's guidance tells whoever holds the
+  tools to look it up rather than recall it and to say where the answer came from. The two reach
+  different agents: the shipped `[agents.assistant]` holds no web tools and gets the first,
+  `[agents.researcher]` does not delegate and gets the second.
+- **Figures and dates are computed, not written.** The `compute` toolset's guidance tells whoever holds
+  it to work out every figure that matters with `calculate` or `execute_python` rather than in prose,
+  converting mixed units to one base unit and reporting what it converted between. A lean delegator,
+  which never holds `compute`, is told instead that arithmetic (a currency or unit conversion, a
+  percentage, a span between dates) is work to delegate with the raw figures and their units. The `time`
+  toolset's guidance tells whoever holds the clock that its sense of the date comes from training: read
+  `get_current_date_and_time` before anything depending on the present, and convert timezones with
+  `convert_time` rather than by adding an offset. These replace directives a user had been writing into
+  their own agents' openers.
 - **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
   `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
   talking to is a prompt, not the capability `[agents.*]` is the single source of. A worker's own
@@ -1128,6 +1376,19 @@ Nothing a toolset contributes reaches an agent until that agent's `tools` list n
 warns you about a name no agent named: a toolset that ships and is never declared costs nothing to leave
 alone. The case that does cost something is a configured MCP server, which connects regardless; see
 [Add MCP services](https://saxman.info/kokua/how-to/add-mcp-services/).
+
+- **The `web` toolset reads a page two ways.** Beside AIMU's `builtin.web` group it builds AIMU's
+  `make_page_tools`: `fetch_page(url, question)` stores the page under `data/pages` and returns its outline
+  plus the passages that best match the question, verbatim with their offsets, and `read_page` /
+  `find_in_page` reach the rest of a stored page by its handle. `get_web_content` stays, for reading a page
+  whole. The guidance prefers `fetch_page`, because a research run that reads several pages otherwise
+  fills its context with them, and says what it costs: the passages are ranked by shared words and can
+  miss an answer worded differently, so the model is told to search or read on before concluding a page
+  does not say something. The store is one directory for every agent, since a handle a worker returns has
+  to be readable by the agent it reports to, and nothing prunes it. The GitHub backup leaves it out. Every
+  agent holding `web` now sends three more tool schemas, about 600 tokens per request.
+  [Set up toolsets](https://saxman.info/kokua/how-to/set-up-toolsets/#reading-pages-fetch_page-or-get_web_content) lists the
+  tradeoffs.
 
 ### Proactive work: scheduled tasks
 
@@ -1623,9 +1884,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   runtime `add_mcp_server`, and the startup `--mcp <url>` flag, both derive a name from the server's host
   and disambiguate it (shared logic) against every other name already claimed -- on file for
   `add_mcp_server`, across the flag's own URLs for `--mcp` -- so neither can produce a config, or a set of
-  servers in one run, the registry's collision check would reject. That derived name still reaches no
-  agent until a human puts it in an `[agents.*]` table, since that section is locked by default: neither
-  can grant itself the capability.
+  servers in one run, the registry's collision check would reject. That derived name reaches no agent in
+  the session that added it, since servers are not re-read mid-session; after a restart it reaches an
+  agent declaring `available = "all"`, and any other only once a human puts it in an `[agents.*]` table,
+  which is locked by default: neither can grant itself the capability. A bearer-token server added at
+  runtime is not written to the file, so `add_mcp_server`'s result now says nothing can use it and its
+  token is not saved, and names the `[[mcp.server]]` entry with `token_env` that would keep it.
 - **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`, a
   required `name`, and an optional `token_env` naming the variable holding that server's token, read
   at startup so the secret stays out of `config.toml`. A `token_env` whose variable is unset logs a
@@ -1645,6 +1909,16 @@ alone. The case that does cost something is a configured MCP server, which conne
   across restarts while a random port is not, so a re-authorization in a later process could present a
   redirect URI the provider had on file under the old port. The authorization message now names the
   callback address it will use, because a redirect landing on the wrong machine is otherwise invisible.
+- **A callback port another program holds is refused before the link is posted, not after it crashes
+  Kokua.** FastMCP binds its callback server only after the browser has been sent to approve. With a
+  pinned `oauth_callback_port` already in use (another local app serving on 8765, in the case that found this),
+  the provider delivered the authorization code to *that* program, and the failed bind then exited the
+  whole process, because uvicorn reports one with `sys.exit(1)` and the `SystemExit` passed every
+  `except Exception` up to the event loop. `ChatOAuth` now binds the callback address itself first. When
+  it cannot, it posts the reason in place of the link, naming the address and `[mcp].oauth_callback_port`,
+  and raises `CallbackUnavailable`, so that server fails to connect and the rest of Kokua carries on. A
+  `SystemExit` from the callback server in the moment between that check and FastMCP's bind is turned
+  into the same error.
 - **Boot logs the tools each server contributed, by name.** This is the only record of a remote server's
   tool list: `config.toml` does not know it, `--list-toolsets` runs before any connection so it can only
   name the server, and `add_mcp_server` reports tool names on a runtime add but a boot reconnect reported
@@ -1925,7 +2199,22 @@ notice on startup.
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
-  Today the floor is **0.34.0**, the first one a rename alone has moved: AIMU renamed its
+  The check now probes `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds and which no
+  AIMU release contains yet. The floor stays at **0.38.0**, because a sibling on AIMU main still reports
+  that version and a 0.39.0 floor would refuse it, so an AIMU installed from PyPI passes the floor and is
+  then refused by the probe. The message says no release has the page tools yet, rather than offering
+  `--no-sources` and PyPI, the install that just failed. When 0.39.0 ships, the floor moves to it.
+  Before that the probe was a signature check on `RunEvent` for `run_id`, which the floor covers now.
+  Today the floor is **0.38.0**: `calculate` evaluates an allowlisted syntax tree rather than an escapable
+  `eval`, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
+  symbol for the startup check to look for, so the check stays where it was and the floor alone covers
+  both. Before it the floor was **0.37.0**: a spawned worker's spec carries a `"tool_approval"` key, which is what lets
+  each agent's tool calls be judged by its own approval policy; its absence raises loudly, so the startup
+  check stays where it was. Residency rides the same release's `ToolGroup`, and the check skips it for the
+  same reason: the core imports it at module scope, so an AIMU without it fails at import, after the
+  check and before any conversation. Before it the floor was **0.36.0**: every run event carries `run_id` and
+  `parent_run_id`, which the request records behind "what the model saw" are keyed by, and the startup
+  check is a signature check on `aimu.events.RunEvent` for its `run_id` field. Before that it was **0.34.0**, the first one a rename alone moved: AIMU renamed its
   mid-turn-message seam from `Steering` to `Inbox`, with no legacy path, and taught it which agent is
   opening each reader. `Inbox.reader(agent=...)` is called once per run, at its start, and `agent` is
   that run's own name, offered so a host can route a message to the one run it was meant for rather than
@@ -1973,7 +2262,9 @@ notice on startup.
   `AIMU_LANGUAGE_MODEL`, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
   invalid, `Assistant.start()` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
-  prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
+  prints it and exits non-zero, the web UI shows it in the chat and prints it to the launch terminal in
+  the CLI's `[error]` form (the `kokua` logger writes only to the file log, so the terminal otherwise
+  said nothing about a server that could not build an assistant). Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
   tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
   finishing with it releases that guard, so a later connection is not wrongly refused as "busy in another
@@ -1985,13 +2276,24 @@ notice on startup.
   "Disconnected." `build_app` now validates the agent tables while building the app, so `kokua
   --frontend web` and `kokua-web` both print the offending name and exit 2, which is what the CLI front
   end already did. A `ConfigError` reaching a connection anyway -- the registry is rebuilt per
-  connection, so a skill deleted from disk under a running server is one -- is shown in the chat, like a
-  model-client failure.
+  connection, so a skill deleted from disk under a running server is one -- is shown in the chat and
+  printed to the terminal, like a model-client failure.
 - **Hang observability.** `/diag` reports the in-flight turn, elapsed time, whether the turn gate is
   held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
   `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines, level set by `[logging] level`.
   `faulthandler` is enabled, so `kill -USR1 <pid>` dumps all thread stacks.
+- **The MCP SDK's own errors are logged where they can be read.** The `mcp` SDK logger has no handler of
+  its own and propagates, so every `logger.exception` it raised fell through to `logging.lastResort`,
+  which writes to stderr at WARNING+ with no timestamp, no logger name, and no server URL. Reconnecting
+  several servers at boot runs their OAuth flows one at a time behind a single callback port, so a
+  failed client registration on one server printed a bare traceback to the terminal directly beneath a
+  *different* server's authorization URL, reading as that flow having failed when it had in fact
+  succeeded. `logging_setup` now attaches the rotating file handler to `mcp` alongside `kokua` and
+  `aimu`, which suppresses `lastResort`, and nothing is lost from the console: `kokua.mcp.servers`
+  already logs the same failure to that file with the server URL and the full traceback. `fastmcp` is
+  deliberately left alone, since it configures its own stderr handler at import, sets
+  `propagate = False`, and removes whatever handlers are already on the logger.
 - **A slow control cannot wedge the web UI.** `frontends/web.py`'s `pump` is two tasks over one queue:
   one reads the WebSocket, one applies frames in arrival order. Reading has to continue regardless of how
   long a control takes, because a disconnect *is* a read and that reader is the only task positioned to
@@ -2006,6 +2308,13 @@ notice on startup.
   `cancel_turn` that precedes it. Whichever half of the pump finishes first ends the connection, in both
   directions: an error while applying ends the reader too, which would otherwise queue frames into a
   drain nobody reads.
+- **A reload reconnects on the first try.** The reloaded page used to connect while the connection it
+  replaced was still tearing down (closing each remote MCP session is a network round trip), and the
+  one-connection guard, still held, refused it as "busy in another tab"; a second reload worked only
+  because it landed later. The guard now tells a closing holder from a live one: a connection arriving
+  during a teardown waits for it, bounded by `TEARDOWN_WAIT_SECONDS` in `frontends/web.py`, and one that
+  outwaits that bound is told the previous connection is still closing. A second tab open beside a live
+  one is refused at once, as before.
 
 ### Known limitations
 

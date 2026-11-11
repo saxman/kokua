@@ -41,7 +41,7 @@ def test_memory_and_documents_are_separate_toolsets_with_their_own_guidance():
 
 
 def test_skills_builds_the_authoring_and_script_tools(tmp_path):
-    """Only the two authoring tools. The catalogue, `activate_skill`, and one tool per skill script come
+    """Only the three authoring tools. The catalogue, `activate_skill`, and one tool per skill script come
     from AIMU's `SkillAgent` regardless of whether this toolset is declared."""
 
     class FakeAgent:

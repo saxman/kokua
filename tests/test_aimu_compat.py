@@ -32,6 +32,7 @@ def test_the_installed_aimu_satisfies_the_floor():
 
 
 def test_an_old_version_names_both_fixes(monkeypatch):
+    monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
     monkeypatch.setattr(aimu_compat, "version", lambda name: "0.12.0")
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
@@ -177,26 +178,53 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_release_the_floor_names():
-    """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
+def test_the_probe_targets_the_page_tools_the_web_toolset_builds():
+    """The surface today is ``aimu.tools.builtin.make_page_tools``, which no AIMU release contains yet.
 
-    The surface today is ``aimu.agents.Inbox``: AIMU renamed its mid-turn-message seam from ``Steering``
-    to ``Inbox``, with no legacy path, and taught it which agent is opening each reader, so a sibling
-    still on the previous branch has ``Steering`` and no ``Inbox`` at all.
-
-    A plain name lookup, not a signature check: unlike the parameter it replaces, the capability here is
-    the export itself, so nothing else has to be true of a checkout once the class is importable.
+    It is a name lookup: the factory is a new export, so its presence alone dates a checkout. It landed
+    after every 0.38.0 capability, so a sibling that has it has the rest of what the floor names.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
-    assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.agents"
+    assert callable(getattr(module, aimu_compat._PROBE_SYMBOL, None))
+    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "Inbox"
+    assert aimu_compat._PROBE_SYMBOL == "make_page_tools"
     assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
+    assert aimu_compat._PROBE_UNRELEASED == "0.39.0"
+
+
+def test_an_aimu_release_without_page_tools_is_told_no_release_has_them(monkeypatch):
+    """A PyPI AIMU 0.38.0 clears the floor and lacks the probe. The usual remedy, installing the floor
+    from PyPI, is the install that just failed, so the message must say no release carries the surface
+    yet rather than send the user round in a circle."""
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/builtin.py"),
+    )
+    with pytest.raises(AimuVersionError) as excinfo:
+        require_aimu()
+    message = str(excinfo.value)
+    assert "make_page_tools" in message
+    assert "no AIMU release" in message and "0.39.0" in message
+    assert "--no-sources" not in message
+
+
+def test_the_floor_covers_the_run_ids_the_probe_no_longer_grips():
+    """0.36.0's probe surface is the floor's job now that ``make_page_tools`` holds the one probe slot.
+
+    ``core/requests.py`` keys every recorded call by ``RunEvent.run_id``, and an AIMU without the field
+    fails in silence (the sink raises per event and AIMU swallows it), so it stays pinned here.
+    """
+    import inspect
+
+    from aimu.events import RunEvent
+
+    assert "run_id" in inspect.signature(RunEvent).parameters
 
 
 def test_the_floor_covers_the_skill_update_tool_the_probe_no_longer_grips():
@@ -490,16 +518,109 @@ def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
     assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_34_0():
+def test_the_floor_is_0_38_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 34, 0)
+    assert MINIMUM_AIMU == (0, 38, 0)
 
 
-def test_the_probe_grips_the_inbox_protocol():
+def test_the_floor_covers_a_calculate_that_runs_no_code():
+    """The shipped policy leaves ``compute.calculate`` ungated because it runs no code of the model's,
+    which was false while it was ``eval`` with an empty builtins dict: the first expression here walked
+    from a tuple to ``os``. No symbol dates the fix, so it is pinned by behavior instead of probed."""
+    from aimu.tools.builtin import calculate
+
+    assert calculate("().__class__.__base__.__subclasses__()").startswith("Error:")
+    assert calculate("2^10").startswith("Error:")
+    assert calculate("2**10") == "1024"
+
+
+def test_the_floor_covers_the_note_on_a_worker_cut_off_at_its_cap():
+    """How a delegating agent learns a worker's answer is partial. A private helper and a string, so it
+    is pinned here by behavior rather than probed."""
+    from aimu.events import RunFinished
+    from aimu.tools.builtin import _RunEndingWatch, _subagent_result
+
+    watch = _RunEndingWatch(None, "run-1")
+    watch(RunFinished(run_id="run-1", ended_by="wrap_up", max_iterations=25))
+    result = _subagent_result("researcher", "partial findings", watch)
+
+    assert result.startswith("[The sub-agent 'researcher' reached its tool-use limit of 25 rounds")
+    assert result.endswith("partial findings")
+
+
+def test_the_floor_covers_the_per_worker_gate_the_probe_does_not_grip():
+    """``"tool_approval"`` is a member of a closed key set, so an AIMU predating it raises ``ValueError``
+    naming the key when the spawn factory is called: loud, which is why the one probe slot stays on
+    ``RunEvent.run_id``, a capability whose absence is silent. Pinned here as a fact about the release."""
+    from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
+
+    assert "tool_approval" in SUBAGENT_SPEC_KEYS
+
+
+def test_the_floor_covers_the_tool_group_residency_rides():
+    """``ToolGroup`` shipped in 0.37.0 beside the gate key, and residency (``core/build.py``'s
+    ``tool_groups_for``) now rides it. It is the floor's job rather than the probe's because
+    ``core/build.py`` imports it at module scope: a checkout without it fails loudly with ``ImportError``
+    when the core is imported, after the preflight and before any conversation exists."""
+    from aimu.tools import ToolGroup
+
+    assert ToolGroup is not None
+
+
+def test_aimu_still_opens_a_successful_load_result_the_way_restoring_reads_it():
+    """A rebuilt agent restores only the loads whose stored result says they succeeded
+    (``core/build.py``'s ``loaded_toolsets_in``), and the only record of success is AIMU's result text. If
+    that text changed, every restore would quietly stop and each conversation would come back with its
+    loads gone; this pins the text against a real load on AIMU's own ``Agent``."""
+    import asyncio
+
+    from aimu import aio
+    from aimu.tools import ToolGroup
+
+    from kokua.core.build import loaded_toolsets_in
+    from tests.helpers import MockAsyncModelClient
+
+    def tiny_tool() -> str:
+        """Do nothing."""
+        return ""
+
+    group = ToolGroup("tiny", "a tiny group", build=lambda: [tiny_tool])
+    agent = aio.Agent(MockAsyncModelClient([]), tools=[], tool_groups=[group])
+
+    async def load_twice() -> tuple[str, str]:
+        return await agent.load_tool_group("tiny"), await agent.load_tool_group("tiny")
+
+    loaded, again = asyncio.run(load_twice())
+
+    def stored(content: str) -> list[dict]:
+        call = {"id": "a", "type": "function", "function": {"name": "load_tools", "arguments": {"name": "tiny"}}}
+        return [{"role": "assistant", "tool_calls": [call]}, {"role": "tool", "tool_call_id": "a", "content": content}]
+
+    assert loaded.startswith("Loaded 'tiny':")
+    assert loaded_toolsets_in(stored(loaded)) == ["tiny"]
+    assert loaded_toolsets_in(stored(again)) == []
+
+
+def test_the_floor_covers_the_inbox_protocol_the_probe_no_longer_grips():
+    """0.34.0's probe surface is the floor's job now that ``RunEvent.run_id`` holds the one probe slot."""
     from aimu.agents import Inbox
 
     assert Inbox is not None
+
+
+def test_the_floor_covers_what_kokua_reads_off_0_36_0s_events():
+    """Everything #22 reads off AIMU's events beyond ``run_id``, which only the floor guarantees."""
+    import dataclasses
+
+    from aimu.events import ModelTurnFinished, RequestPrepared, RunFinished
+
+    def fields(cls):
+        return {field.name for field in dataclasses.fields(cls)}
+
+    assert {"endpoint", "payload", "run_id", "parent_run_id"} <= fields(RequestPrepared)
+    assert {"stop_reason", "tool_calls", "thinking"} <= fields(ModelTurnFinished)
+    assert {"ended_by", "max_iterations"} <= fields(RunFinished)
 
 
 def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monkeypatch):

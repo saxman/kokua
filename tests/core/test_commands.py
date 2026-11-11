@@ -35,7 +35,7 @@ def _registry(*toolsets: Toolset):
 
 def test_a_declared_workflow_gets_its_command():
     agents = example_agents()
-    agents["assistant"].tools = ["planning"]
+    agents["assistant"].available = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", "plan"))
@@ -62,7 +62,7 @@ def test_a_workflow_claiming_a_serve_loop_command_fails_at_startup(command):
     it can still name the fix rather than left to be discovered at the prompt.
     """
     agents = example_agents()
-    agents["assistant"].tools = ["shadow"]
+    agents["assistant"].available = ["shadow"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="shadow", description="S.", build=lambda ctx: [], workflow=_workflow("shadow", command))
@@ -76,7 +76,7 @@ def test_a_workflow_claiming_a_serve_loop_command_fails_at_startup(command):
 
 def test_an_undeclared_workflow_gets_no_command():
     agents = example_agents()
-    agents["assistant"].tools = ["time"]
+    agents["assistant"].available = ["time"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="time", description="T.", build=lambda ctx: []),
@@ -88,7 +88,7 @@ def test_an_undeclared_workflow_gets_no_command():
 
 def test_a_workflow_may_not_claim_a_reserved_command():
     agents = example_agents()
-    agents["assistant"].tools = ["stopper"]
+    agents["assistant"].available = ["stopper"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("stopper", "stop"))
@@ -100,7 +100,7 @@ def test_a_workflow_may_not_claim_a_reserved_command():
 
 def test_undeclared_workflow_commands_excludes_declared_and_includes_undeclared():
     agents = example_agents()
-    agents["assistant"].tools = ["declared"]
+    agents["assistant"].available = ["declared"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="declared", description="D.", build=lambda ctx: [], workflow=_workflow("declared", "d")),
@@ -112,7 +112,7 @@ def test_undeclared_workflow_commands_excludes_declared_and_includes_undeclared(
 
 def test_two_workflows_may_not_claim_one_command():
     agents = example_agents()
-    agents["assistant"].tools = ["a", "b"]
+    agents["assistant"].available = ["a", "b"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="a", description="A.", build=lambda ctx: [], workflow=_workflow("a", "go")),
@@ -127,7 +127,7 @@ def test_a_workflow_must_share_its_toolsets_name():
     """A workflow's settings are its toolset's ``[<name>]`` section, resolved by the workflow's name, so a
     disagreeing name would hand the workflow either nothing or another capability's section."""
     agents = example_agents()
-    agents["assistant"].tools = ["widgets"]
+    agents["assistant"].available = ["widgets"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="widgets", description="W.", build=lambda ctx: [], workflow=_workflow("gadgets", "go"))
@@ -142,7 +142,7 @@ def test_a_workflow_must_share_its_toolsets_name():
 
 def test_an_empty_command_is_rejected():
     agents = example_agents()
-    agents["assistant"].tools = ["planning"]
+    agents["assistant"].available = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", ""))
@@ -154,7 +154,7 @@ def test_an_empty_command_is_rejected():
 
 def test_a_command_containing_whitespace_is_rejected():
     agents = example_agents()
-    agents["assistant"].tools = ["planning"]
+    agents["assistant"].available = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", "do it"))
@@ -169,7 +169,7 @@ def test_a_non_lowercase_command_is_rejected():
     reached -- and worse, it would slip past the reserved-word check under its own, different case
     (``"Stop"`` isn't ``"stop"``) and then be silently shadowed by the real `/stop` at runtime."""
     agents = example_agents()
-    agents["assistant"].tools = ["stopper"]
+    agents["assistant"].available = ["stopper"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("stopper", "Stop"))
@@ -288,7 +288,7 @@ async def test_an_undeclared_workflow_command_gets_an_actionable_reply_and_start
     assistant1._store.close()  # flush TinyDB before assistant2 reopens the same file
 
     agents = example_agents()
-    agents["assistant"].tools = [name for name in agents["assistant"].tools if name != "planning"]
+    agents["assistant"].available = [name for name in agents["assistant"].available if name != "planning"]
     channel2 = FakeChannel(inbound=["/plan do the thing"])
     assistant2 = await Assistant.create(
         _config(tmp_path, agents=agents), channel2, client=MockAsyncModelClient(["should not run"])
@@ -298,7 +298,7 @@ async def test_an_undeclared_workflow_command_gets_an_actionable_reply_and_start
 
     assert channel2.sent == [
         "The 'planning' toolset offers /plan, but no agent declares it. Add 'planning' to "
-        "[agents.assistant].tools in your config.toml."
+        "[agents.assistant.tools].available in your config.toml."
     ]
     after = [dict(m) for m in assistant2._store.get(assistant2._active_id).messages]
     assert after == before

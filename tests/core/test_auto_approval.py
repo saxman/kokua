@@ -8,6 +8,7 @@ from aimu.models import parse_json_response
 
 from kokua.config import ConfigError
 from kokua.config.schema import AssistantConfig, ResolvedReviewer, ReviewerConfig
+from kokua.core.agents import build_registry
 from kokua.core.assistant import Assistant
 from kokua.core.auto_approval import (
     MAX_FIELD_CHARS,
@@ -19,9 +20,10 @@ from kokua.core.auto_approval import (
     build_packet,
     current_review_context,
     decide,
+    resolve_auto_approval,
     review_call,
 )
-from tests.channels import FakeChannel, _config
+from tests.channels import FakeChannel, _config, example_agents
 from tests.helpers import MockAsyncModelClient
 
 
@@ -165,10 +167,21 @@ def test_the_fence_check_is_not_case_sensitive_and_catches_a_bare_tag(forgery):
 _REVIEWER = "approval"
 
 
+#: The shipped confirm list with `run_command` moved out of it: a tool in both halves of a policy is a
+#: startup error, so a test putting it in `default_review` has to take it out of `default_confirm`.
+_CONFIRM_WITHOUT_RUN_COMMAND = [
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+    "compute.execute_python",
+    "fs_write",
+    "config.update_config",
+]
+
+
 def _auto(**overrides) -> dict:
     """The auto-approval half of a config, defaulted to a gate that resolves cleanly.
 
-    `run_command` is the tool because the shipped `[security].confirm_tools` gates it and
+    `run_command` is the tool because the shipped `[assistant.tools].review` names it and
     `[security].never_auto_approve` does not hold it back, which is the only combination a reviewer may
     be asked about.
     """
@@ -176,7 +189,8 @@ def _auto(**overrides) -> dict:
         model="ollama:a",
         auto_approval_enabled=True,
         auto_approval_reviewers=[_REVIEWER],
-        auto_approval_tools=["compute.run_command"],
+        default_confirm=_CONFIRM_WITHOUT_RUN_COMMAND,
+        default_review=["compute.run_command"],
         reviewers={_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it")},
     )
     fields.update(overrides)
@@ -212,7 +226,8 @@ async def test_disabled_resolves_to_nothing(tmp_path):
         tmp_path,
         auto_approval_enabled=False,
         auto_approval_reviewers=[],
-        auto_approval_tools=["totally_made_up_toolset"],
+        default_confirm=_CONFIRM_WITHOUT_RUN_COMMAND,
+        default_review=[],
         reviewers={},
     )
     assert resolved is None
@@ -220,7 +235,6 @@ async def test_disabled_resolves_to_nothing(tmp_path):
 
 async def test_resolves_tool_names_and_the_reviewer(tmp_path):
     auto = await _resolve(tmp_path)
-    assert auto.tools == frozenset({"run_command"})
     assert auto.toolset_of["run_command"] == "compute"
     assert [reviewer.name for reviewer in auto.reviewers] == [_REVIEWER]
     assert auto.reviewers[0].model == "ollama:qwen3:8b"
@@ -266,37 +280,56 @@ async def test_inherited_thinking_is_not_a_declared_key(tmp_path):
     generation alone."""
     auto = await _resolve(tmp_path, thinking="high")
     assert auto.reviewers[0].thinking == "high"
-    assert auto.tools == frozenset({"run_command"})
 
 
-async def test_enabled_with_no_tools_fails(tmp_path):
-    with pytest.raises(ConfigError, match="names no tool"):
-        await _resolve(tmp_path, auto_approval_tools=[])
+async def test_auto_approval_requires_a_review_entry_somewhere(tmp_path):
+    with pytest.raises(ConfigError, match=r"no review list names a tool"):
+        await _resolve(tmp_path, default_confirm=_CONFIRM_WITHOUT_RUN_COMMAND, default_review=[])
+
+
+async def test_a_review_entry_on_one_agent_is_enough(tmp_path):
+    """The default tier names nothing, but coder reviews run_command, so there is something to act on."""
+    agents = example_agents()
+    agents["coder"] = dataclasses.replace(agents["coder"], confirm=[], review=["compute.run_command"])
+    auto = await _resolve(tmp_path, agents=agents, default_confirm=_CONFIRM_WITHOUT_RUN_COMMAND, default_review=[])
+    assert auto.toolset_of["run_command"] == "compute"
 
 
 async def test_a_tool_entry_naming_nothing_fails_with_the_near_miss(tmp_path):
-    """The same vocabulary confirm_tools uses, so the same misspelling gets the same suggestion, and
-    the closing sentence says what this list's dead entry costs: a prompt that still arrives."""
+    """The same vocabulary a confirm list uses, so the same misspelling gets the same suggestion, and
+    the message says a dead entry gates nothing, since a review entry is itself a gate."""
     with pytest.raises(ConfigError) as error:
-        await _resolve(tmp_path, auto_approval_tools=["compute.run_commnd"])
+        await _resolve(tmp_path, default_review=["compute.run_commnd"])
     message = str(error.value)
-    assert "[security.auto_approval].tools" in message
+    assert "[assistant.tools].review" in message
     assert "compute.run_commnd" in message and "run_command" in message
-    assert "still stops and asks" in message
+    assert "would gate nothing" in message
 
 
 async def test_a_floored_tool_cannot_be_reviewed(tmp_path):
     """update_config changes what may act later, so approving one call stops constraining anything:
     [security].never_auto_approve holds it back whatever this list says."""
     with pytest.raises(ConfigError, match="never_auto_approve"):
-        await _resolve(tmp_path, auto_approval_tools=["config.update_config"])
+        await _resolve(
+            tmp_path,
+            default_confirm=[entry for entry in _CONFIRM_WITHOUT_RUN_COMMAND if entry != "config.update_config"],
+            default_review=["config.update_config"],
+        )
 
 
-async def test_reviewing_an_ungated_tool_fails(tmp_path):
-    """calculate is a real tool of a real toolset, and nothing gates it: reviewing it saves no prompt,
-    because that call already runs without one."""
-    with pytest.raises(ConfigError, match="which nothing gates"):
-        await _resolve(tmp_path, auto_approval_tools=["compute.calculate"])
+async def test_auto_approval_refuses_a_floored_tool_in_any_review(tmp_path):
+    """The floor is checked against every agent's own review list, and the message names the table to edit."""
+    agents = example_agents()
+    coder = agents["coder"]
+    agents["coder"] = dataclasses.replace(
+        coder, available=[*coder.available, "config"], confirm=[], review=["config.update_config"]
+    )
+    message = (
+        r"\[agents\.coder\.tools\]\.review reaches update_config, "
+        r"which \[security\]\.never_auto_approve holds back"
+    )
+    with pytest.raises(ConfigError, match=message):
+        await _resolve(tmp_path, agents=agents)
 
 
 async def test_a_reviewer_on_the_assistants_own_model_warns_and_still_resolves(tmp_path, caplog):
@@ -357,7 +390,6 @@ def auto() -> AutoApproval:
     the call, and a start would only supply a tool vocabulary nothing on this path reads.
     """
     return AutoApproval(
-        tools=frozenset({"run_command"}),
         toolset_of={"run_command": "compute"},
         reviewers=(_resolved(_REVIEWER, "ollama:b"),),
         timeout_seconds=10.0,
@@ -687,3 +719,262 @@ async def test_an_approving_quorum_names_every_model(monkeypatch, auto_quorum, i
     monkeypatch.setattr("kokua.core.auto_approval._build_client", _Agreeing)
     outcome = await review_call(auto_quorum, tool="run_command", arguments={"command": "ls"})
     assert outcome == Outcome(approved=True, reason="safe enough", model="ollama:b,ollama:c")
+
+
+# Residency: review and floor entries may name a toolset nobody has built yet. Hand-built state, since
+# nothing defers at wiring yet.
+
+
+def _pending_auto(tmp_path, available=("memory", "mcp", "compute"), resident=("memory",), **overrides):
+    from types import SimpleNamespace
+
+    from kokua.config.schema import AgentConfig
+    from kokua.core.approval import resolve_approval_policies
+    from kokua.registry.context import LiveState
+
+    agents = {"assistant": AgentConfig(available=list(available), resident=list(resident))}
+    fields = dict(
+        data_dir=tmp_path,
+        agents=agents,
+        entry_agent="assistant",
+        model="ollama:a",
+        auto_approval_enabled=True,
+        auto_approval_reviewers=[_REVIEWER],
+        reviewers={_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it")},
+        default_confirm=[],
+        default_review=[],
+        never_auto_approve=[],
+    )
+    fields.update(overrides)
+    config = AssistantConfig(**fields)
+    state = LiveState(config=config, registry=build_registry(config))
+    state.tools_by_toolset = {name: {f"{name}_tool"} for name in resident}
+    entry_agent = SimpleNamespace(tools=[])
+    policies = resolve_approval_policies(config, state, entry_agent)
+    return config, state, entry_agent, policies
+
+
+def test_every_review_entry_pending_still_starts(tmp_path):
+    config, state, entry_agent, policies = _pending_auto(tmp_path, default_review=["mcp.add_mcp_server"])
+    assert resolve_auto_approval(config, state, entry_agent, policies) is not None
+
+
+def test_a_floor_entry_naming_a_deferred_toolset_starts(tmp_path):
+    """The shipped shape: the floor names mcp.add_mcp_server and the entry agent defers mcp."""
+    config, state, entry_agent, policies = _pending_auto(
+        tmp_path,
+        available=("compute", "mcp"),
+        resident=("compute",),
+        default_review=["compute"],
+        never_auto_approve=["mcp.add_mcp_server"],
+    )
+    auto = resolve_auto_approval(config, state, entry_agent, policies)
+    assert auto.pending_floor == frozenset({"mcp.add_mcp_server"})
+
+
+def test_a_malformed_floor_entry_for_a_deferred_toolset_still_fails_startup(tmp_path):
+    config, state, entry_agent, policies = _pending_auto(
+        tmp_path, default_review=["mcp.add_mcp_server"], never_auto_approve=["mcp.add*"]
+    )
+    with pytest.raises(ConfigError, match="hold nothing back"):
+        resolve_auto_approval(config, state, entry_agent, policies)
+
+
+_CONFIRM_WITHOUT_MCP = [entry for entry in _CONFIRM_WITHOUT_RUN_COMMAND if entry != "mcp.add_mcp_server"]
+
+
+@pytest.mark.parametrize("entry", ["mcp", "mcp.*"])
+async def test_a_review_of_a_deferred_toolset_reaching_the_shipped_floor_fails_startup(tmp_path, entry):
+    """The shipped entry agent defers ``mcp`` and the shipped floor names ``mcp.add_mcp_server``, so a
+    whole-toolset review entry is certain to reach it once ``mcp`` builds. Waiting for that build would
+    refuse every load of ``mcp`` instead of the one startup the docs promise refuses."""
+    with pytest.raises(
+        ConfigError,
+        match=r"\[assistant\.tools\]\.review reaches mcp\.add_mcp_server, "
+        r"which \[security\]\.never_auto_approve holds back",
+    ):
+        await _resolve(tmp_path, default_confirm=_CONFIRM_WITHOUT_MCP, default_review=["compute.run_command", entry])
+
+
+def test_a_whole_toolset_floor_entry_reached_by_a_pending_tool_review_fails_startup(tmp_path):
+    with pytest.raises(ConfigError, match=r"review reaches mcp\.remove_mcp_server, which"):
+        _pending_auto_resolved(tmp_path, default_review=["mcp.remove_mcp_server"], never_auto_approve=["mcp"])
+
+
+def test_the_same_pending_tool_in_review_and_floor_fails_startup(tmp_path):
+    with pytest.raises(ConfigError, match=r"review reaches mcp\.add_mcp_server, which"):
+        _pending_auto_resolved(
+            tmp_path, default_review=["mcp.add_mcp_server"], never_auto_approve=["mcp.add_mcp_server"]
+        )
+
+
+async def test_a_review_of_another_tool_in_the_floors_deferred_toolset_still_starts(tmp_path):
+    auto = await _resolve(
+        tmp_path, default_confirm=_CONFIRM_WITHOUT_MCP, default_review=["compute.run_command", "mcp.remove_mcp_server"]
+    )
+    assert "mcp.add_mcp_server" in auto.pending_floor
+
+
+async def test_with_auto_approval_off_a_review_reaching_the_floor_still_starts(tmp_path):
+    """The floor bounds what a reviewer may approve, so with no reviewer it bounds nothing."""
+    resolved = await _resolve(
+        tmp_path,
+        auto_approval_enabled=False,
+        default_confirm=_CONFIRM_WITHOUT_MCP,
+        default_review=["compute.run_command", "mcp"],
+    )
+    assert resolved is None
+
+
+def _pending_auto_resolved(tmp_path, **overrides):
+    config, state, entry_agent, policies = _pending_auto(tmp_path, **overrides)
+    return resolve_auto_approval(config, state, entry_agent, policies)
+
+
+def _reaching_the_floor_only_once_built(tmp_path):
+    """A gate whose review reaches the floor only once ``mcp`` builds, which startup cannot see.
+
+    The text of ``review = ["mcp"]`` against ``mcp.add_mcp_server`` is refused at startup, so the
+    conflict here is the kind only a build can reveal: a review list naming the tool through another
+    toolset that provides the same name, which is resolved already while the floor entry waits.
+    """
+    config, state, entry_agent, policies = _pending_auto(
+        tmp_path, default_review=["mcp.remove_mcp_server"], never_auto_approve=["mcp.add_mcp_server"]
+    )
+    auto = resolve_auto_approval(config, state, entry_agent, policies)
+    default = dataclasses.replace(policies.default, review=policies.default.review | {"add_mcp_server"})
+    return dataclasses.replace(policies, default=default), auto
+
+
+def test_building_a_toolset_whose_review_reaches_the_floor_is_refused(tmp_path):
+    policies, auto = _reaching_the_floor_only_once_built(tmp_path)
+    names = frozenset({"add_mcp_server", "remove_mcp_server"})
+    with pytest.raises(
+        ConfigError,
+        match=r"\[assistant\.tools\]\.review reaches add_mcp_server, which \[security\]\.never_auto_approve holds back",
+    ):
+        auto.with_built(policies.with_built("mcp", names), "mcp", names)
+
+
+def test_building_a_toolset_that_misses_the_floor_resolves_it_and_labels_the_tools(tmp_path):
+    config, state, entry_agent, policies = _pending_auto(
+        tmp_path, default_review=["mcp.remove_mcp_server"], never_auto_approve=["mcp.add_mcp_server"]
+    )
+    auto = resolve_auto_approval(config, state, entry_agent, policies)
+    names = frozenset({"add_mcp_server", "remove_mcp_server"})
+    updated = auto.with_built(policies.with_built("mcp", names), "mcp", names)
+    assert updated.toolset_of["remove_mcp_server"] == "mcp"
+    assert updated.pending_floor == frozenset()
+    assert updated.floor == frozenset({"add_mcp_server"})
+    assert auto.pending_floor == frozenset({"mcp.add_mcp_server"})  # the original is unchanged
+
+
+async def test_a_refused_build_leaves_the_old_policies_and_auto_approval_in_place(tmp_path):
+    policies, auto = _reaching_the_floor_only_once_built(tmp_path)
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assistant._human.policies = policies
+        assistant._human.auto_approval = auto
+        with pytest.raises(ConfigError, match="never_auto_approve holds back"):
+            assistant._on_toolset_built("mcp", frozenset({"add_mcp_server", "remove_mcp_server"}))
+        assert assistant._human.policies is policies
+        assert assistant._human.auto_approval is auto
+    finally:
+        assistant._state.close()
+
+
+# A skill on the entry agent is never deferred (its SkillAgent advertises every skill), so a review or
+# floor entry naming one resolves at startup like any other, rather than waiting for a build that never
+# comes.
+
+
+def _agents_with_skill() -> dict:
+    agents = example_agents()
+    entry = agents["assistant"]
+    assert entry.resident is not None
+    agents["assistant"] = dataclasses.replace(entry, available=[*entry.available, "weekly-digest"])
+    return agents
+
+
+async def _started_with_skill(tmp_path, **overrides):
+    from tests.core.test_approval import _write_skill
+
+    config = _config(tmp_path, **_auto(agents=_agents_with_skill(), **overrides))
+    _write_skill(config)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        return assistant._human.policies, assistant._human.auto_approval
+    finally:
+        assistant._state.close()
+
+
+async def test_a_review_entry_on_an_entry_agent_skill_resolves_at_startup(tmp_path):
+    policies, auto = await _started_with_skill(tmp_path, default_review=["weekly-digest"], never_auto_approve=[])
+    assert policies.default.pending_review == frozenset()
+    reviewed = {tool for tool, toolset in auto.toolset_of.items() if toolset == "weekly-digest"}
+    assert reviewed and reviewed <= policies.default.review
+
+
+async def test_a_floor_entry_on_a_skill_a_worker_defers_is_checked_at_startup_when_the_entry_agent_holds_it(
+    tmp_path,
+):
+    """The entry agent's SkillAgent holds the skill from the first turn, so a worker that could load it
+    later does not make its floor entry wait: a review reaching it is refused at startup."""
+    from tests.core.test_approval import _write_skill
+
+    agents = example_agents()
+    worker = agents["researcher"]
+    agents["researcher"] = dataclasses.replace(
+        worker, available=[*worker.available, "weekly-digest"], resident=list(worker.available)
+    )
+    config = _config(
+        tmp_path, **_auto(agents=agents, default_review=["weekly-digest"], never_auto_approve=["weekly-digest"])
+    )
+    _write_skill(config)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        with pytest.raises(ConfigError, match="never_auto_approve holds back"):
+            await assistant.start()
+    finally:
+        assistant._state.close()
+
+
+async def test_a_floor_entry_on_an_entry_agent_skill_resolves_at_startup(tmp_path):
+    """No review reaches it, so nothing refuses; what is checked is that it does not wait for a build
+    that never comes, since the entry agent's SkillAgent holds the skill from the first turn."""
+    policies, auto = await _started_with_skill(tmp_path, never_auto_approve=["weekly-digest"])
+    assert auto.pending_floor == frozenset()
+    assert auto.floor and not auto.floor & policies.default.review
+
+
+async def test_a_floor_entry_on_a_skill_covers_a_script_added_mid_session(tmp_path):
+    """The floor is a gate entry like any other: naming the skill holds back what it offers now, so a
+    script added after startup is in it before any agent can be handed that script."""
+    from tests.core.test_approval import _add_second_script, _write_skill
+
+    from kokua.config.schema import AgentConfig
+
+    config = _config(
+        tmp_path,
+        **_auto(
+            agents={"assistant": AgentConfig(available=["skills", "compute", "time"])},
+            default_confirm=["skills.add_skill_script"],
+            never_auto_approve=["weekly-digest"],
+        ),
+    )
+    _write_skill(config)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert assistant._human.auto_approval.floor == {"weekly_digest__collect_notes"}
+        await _add_second_script(assistant)
+        assert assistant._human.auto_approval.floor == {"weekly_digest__collect_notes", "weekly_digest__second"}
+    finally:
+        assistant._state.close()
+
+
+async def test_a_floor_entry_on_an_entry_agent_skill_refuses_a_review_reaching_it_at_startup(tmp_path):
+    with pytest.raises(ConfigError, match="never_auto_approve holds back"):
+        await _started_with_skill(tmp_path, default_review=["weekly-digest"], never_auto_approve=["weekly-digest"])

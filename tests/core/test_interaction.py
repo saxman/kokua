@@ -8,6 +8,7 @@ import contextlib
 import pytest
 
 from kokua.config.schema import AssistantConfig, ReviewerConfig
+from kokua.core.approval import DEFAULT_POLICY, ApprovalPolicies, ApprovalPolicy
 from kokua.core.auto_approval import AutoApproval, Outcome, Review, ReviewContext, current_review_context
 from kokua.core.interaction import HumanGate, PendingRequest
 
@@ -128,27 +129,39 @@ async def test_a_second_askers_default_does_not_leak_onto_the_first():
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
+        self.asked_by: list[str | None] = []
         self.auto_approvals: list[tuple[str, dict, bool, str, str, str]] = []
+        self.auto_approval_agents: list[str | None] = []
         self.alerts: list[str] = []
 
-    async def ask_approval(self, name, arguments):
+    async def ask_approval(self, name, arguments, *, agent=None):
         self.asked.append(f"approve:{name}")
+        self.asked_by.append(agent)
 
-    async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None):
+    async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None, agent=None):
         self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
+        self.auto_approval_agents.append(agent)
 
     async def alert(self, text, *, conversation_id=None, group=None):
         self.alerts.append(text)
 
 
+def _policies(*, confirm=(), review=()) -> ApprovalPolicies:
+    """The resolved policies a started assistant would hold: one default tier, no agent declaring its own."""
+    default = ApprovalPolicy(
+        agent=DEFAULT_POLICY, source=DEFAULT_POLICY, confirm=frozenset(confirm), review=frozenset(review)
+    )
+    return ApprovalPolicies(by_agent={}, default=default)
+
+
 def _gate(ui):
     """A gate as the composition root leaves it: wired, and with its gated set already resolved.
 
-    Startup resolves `[security].confirm_tools` (a list of `toolset.tool` entries) down to tool names
+    Startup resolves `[assistant.tools].confirm` (a list of `toolset.tool` entries) down to tool names
     and assigns them here, so a test builds the gate the same way rather than handing it config.
     """
     gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1")
-    gate.gated_tools = frozenset({"execute_python"})
+    gate.policies = _policies(confirm={"execute_python"})
     return gate
 
 
@@ -200,7 +213,7 @@ async def test_approval_takes_precedence_over_a_waiting_decision():
 
     decision = asyncio.create_task(gate.decide(prompt, lambda raw, text: "decided", default=None))
     await asyncio.sleep(0)
-    approval = asyncio.create_task(gate.approve("execute_python", {}))
+    approval = asyncio.create_task(gate.approve("assistant", "execute_python", {}))
     await asyncio.sleep(0)
 
     assert gate.resolve_reply("y", "y") is True
@@ -247,7 +260,6 @@ def _auto() -> AutoApproval:
     """
     config = AssistantConfig(reviewers={"approval": ReviewerConfig(model="ollama:b", system_message="judge it")})
     return AutoApproval(
-        tools=frozenset({"run_command"}),
         toolset_of={"run_command": "compute"},
         reviewers=(config.reviewer_for("approval"),),
         timeout_seconds=10.0,
@@ -299,7 +311,7 @@ async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> boo
     own would produce: nobody would resolve the request, and a suite that hangs says less than one
     that fails.
     """
-    task = asyncio.create_task(gate.approve(name, arguments))
+    task = asyncio.create_task(gate.approve("assistant", name, arguments))
     try:
         async with asyncio.timeout(_SETTLE_TIMEOUT):
             # Slept rather than spun: on the failure path this polls for the whole timeout, and a busy
@@ -317,14 +329,60 @@ async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> boo
     return await task
 
 
-async def _settle_without_a_prompt(gate, name, arguments) -> bool:
+async def test_the_gate_names_the_asking_agent_on_its_prompt():
+    ui = _UI()
+    gate = _gate(ui)
+    task = asyncio.create_task(gate.approve("coder", "execute_python", {"code": "1"}))
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while not gate.approval.pending:
+            await asyncio.sleep(0.001)
+    gate.approval.resolve(True)
+    assert await task is True
+    assert ui.asked_by == ["coder"]
+
+
+async def test_the_prompt_names_the_call_as_toolset_dot_tool():
+    """The name a `confirm` entry gates a call by, asked for the calling agent's own toolset."""
+    ui = _UI()
+    asked: list[tuple] = []
+
+    def toolset_of(agent, tool):
+        asked.append((agent, tool))
+        return "compute"
+
+    gate = HumanGate(
+        ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1", toolset_of=toolset_of
+    )
+    gate.policies = _policies(confirm={"execute_python"})
+    assert await _answer_the_prompt(gate, "execute_python", {"code": "1"}, with_answer=True) is True
+    assert ui.asked == ["approve:compute.execute_python"]
+    assert asked == [("assistant", "execute_python")]
+
+
+async def test_an_auto_approval_card_names_the_call_as_toolset_dot_tool(monkeypatch, in_turn):
+    monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(True, "harmless", "ollama:b")))
+    ui = _UI()
+    gate = HumanGate(
+        ui,
+        active_id=lambda: "c1",
+        is_proactive=lambda: False,
+        turn_conversation=lambda: "c1",
+        toolset_of=lambda agent, tool: "compute",
+    )
+    gate.policies = _policies(review={"run_command"})
+    gate.auto_approval = _auto()
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is True
+    assert ui.auto_approvals[0][0] == "compute.run_command"
+
+
+async def _settle_without_a_prompt(gate, name, arguments, *, agent="assistant") -> bool:
     """`approve`'s answer on a path that must not stop to ask, bounded so a regression fails.
 
     A plain `await` here would hang instead: these paths raise no prompt, so nothing in the test is
     waiting to answer one, and a gate that started asking would leave the request outstanding forever.
     """
     try:
-        return await asyncio.wait_for(gate.approve(name, arguments), timeout=_SETTLE_TIMEOUT)
+        return await asyncio.wait_for(gate.approve(agent, name, arguments), timeout=_SETTLE_TIMEOUT)
     except TimeoutError:
         raise AssertionError(f"approve({name!r}) stopped to ask instead of settling") from None
 
@@ -335,7 +393,7 @@ async def test_an_approved_review_needs_no_prompt(monkeypatch, in_turn):
     )
     ui = _UI()
     gate = _gate(ui)
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _settle_without_a_prompt(gate, "run_command", {"command": "uv run pytest -q"}) is True
@@ -346,6 +404,7 @@ async def test_an_approved_review_needs_no_prompt(monkeypatch, in_turn):
     assert ui.auto_approvals == [
         ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b", "c1")
     ]
+    assert ui.auto_approval_agents == ["assistant"]
 
 
 async def test_an_escalated_review_still_prompts_and_carries_the_reason(monkeypatch, in_turn):
@@ -353,7 +412,7 @@ async def test_an_escalated_review_still_prompts_and_carries_the_reason(monkeypa
     monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(False, "cannot be undone", "ollama:b")))
     ui = _UI()
     gate = _gate(ui)
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _answer_the_prompt(gate, "run_command", {"command": "rm -rf build"}, with_answer=False) is False
@@ -368,7 +427,7 @@ async def test_an_escalated_review_leaves_the_answer_to_the_user(monkeypatch, in
     """The prompt behind an escalation is the ordinary one, so a yes still runs the call."""
     monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(False, "cannot be undone", "ollama:b")))
     gate = _gate(_UI())
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _answer_the_prompt(gate, "run_command", {"command": "rm -rf build"}, with_answer=True) is True
@@ -378,8 +437,8 @@ async def test_an_ineligible_gated_tool_is_never_reviewed(monkeypatch, in_turn):
     monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("update_config must never be reviewed"))
     ui = _UI()
     gate = _gate(ui)
-    gate.gated_tools = frozenset({"run_command", "update_config"})
-    gate.auto_approval = _auto()  # its tools name run_command only
+    gate.policies = _policies(confirm={"update_config"}, review={"run_command"})
+    gate.auto_approval = _auto()  # only run_command is in a review list
 
     assert await _answer_the_prompt(gate, "update_config", {"section": "security"}, with_answer=False) is False
 
@@ -387,12 +446,60 @@ async def test_an_ineligible_gated_tool_is_never_reviewed(monkeypatch, in_turn):
     assert ui.auto_approvals == []
 
 
+def _two_tiers(*, coder_confirm=(), coder_review=(), default_confirm=(), default_review=()) -> ApprovalPolicies:
+    default = ApprovalPolicy(
+        agent=DEFAULT_POLICY,
+        source=DEFAULT_POLICY,
+        confirm=frozenset(default_confirm),
+        review=frozenset(default_review),
+    )
+    coder = ApprovalPolicy(
+        agent="coder",
+        source="[agents.coder.tools]",
+        confirm=frozenset(coder_confirm),
+        review=frozenset(coder_review),
+    )
+    return ApprovalPolicies(by_agent={"coder": coder}, default=default)
+
+
+async def test_a_worker_that_only_confirms_a_tool_is_not_reviewed_for_it(monkeypatch, in_turn):
+    """The review decision reads the calling agent's own policy, not the default tier's."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("coder confirms run_command"))
+    ui = _UI()
+    gate = _gate(ui)
+    gate.policies = _two_tiers(coder_confirm={"run_command"}, default_review={"run_command"})
+    gate.auto_approval = _auto()
+
+    task = asyncio.create_task(gate.approve("coder", "run_command", {"command": "ls"}))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert ui.asked == ["approve:run_command"]
+    assert ui.auto_approvals == []
+    gate.approval.resolve(False)
+    assert await task is False
+
+
+async def test_a_worker_that_reviews_a_tool_the_default_only_confirms_is_reviewed(monkeypatch, in_turn):
+    monkeypatch.setattr(
+        "kokua.core.interaction.review_call", _answers(Outcome(True, "runs the test suite", "ollama:b"))
+    )
+    ui = _UI()
+    gate = _gate(ui)
+    gate.policies = _two_tiers(coder_review={"run_command"}, default_confirm={"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}, agent="coder") is True
+
+    assert ui.asked == []
+    assert len(ui.auto_approvals) == 1
+
+
 async def test_a_proactive_turn_is_never_reviewed(monkeypatch, in_turn):
     """An unattended turn has nobody to escalate to, so it is not offered a way to skip asking."""
     monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("an unattended turn is not reviewable"))
     ui = _UI()
     gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: True, turn_conversation=lambda: "c1")
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
@@ -406,7 +513,7 @@ async def test_a_turn_switched_away_from_is_never_reviewed(monkeypatch, in_turn)
     monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("a backgrounded turn is not reviewable"))
     ui = _UI()
     gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "elsewhere")
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
@@ -434,7 +541,7 @@ async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatc
     monkeypatch.setattr("kokua.core.interaction.review_call", switch_away_then_approve)
     ui = _UI()
     gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _settle_without_a_prompt(gate, "run_command", {"command": "rm -rf build"}) is False
@@ -479,7 +586,7 @@ async def test_an_approving_reviewer_removes_the_prompt_through_the_whole_chain(
     monkeypatch.setattr("kokua.core.auto_approval._build_client", lambda reviewer: _ApprovingClient())
     ui = _UI()
     gate = _gate(ui)
-    gate.gated_tools = frozenset({"run_command"})
+    gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
     assert await _settle_without_a_prompt(gate, "run_command", {"command": "uv run pytest -q"}) is True

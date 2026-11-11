@@ -112,6 +112,39 @@ async def test_nested_tool_calls_reach_the_card():
     }
 
 
+async def test_a_nested_tool_entry_names_the_toolset_the_worker_got_it_from():
+    """Asked with the worker's own agent type, since two workers can hold same-named tools from
+    different toolsets, and recorded with the entry so a reload shows what the live card did."""
+    asked: list[tuple] = []
+
+    def toolset_of(agent, tool):
+        asked.append((agent, tool))
+        return "web"
+
+    channel = SubagentCapturingChannel()
+    reporter = SubagentReporter(
+        ChannelUI(channel),
+        model_for=lambda agent_type: None,
+        thinking_for=lambda agent_type: None,
+        payloads_path=_UNUSED_PAYLOADS_PATH,
+        toolset_of=toolset_of,
+    )
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "https://example.com"}))
+    assert asked == [("researcher", "get_web_content")]
+    assert channel.subagent_frames[-1]["append"]["toolset"] == "web"
+    assert events[-1]["append"]["toolset"] == "web"
+
+
+async def test_a_nested_tool_entry_with_no_known_toolset_has_no_toolset_key():
+    reporter, channel = _reporter()
+    _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("mystery", {}))
+    assert "toolset" not in channel.subagent_frames[-1]["append"]
+
+
 async def test_a_nested_tool_entry_carries_what_the_call_returned():
     """A sub-agent's card is the only place its nested calls are ever shown, so dropping the result
     would leave no way to see what the spawn actually retrieved."""
@@ -751,7 +784,7 @@ class _ScriptedAgent:
     def __init__(self, during=None):
         self._during = during
 
-    async def run(self, task, stream=True):
+    async def run(self, task, stream=True, **kwargs):
         async def chunks():
             yield _thinking("planning")
             if self._during is not None:
@@ -773,12 +806,14 @@ async def test_nested_and_concurrent_spawns_through_aimus_own_spawn_path_name_th
 
     async def two_concurrent_children():
         await asyncio.gather(
-            _run_observed(_ScriptedAgent(), "left", "a", reporter),
-            _run_observed(_ScriptedAgent(), "right", "b", reporter),
+            _run_observed(_ScriptedAgent(), "left", "a", reporter, run_id="left", parent_run_id=None),
+            _run_observed(_ScriptedAgent(), "right", "b", reporter, run_id="right", parent_run_id=None),
         )
 
-    await _run_observed(_ScriptedAgent(during=two_concurrent_children), "outer", "task", reporter)
-    await _run_observed(_ScriptedAgent(), "after", "task", reporter)
+    await _run_observed(
+        _ScriptedAgent(during=two_concurrent_children), "outer", "task", reporter, run_id="outer", parent_run_id=None
+    )
+    await _run_observed(_ScriptedAgent(), "after", "task", reporter, run_id="after", parent_run_id=None)
 
     creates = {event["role"]: event for event in events if "task" in event}
     outer_id = creates["outer"]["id"]
@@ -786,6 +821,7 @@ async def test_nested_and_concurrent_spawns_through_aimus_own_spawn_path_name_th
     assert creates["left"]["parent"] == outer_id
     assert creates["right"]["parent"] == outer_id
     assert "parent" not in creates["after"], "a finished spawn must not be the parent of the next one"
+    assert {event["id"] for event in creates.values()} == {"outer", "left", "right", "after"}
 
 
 # A card stands in for the call that opened it (see `transcripts.SPAWN_TOOL_NAMES`): it names a tool

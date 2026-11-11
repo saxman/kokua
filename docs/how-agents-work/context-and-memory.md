@@ -126,6 +126,20 @@ HNSW index binaries, which is what makes a similarity search fast. The `store_me
 numbered directory; the two `sqlite3` queries pull the stored string back out, byte for byte as the
 model wrote it.
 
+In the web UI the context itself is one click away. After each model call a small **`{ }` button**
+appears on that round's output. A round is one request and the one response it got. Clicking the button
+opens a panel on the right, whose summary line gives the request's message count, tool count, and size,
+and how the call stopped; click it again, press Escape, or use the panel's close button to put it away.
+In a long turn, watch the message count and the size grow round by round: that is the context filling,
+and it is the number the window limit is measured against. The panel shows both halves: the
+**request** exactly as it was sent (the message list, the system prompt, the tool schemas), drawn one
+level at a time so a large request costs the page only what you open, and the **response** the model
+returned (its reasoning, the tool calls it asked for, and its text). Round two's request is round one's
+plus round one's response and the tool results that followed it. Strings over 4,000 characters are cut
+behind a **show all** button, and image data is labeled as such rather than printed. Each half carries a
+**download** link for the whole file as JSON; a request over two million characters (a conversation with
+images in it, resent on every call) is download-only and draws no tree.
+
 ## In Kokua
 
 **The conversation.** Each conversation owns its own agent and its own model client, and the client
@@ -192,7 +206,7 @@ copied in, an earlier version reported an empty store while the files sat there.
 
 **On disk.** Everything lives under `$KOKUA_HOME` (default `~/.kokua`), and every leaf is a derived
 property on the config rather than a new path function: `data/sessions.json`, `data/memory/`,
-`data/documents/`, `data/images/`. [Principle
+`data/documents/`, `data/images/`, `data/pages/`. [Principle
 4](../explanation/design-principles.md#4-all-state-under-one-directory-the-user-owns) is why.
 
 Kokua's README says that state is "plain files under `~/.kokua`, so you can read what it remembers while
@@ -207,11 +221,13 @@ friendlier sentence.
 
 **The arithmetic is not abstract, and the numbers are in this repository.** A locally served model is
 commonly given a 32768-token window. Set `[assistant.generation] max_tokens = 4096` and roughly 28k
-remains for the system prompt, the tool block, and the entire conversation. The shipped entry agent
-resolves to 37 tools, each contributing its name, description, and a described parameter list on
-*every* round of *every* turn ([Tool calling](tool-calling.md)), before a single word of conversation.
-That block is a fixed subtraction from the budget, and a long working session on a real task is how you
-spend what is left.
+remains for the system prompt, the tool block, and the entire conversation. The shipped entry agent can
+reach 37 tools, and the nineteen it holds from the first turn (seventeen from its resident toolsets, plus
+the `available_tools` / `load_tools` pair that loads the rest) each contribute a name, a description,
+and a described parameter list on *every* round of *every* turn ([Tool calling](tool-calling.md)),
+before a single word of conversation: 16,244 bytes of JSON, against 30,560 with every toolset resident.
+That block is a fixed subtraction from the budget (larger by whatever a turn loads), and a long working
+session on a real task is how you spend what is left.
 
 **What overflow looks like depends on the backend, which is the nasty part.** `context_length` is
 applied per request only on Ollama's native API; everywhere else the window is fixed at model load, at

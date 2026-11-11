@@ -5,6 +5,7 @@ The policy and the apply-then-persist ordering underneath are covered in ``tests
 
 from __future__ import annotations
 
+import re
 import tomllib
 
 import pytest
@@ -273,19 +274,19 @@ def _unlocked(tmp_path, **kwargs):
 
 
 async def test_update_config_writes_an_agent_tools_list_when_unlocked(tmp_path):
-    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(available=["time"])}, entry_agent="researcher")
     path, _, update_config = _tools(
         tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
     )
-    result = await update_config("agents.researcher", "tools", "time,memory")
-    assert _read(path)["agents"]["researcher"]["tools"] == ["time", "memory"]
+    result = await update_config("agents.researcher.tools", "available", "time,memory")
+    assert _read(path)["agents"]["researcher"]["tools"]["available"] == ["time", "memory"]
     assert "restart" in result.lower()
 
 
 async def test_update_config_refuses_an_agent_tools_list_naming_an_unknown_toolset(tmp_path):
-    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(available=["time"])}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
-    result = await update_config("agents.researcher", "tools", "time,nosuch")
+    result = await update_config("agents.researcher.tools", "available", "time,nosuch")
     assert "nosuch" in result
     assert not path.exists()
 
@@ -341,8 +342,8 @@ async def test_update_config_still_writes_agent_keys_their_converters_accept(tmp
 async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_path):
     config = _unlocked(tmp_path, agents={"assistant": AgentConfig()}, entry_agent="assistant")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
-    await update_config("agents.newbie", "tools", "time")
-    assert _read(path)["agents"]["newbie"]["tools"] == ["time"]
+    await update_config("agents.newbie.tools", "available", "time")
+    assert _read(path)["agents"]["newbie"]["tools"]["available"] == ["time"]
 
 
 async def test_update_config_writes_no_table_for_a_section_naming_no_real_agent(tmp_path):
@@ -430,7 +431,7 @@ async def test_update_config_dry_run_sees_a_prior_entry_agent_write(tmp_path):
 async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(tmp_path):
     """A graph already broken elsewhere must not make the refusal read as though the agent just written
     is the broken one: the write to `r` is fine on its own, the fault is in `q`'s tools."""
-    config = _unlocked(tmp_path, agents={"q": AgentConfig(tools=["nosuch"]), "r": AgentConfig()}, entry_agent="r")
+    config = _unlocked(tmp_path, agents={"q": AgentConfig(available=["nosuch"]), "r": AgentConfig()}, entry_agent="r")
     path, _, update_config = _tools(tmp_path, config=config, registry={})
 
     result = await update_config("agents.r", "description", "the researcher")
@@ -448,9 +449,9 @@ async def test_update_config_validates_against_the_live_config_when_no_file_exis
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
     assert not path.exists()
 
-    result = await update_config("agents.researcher", "tools", "time")
+    result = await update_config("agents.researcher.tools", "available", "time")
 
-    assert _read(path)["agents"]["researcher"]["tools"] == ["time"]
+    assert _read(path)["agents"]["researcher"]["tools"]["available"] == ["time"]
     assert "restart" in result.lower()
 
 
@@ -482,10 +483,10 @@ async def test_update_config_accepts_an_agent_write_naming_a_server_only_the_fil
         encoding="utf-8",
     )
 
-    result = await update_config("agents.researcher", "tools", "notes")
+    result = await update_config("agents.researcher.tools", "available", "notes")
 
     assert "restart" in result.lower()
-    assert _read(path)["agents"]["researcher"]["tools"] == ["notes"]
+    assert _read(path)["agents"]["researcher"]["tools"]["available"] == ["notes"]
 
 
 async def test_update_config_refuses_a_plain_write_when_the_file_is_not_valid_toml(tmp_path):
@@ -524,3 +525,120 @@ def test_the_toolset_builds_the_read_and_update_tools(tmp_path):
     ctx = ToolsetContext(state=state, agent=object(), agent_name="assistant")
 
     assert {fn.__name__ for fn in config_tools.TOOLSET.build(ctx)} == {"read_config", "update_config"}
+
+
+async def test_an_agent_tools_write_round_trips_through_the_loader(tmp_path):
+    """The write is only safe if the file it leaves loads back to the value written: the old scalar-list
+    write produced a table the parser refuses."""
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time"])}, entry_agent="coder")
+    path, _, update_config = _tools(
+        tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
+    )
+    await update_config("agents.coder.tools", "available", "time,memory")
+    loaded = settings.load(str(path), table=core_table())
+    assert loaded["agents"]["coder"].available == ["time", "memory"]
+
+
+async def test_writing_one_approval_list_declares_the_pair_like_the_loader_does(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time"])}, entry_agent="coder")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    result = await update_config("agents.coder.tools", "confirm", "compute.run_command")
+    assert "restart" in result.lower()
+    loaded = settings.load(str(path), table=core_table())
+    assert loaded["agents"]["coder"].confirm == ["compute.run_command"]
+    assert loaded["agents"]["coder"].review == []
+
+
+async def test_a_scalar_tools_write_points_at_the_subtable(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig()}, entry_agent="coder")
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.coder", "tools", "time")
+    assert 'section="agents.coder.tools"' in result
+    assert not path.exists()
+
+
+async def test_an_agent_resident_write_round_trips_through_the_loader(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time", "memory"])}, entry_agent="coder")
+    path, _, update_config = _tools(
+        tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
+    )
+    await update_config("agents.coder.tools", "resident", "time")
+    loaded = settings.load(str(path), table=core_table())
+    assert loaded["agents"]["coder"].resident == ["time"]
+
+
+async def test_update_config_dry_run_accepts_all_with_resident_and_refuses_it_without(tmp_path):
+    from kokua.registry.registry import register
+
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time", "memory"])}, entry_agent="coder")
+    registry = register([("built-in toolset", [_stub_toolset("time"), _stub_toolset("memory")])])
+    path, _, update_config = _tools(tmp_path, config=config, registry=registry)
+
+    refused = await update_config("agents.coder.tools", "available", "all")
+    assert refused.startswith("Rejected:")
+    assert 'available = "all" needs a resident list' in refused
+    assert not path.exists()
+
+    await update_config("agents.coder.tools", "available", "time,memory")
+    await update_config("agents.coder.tools", "resident", "time")
+    accepted = await update_config("agents.coder.tools", "available", "all")
+    assert not accepted.startswith("Rejected:"), accepted
+    assert _read(path)["agents"]["coder"]["tools"]["available"] == "all"
+    assert settings.load(str(path), table=core_table())["agents"]["coder"].available is schema.ALL_TOOLSETS
+
+
+async def test_update_config_refuses_all_inside_a_list(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time"])}, entry_agent="coder")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    result = await update_config("agents.coder.tools", "available", "time,all")
+    assert result.startswith("Rejected:")
+    assert 'or the string "all" (lowercase, not in a list)' in result
+    assert not path.exists()
+
+
+async def test_update_config_refuses_a_case_variant_of_all_as_the_parser_does(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time"])}, entry_agent="coder")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    result = await update_config("agents.coder.tools", "available", "ALL")
+    assert result.startswith("Rejected:")
+    assert 'or the string "all" (lowercase, not in a list)' in result
+    assert not path.exists()
+
+
+async def test_update_config_refuses_a_case_variant_of_all_inside_a_list(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time"])}, entry_agent="coder")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    result = await update_config("agents.coder.tools", "available", "time,All")
+    assert result.startswith("Rejected:")
+    assert 'or the string "all" (lowercase, not in a list)' in result
+    assert not path.exists()
+
+
+_MEMBERSHIP = r"resident names '(web|memory)', which is not in available"
+
+
+async def test_a_resident_write_outside_available_is_refused_and_the_file_is_unchanged(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time", "memory"])}, entry_agent="coder")
+    path, _, update_config = _tools(
+        tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
+    )
+    await update_config("agents.coder.tools", "available", "time,memory")
+    before = path.read_text(encoding="utf-8")
+    result = await update_config("agents.coder.tools", "resident", "web")
+    assert result.startswith("Rejected:")
+    assert re.search(_MEMBERSHIP, result)
+    assert path.read_text(encoding="utf-8") == before
+
+
+async def test_an_available_write_that_strands_resident_is_refused_and_the_file_is_unchanged(tmp_path):
+    config = _unlocked(tmp_path, agents={"coder": AgentConfig(available=["time", "memory"])}, entry_agent="coder")
+    path, _, update_config = _tools(
+        tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
+    )
+    await update_config("agents.coder.tools", "available", "time,memory")
+    await update_config("agents.coder.tools", "resident", "memory")
+    before = path.read_text(encoding="utf-8")
+    result = await update_config("agents.coder.tools", "available", "time")
+    assert result.startswith("Rejected:")
+    assert re.search(_MEMBERSHIP, result)
+    assert path.read_text(encoding="utf-8") == before

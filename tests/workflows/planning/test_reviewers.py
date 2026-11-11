@@ -129,7 +129,7 @@ def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     registry = build_registry(config)
     ctx = ToolsetContext(state=LiveState(config=config), agent=None, agent_name="reviewer")
     gated: set[str] = set()
-    for entry in config.confirm_tools:
+    for entry in config.default_confirm:
         toolset, _, tool = entry.partition(".")
         assert toolset in registry, f"shipped gate {entry!r} names no toolset"
         if tool and tool != "*":

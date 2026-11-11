@@ -33,10 +33,10 @@ from kokua.registry import Toolset, ToolsetContext
 FRONTEND_GROUP = "kokua.frontends"
 TOOLSET_GROUP = "kokua.toolsets"
 
-# This project's own distribution name (see kokua/__init__.py's version("kokua")). Kokua's own built-in
-# toolsets (aimu_agents, github_backup, image) register under TOOLSET_GROUP exactly as a third-party
-# plugin would; own_distribution_toolset_names tells those apart from a real third party's by checking
-# which distribution registered the entry point, so a fourth one added later needs no update here.
+# This project's own distribution name (see kokua/__init__.py's version("kokua")). Every toolset Kokua
+# ships registers under TOOLSET_GROUP exactly as a third-party plugin would; own_distribution_toolset_names
+# tells those apart from a real third party's by checking which distribution registered the entry point,
+# so a toolset Kokua adds later needs no update here.
 _OWN_DISTRIBUTION = "kokua"
 
 __all__ = [
@@ -109,9 +109,9 @@ def discover_toolsets() -> dict[str, Toolset]:
 def own_distribution_toolset_names() -> set[str]:
     """Names in the ``kokua.toolsets`` group that Kokua's own distribution registered, not a third party's.
 
-    A name here ships in the box regardless of what any config declares, so an agent not naming it is not
-    news the way an unreferenced third-party plugin or a configured MCP server would be -- see
-    ``core.agents.unreferenced_toolsets``. Queried independently of ``discover_toolsets`` (a second
+    ``core.agents.build_registry`` labels these as built-in toolsets and the rest as plugins, which is how
+    ``--list-toolsets`` groups them and how ``core.agents.TRUST_ORDER`` ranks Kokua's own toolsets ahead of
+    a third party's for an ``available = "all"`` agent. Queried independently of ``discover_toolsets`` (a second
     ``entry_points`` call) rather than folded into it, since provenance is a distinct question from "what
     is installed" and callers of ``discover_toolsets`` should not have to care about it.
     """

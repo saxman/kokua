@@ -9,7 +9,8 @@ four steps apply to any third-party toolset, and jobme is simply carried through
 example.
 
 > A toolset that is installed, even one that is connected or running, does nothing until an
-> `[agents.<name>].tools` list names it. Installing it is never the last step.
+> `[agents.<name>.tools].available` list names it, or an agent declares `available = "all"` (from the
+> next start). Installing it is never the last step.
 
 ## What Kokua sees when you install one
 
@@ -28,7 +29,7 @@ jobme = "jobme.kokua_toolset:TOOLSET"
 
 The key on the left, `jobme`, is the name that lands in Kokua's one toolset namespace, alongside `web`,
 `memory`, an MCP server's own name, and every built-in. It is also the exact name you write into
-`[agents.<name>].tools` below, and it must equal the `Toolset.name` the entry points at: Kokua's own
+`[agents.<name>.tools].available` below, and it must equal the `Toolset.name` the entry points at: Kokua's own
 built-ins are pinned against that agreement by `tests/toolsets/test_registration.py`, but a third-party
 package has no such test running against it, so a mismatched name here would register a plugin silently
 under the wrong word. An entry point is inert until something loads its group, which is why jobme's own
@@ -100,13 +101,13 @@ anything covered further down this page.
 
 ## Declare it on an agent
 
-Installing jobme grants nothing by itself. Add its name to the `tools` list of the agent that should
+Installing jobme grants nothing by itself. Add its name to the `available` list of the agent that should
 hold it, most often the entry agent:
 
 ```toml
-[agents.assistant]
-tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations",
-         "planning", "capabilities", "time", "jobme"]
+[agents.assistant.tools]
+available = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations",
+             "planning", "capabilities", "time", "benchmark", "messaging", "jobme"]
 ```
 
 Restart Kokua. Agent tables are read at startup, so the edit takes effect on the next process, not the
@@ -138,17 +139,22 @@ restart before the running assistant reads it.
 ## Gate the expensive tool
 
 `tailor_application` runs the whole pipeline: several minutes, and real provider spend on every call.
-That is exactly what `[security].confirm_tools` exists for, so add it there:
+That is exactly what an approval policy exists for, so add it to `confirm` in `[assistant.tools]`
+(the default every agent without its own policy inherits; see [Tool access](../explanation/tool-access.md)).
+Declaring `confirm` replaces the default pair whole, so write out the entries you want to keep, and keep
+`review` too, or its entries stop being gated at all:
 
 ```toml
-[security]
-confirm_tools = ["compute.execute_python", "compute.run_command", "config.update_config", "jobme.tailor_application"]
+[assistant.tools]
+confirm = ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config", "jobme.tailor_application"]
+review = ["compute.run_command", "compute.execute_python", "fs_write"]
 ```
 
 Every entry names the toolset providing the tool, which for a third party's is the same name your agent
 declared: `jobme.tailor_application` for the one tool, or a bare `jobme` for everything the toolset
-offers. Make the two edits in this order. `confirm_tools` is checked against every tool this config
-actually builds, so an entry naming a toolset no agent declares fails startup and says so; jobme has to
+offers. Make the two edits in this order. A gate entry is checked against the tools the config actually builds
+(the default tier against every agent's, an agent's own pair against its own `available` list), so an
+entry naming a toolset no agent declares fails startup and says so; jobme has to
 be declared on some agent first, whether in the same file or an earlier run, before
 `tailor_application` exists for this list to name at all.
 
@@ -218,6 +224,6 @@ skill on disk rather than a scoped list.
   why installing, or even connecting, is never the last step.
 - [Configuration reference](../reference/configuration.md#toolset-sections): how any toolset's `[<name>]`
   section is validated, and what a name collision with a core section does.
-- [Configuration reference](../reference/configuration.md#confirm_tools): the full behavior of
-  `[security].confirm_tools`, including the three entry forms and the four ways an entry can gate
+- [Configuration reference](../reference/configuration.md#assistanttools): the full behavior of
+  `[assistant.tools]`, including the three entry forms and the five ways an entry can gate
   nothing.

@@ -10,6 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
+import pytest
+from aimu.models import StreamChunk, StreamingContentType
+
 from kokua.channels.ui import ChannelUI
 
 
@@ -33,7 +36,7 @@ class _TurnSavedDouble(BareChannel):
         super().__init__()
         self.saved: list[tuple[str, int, Optional[str]]] = []
 
-    async def send_turn_saved(self, conversation_id, message_index, *, token=None):
+    async def send_turn_saved(self, conversation_id, message_index, *, token=None, turn=None):
         self.saved.append((conversation_id, message_index, token))
 
 
@@ -51,13 +54,13 @@ class RichChannelDouble(BareChannel):
     async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
         self.calls.append(("notification", (text, conversation_id, url, group)))
 
-    async def send_approval_request(self, name: str, arguments: Any) -> None:
-        self.calls.append(("approval", (name, arguments)))
+    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+        self.calls.append(("approval", (name, arguments, agent)))
 
     async def send_auto_approval(
-        self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None
+        self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None, agent=None
     ) -> None:
-        self.calls.append(("auto_approval", (name, arguments, approved, reason, model, conversation_id)))
+        self.calls.append(("auto_approval", (name, arguments, approved, reason, model, conversation_id, agent)))
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         self.calls.append(("plan_review", (plan, critique)))
@@ -76,6 +79,12 @@ class RichChannelDouble(BareChannel):
 
     async def send_artifact(self, record: dict) -> None:
         self.calls.append(("artifact", (record,)))
+
+    async def send_request(self, record: dict) -> None:
+        self.calls.append(("request", (record,)))
+
+    async def send_ending(self, ending: dict) -> None:
+        self.calls.append(("ending", (ending,)))
 
     async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
         self.calls.append(("message_frame", (text, token)))
@@ -154,6 +163,20 @@ async def test_approval_falls_back_to_a_text_question():
     assert channel.sent == ["[approve] Allow execute_python({'code': '1'})? [y/N]"]
 
 
+async def test_plain_text_approval_names_the_agent():
+    channel = BareChannel()
+    await ChannelUI(channel).ask_approval("run_command", {"command": "ls"}, agent="coder")
+    assert channel.sent[-1] == "[approve] Allow coder to run run_command({'command': 'ls'})? [y/N]"
+
+
+async def test_rich_approval_carries_the_agent_and_defaults_to_none():
+    channel = RichChannelDouble()
+    ui = ChannelUI(channel)
+    await ui.ask_approval("run_command", {}, agent="coder")
+    await ui.ask_approval("run_command", {})
+    assert channel.calls == [("approval", ("run_command", {}, "coder")), ("approval", ("run_command", {}, None))]
+
+
 async def test_plan_review_falls_back_to_text_and_includes_the_critique():
     channel = BareChannel()
     await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"])
@@ -202,6 +225,8 @@ async def test_rich_channel_receives_every_frame():
     await ui.show_plan("step 1")
     await ui.show_phase("Planner", "drafting")
     await ui.show_subagent({"role": "Plan reviewer"})
+    await ui.show_request({"run_id": "r"})
+    await ui.show_ending({"run_id": "r"})
     await ui.finish_stream()
     assert await ui.stream_activity(_chunks("a", "b"), show_answer=True) == "ab"
 
@@ -215,6 +240,8 @@ async def test_rich_channel_receives_every_frame():
         "plan",
         "phase",
         "subagent",
+        "request",
+        "ending",
         "done",
         "stream_activity",
     ]
@@ -332,8 +359,37 @@ async def test_auto_approval_uses_the_frame_when_the_channel_has_one():
     )
     assert channel.calls[-1] == (
         "auto_approval",
-        ("run_command", {"command": "ls"}, True, "lists files", "ollama:b", "c1"),
+        ("run_command", {"command": "ls"}, True, "lists files", "ollama:b", "c1", None),
     )
+
+
+async def test_auto_approval_card_carries_the_agent():
+    channel = RichChannelDouble()
+    await ChannelUI(channel).show_auto_approval("run_command", {}, approved=True, reason="ok", model="m", agent="coder")
+    assert channel.calls[-1][1][-1] == "coder"
+
+
+async def test_plain_text_auto_approval_names_the_agent():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval("run_command", {}, approved=True, reason="", model="m", agent="coder")
+    await ui.show_auto_approval("run_command", {}, approved=False, reason="", model="m", agent="coder")
+    assert channel.sent == [
+        "[auto-approval] m auto-approved coder's run_command({})",
+        "[auto-approval] m is asking you to approve coder's run_command({})",
+    ]
+
+
+async def test_a_channel_with_a_one_argument_approval_method_is_not_called_the_old_way():
+    """The approval frame is a breaking change for such a channel: it always receives `agent`, so it
+    fails loudly instead of being half-served by a branch that only some calls take."""
+
+    class OldChannel(BareChannel):
+        async def send_approval_request(self, name, arguments):
+            raise AssertionError("must not be called without agent")
+
+    with pytest.raises(TypeError):
+        await ChannelUI(OldChannel()).ask_approval("run_command", {})
 
 
 async def test_an_empty_reason_does_not_trail_a_colon():
@@ -383,3 +439,102 @@ async def test_show_artifact_degrades_to_a_line_naming_the_file_on_disk():
     record = {"url": "/images/a.png", "filename": "cat.png", "mime": "image/png", "after": 1}
     await ChannelUI(bare).show_artifact(record, Path("/data/images/a.png"))
     assert bare.sent == ["Image saved: /data/images/a.png"]
+
+
+async def test_a_request_is_a_no_op_and_only_a_wrap_up_or_error_ending_is_a_line_on_a_bare_channel():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_request({"run_id": "r", "parent_run_id": None, "round": 0})
+    await ui.show_ending(
+        {"agent": "assistant", "ended_by": "wrap_up", "round": 10, "max_iterations": 10, "error": None}
+    )
+    await ui.show_ending(
+        {"agent": "researcher", "ended_by": "error", "round": 2, "max_iterations": None, "error": "TruncatedTurnError"}
+    )
+    await ui.show_ending(
+        {"agent": "assistant", "ended_by": "answered", "round": 1, "max_iterations": 10, "error": None}
+    )
+
+    assert channel.sent == [
+        "[assistant] ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call",
+        "[researcher] ended: error (TruncatedTurnError) at round 3",
+    ]
+
+
+def test_ending_lines_count_rounds_from_one_and_need_no_counter_for_a_wrap_up():
+    from kokua.channels.ui import ending_line
+
+    base = {"agent": "a", "round": 0, "max_iterations": 10, "error": None}
+    assert ending_line({**base, "ended_by": "answered"}) == "[a] ended: answered at round 1 of 10"
+    assert ending_line({**base, "ended_by": "answered", "max_iterations": None}) == "[a] ended: answered at round 1"
+    wrap = {**base, "ended_by": "wrap_up", "round": 10}
+    assert ending_line(wrap) == "[a] ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call"
+    assert ending_line({**wrap, "max_iterations": None}) == (
+        "[a] ended: tool-use limit reached; answered on a forced wrap-up call"
+    )
+    error = {**base, "ended_by": "error", "error": "boom", "round": 2}
+    assert ending_line(error) == "[a] ended: error (boom) at round 3 of 10"
+    assert ending_line({**error, "error": None}) == "[a] ended: error at round 3 of 10"
+    assert ending_line({**base, "ended_by": None}) == "[a] ended at round 1 of 10"
+
+
+async def test_show_turn_is_a_no_op_on_a_bare_channel():
+    channel = BareChannel()
+    await ChannelUI(channel).show_turn(3)
+    assert channel.sent == []
+
+
+# --- toolset labels -------------------------------------------------------------------------------
+
+
+class _DrainingChannel(BareChannel):
+    """Drains a streamed reply into ``chunks``, the way a real channel's send loop consumes one."""
+
+    def __init__(self):
+        super().__init__()
+        self.chunks: list[StreamChunk] = []
+
+    async def send(self, content, *, reply_to=None) -> None:
+        if isinstance(content, str):
+            self.sent.append(content)
+            return
+        self.chunks.extend([chunk async for chunk in content])
+
+
+def _tool_chunk(name: str) -> StreamChunk:
+    return StreamChunk(StreamingContentType.TOOL_CALLING, {"name": name, "arguments": {}, "response": "ok"})
+
+
+async def test_a_streamed_tool_call_carries_the_toolset_it_came_from():
+    channel = _DrainingChannel()
+    ui = ChannelUI(channel, toolset_of={"get_web_content": "web"}.get)
+    thinking = StreamChunk(StreamingContentType.THINKING, "hmm")
+    await ui.send(_chunks(thinking, _tool_chunk("get_web_content")))
+    assert channel.chunks[0] == thinking
+    assert channel.chunks[1].content == {
+        "name": "get_web_content",
+        "arguments": {},
+        "response": "ok",
+        "toolset": "web",
+    }
+
+
+async def test_a_tool_call_with_no_known_toolset_streams_without_the_key():
+    """Absent rather than None, so a renderer tells "unknown" from a toolset by the key alone."""
+    channel = _DrainingChannel()
+    await ChannelUI(channel, toolset_of=lambda tool: None).send(_chunks(_tool_chunk("mystery")))
+    assert "toolset" not in channel.chunks[0].content
+
+
+async def test_stream_activity_labels_tool_calls_too():
+    """A planned turn's executor streams through stream_activity rather than send, and is labelled alike."""
+    seen: list[StreamChunk] = []
+
+    class _Streaming(BareChannel):
+        async def stream_activity(self, chunks, *, show_answer=False) -> str:
+            seen.extend([chunk async for chunk in chunks])
+            return ""
+
+    ui = ChannelUI(_Streaming(), toolset_of={"calculate": "compute"}.get)
+    await ui.stream_activity(_chunks(_tool_chunk("calculate")))
+    assert seen[0].content["toolset"] == "compute"

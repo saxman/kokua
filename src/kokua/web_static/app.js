@@ -4,6 +4,7 @@ const input = document.getElementById("msg");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const planToggle = document.getElementById("plan-toggle");
+const roundPanel = document.getElementById("round-panel");
 const thinkingLevel = document.getElementById("thinking-level");
 const attachBtn = document.getElementById("attach-btn");
 const imageInput = document.getElementById("image-input");
@@ -19,6 +20,7 @@ const tasksCount = document.getElementById("tasks-count");
 const taskList = document.getElementById("task-list");
 const alertLayer = document.getElementById("alerts");
 const convHeading = document.getElementById("conv-heading");
+const modelLabel = document.getElementById("model-label");
 
 // Alert cards ("notification" frames): work the user is not watching, raised over the page instead of
 // written into the transcript, because none of it is about the conversation on screen. Three things
@@ -149,7 +151,9 @@ function dismissAlert(index) {
 // Anything with a closer claim on the key (a rename input, mid-edit) calls preventDefault, and its
 // listener on the input runs before this one on the document.
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !e.defaultPrevented && alerts.length) dismissAlert(0);
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (alerts.length) dismissAlert(0);
+  else if (shownRound) closeRoundPanel(true);
 });
 
 // The inline "working" indicator: a dim row saying a turn is under way, pinned to the foot of the
@@ -230,10 +234,17 @@ function tickWorking(spinner, elapsed) {
 // indicator stranded above the content it was meant to sit under. While a turn is running the row is
 // the log's last element, so a top-level block goes in ahead of it; `parent` is a sub-agent card's
 // body for a nested block, which is inside a block already placed and so just appends.
+// Declared here, ahead of appendToLog, because every append consults them (see adoptRoundButton) and
+// a `const` read before its line has run throws: each container's (the log's, or a card body's) most
+// recent round, and what counts as a dispatch result.
+const latestRound = new WeakMap();
+const DISPATCH_RESULT = ".bubble.tool, .bubble.subagent, .bubble.image";
+
 function appendToLog(el, parent) {
   if (parent) parent.appendChild(el);
   else if (workingElement) log.insertBefore(el, workingElement);
   else log.appendChild(el);
+  adoptRoundButton(el, parent || log);
 }
 
 // The last block rendered in the transcript, looking past the working indicator. Throughout a turn the
@@ -899,6 +910,17 @@ function appendSubagentEntry(card, entry) {
     return;
   }
   card.reasoning = null;
+  // Both can land after the card's terminal status (frames are scheduled tasks), and are drawn anyway.
+  if (entry.kind === "request") {
+    card.answer = null;
+    renderRequest(entry, { card });
+    return;
+  }
+  if (entry.kind === "ending") {
+    card.answer = null;
+    renderEnding(entry, { card, parent: card.body });
+    return;
+  }
   if (entry.kind === "loop") {
     card.answer = null;
     renderLoop(entry.text, undefined, { parent: card.body, reason: entry.reason });
@@ -920,6 +942,7 @@ function appendSubagentEntry(card, entry) {
     card.answer = null;
     renderTool(entry.name, entry.arguments, undefined, {
       parent: card.body,
+      toolset: entry.toolset,
       response: entry.response,
       responseRef: entry.response_ref,
       responseBytes: entry.response_bytes,
@@ -1502,10 +1525,522 @@ function renderToolOutput(parent, response, opts) {
   });
 }
 
+// --- What the model saw -------------------------------------------------------------------
+// One `{ }` button per model call, on the round's own output, opening a right-hand panel with the round's
+// two halves: the request the model was sent and the response it returned (a small file, fetched when the
+// round is shown). A single request can be 120 KB at 30k tokens
+// of context and megabytes once images ride along (base64, repeated on every call), so the viewer
+// costs the page only what the reader opens: the summary line is drawn from the call record with no
+// fetch, the tree is fetched when the round is shown and rendered a level at a time, long strings are cut,
+// and above a ceiling there is no inline tree at all, only the download.
+const REQUEST_INLINE_CEILING = 2_000_000;  // characters; a request above this is download-only
+const JSON_STRING_CLAMP = 4000;  // characters of a string shown before "show all"
+const IMAGE_DATA_MIN = 1000;  // a string this long that is a data:image/ URL or all base64 is image data
+// The only reference shape the server hands out (payloads.save_text's name), checked so a stored
+// record cannot point the fetch or the download link anywhere else.
+const PAYLOAD_REF = /^\/payloads\/[0-9a-f]{64}$/;
+const BASE64_ONLY = /^[A-Za-z0-9+/=]+$/;
+
+// Every surface counts rounds from 1: buttons, endings, and the export. AIMU's own counter starts at 0.
+function requestSummary(call) {
+  const parts = [];
+  if (call.message_count != null) parts.push(`${call.message_count} messages`);
+  if (call.tool_count != null) parts.push(`${call.tool_count} tools`);
+  if (call.payload_chars != null) parts.push(formatPayloadSize(call.payload_chars));
+  if (call.stop_reason) parts.push(call.stop_reason);
+  if (call.error) parts.push(call.error);
+  return parts.join(" · ");
+}
+
+// The number of the turn a block belongs to, read from the nearest user bubble above it (the turn's
+// own opening bubble, which carries `data-turn` once the page has learned it from history or from
+// `turn_saved`). Read when the panel opens rather than when it is drawn, since a live turn is
+// numbered only when it is saved. Null when unknown, which drops the `turn-N-` prefix from a download.
+function enclosingTurn(el) {
+  let node = el;
+  while (node && node.parentElement !== log) node = node.parentElement;
+  for (node = node && node.previousElementSibling; node; node = node.previousElementSibling) {
+    if (node.matches(".bubble.user:not(.mid-turn)")) return node.dataset.turn || null;
+  }
+  return null;
+}
+
+// Only characters the download-name allowlist on the server accepts, so the name survives the route.
+function downloadSlug(text) {
+  return String(text).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+
+// One section of a round (its request, or its response): a title, a download link when the file was
+// captured, and a container the caller fills. `empty` writes a one-line explanation into it instead.
+function roundSection(body, cls, title, ref, downloadName, downloadClass) {
+  const section = document.createElement("div");
+  section.className = "round-section " + cls;
+  const heading = document.createElement("div");
+  heading.className = "round-section-title";
+  heading.textContent = title;
+  section.appendChild(heading);
+  if (ref) {
+    const link = document.createElement("a");
+    link.className = downloadClass;
+    link.href = ref + "?download=" + downloadName;
+    link.download = downloadName;
+    link.textContent = "download";
+    section.appendChild(link);
+  }
+  const content = document.createElement("div");
+  section.appendChild(content);
+  body.appendChild(section);
+  const empty = (text) => {
+    const line = document.createElement("div");
+    line.className = "request-empty";
+    line.textContent = text;
+    content.appendChild(line);
+  };
+  return { content, empty };
+}
+
+// What the model returned for this round, from the recorded response file: its reasoning, the tool
+// calls it asked for (each name with its arguments as a tree), and its text. A round that only asked
+// for tools has no text, which is exactly why the calls are shown here rather than left to the tool
+// cards elsewhere in the turn.
+function renderResponse(response, parent) {
+  let shown = false;
+  if (!response || typeof response !== "object") response = {};
+  if (typeof response.thinking === "string" && response.thinking) {
+    const block = document.createElement("div");
+    block.className = "response-thinking";
+    renderJsonString(response.thinking, block);
+    parent.appendChild(block);
+    shown = true;
+  }
+  for (const call of Array.isArray(response.tool_calls) ? response.tool_calls : []) {
+    const block = document.createElement("div");
+    block.className = "response-tool";
+    const name = document.createElement("div");
+    name.className = "response-tool-name";
+    name.textContent = call && call.name != null ? String(call.name) : "(unnamed tool)";
+    block.appendChild(name);
+    if (call && call.arguments != null) renderJsonNode(call.arguments, block, 0);
+    parent.appendChild(block);
+    shown = true;
+  }
+  if (typeof response.text === "string" && response.text) {
+    const block = document.createElement("div");
+    block.className = "response-text";
+    renderJsonString(response.text, block);
+    parent.appendChild(block);
+    shown = true;
+  }
+  if (!shown) {
+    const line = document.createElement("div");
+    line.className = "request-empty";
+    line.textContent = "the model returned nothing";
+    parent.appendChild(line);
+  }
+}
+
+// One round: the request the model received and the response it returned, drawn in the round panel.
+// Nothing here runs until a round is shown, which is what keeps the fetches lazy.
+function renderRoundDetails(record) {
+  const call = record.call;
+  const round = record.round;
+  const ref = PAYLOAD_REF.test(call.payload_ref || "") ? call.payload_ref : null;
+  const responseRef = PAYLOAD_REF.test(call.response_ref || "") ? call.response_ref : null;
+  roundPanel.replaceChildren();
+
+  const header = document.createElement("div");
+  header.className = "round-panel-header";
+  const turn = enclosingTurn(record.output);
+  const title = document.createElement("span");
+  title.className = "round-panel-title";
+  title.textContent = (/^\d+$/.test(turn || "") ? `Turn ${turn} · ` : "") + `round ${round}`;
+  const agent = document.createElement("span");
+  agent.className = "round-panel-agent";
+  agent.textContent = record.agent || "";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "round-panel-close";
+  close.textContent = "×";
+  close.title = "Close";
+  close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => closeRoundPanel(true));
+  header.append(title, agent, close);
+  roundPanel.appendChild(header);
+
+  const summary = document.createElement("div");
+  summary.className = "round-summary";
+  summary.textContent = requestSummary(call);
+  roundPanel.appendChild(summary);
+
+  const note = document.createElement("div");
+  note.className = "request-note";
+  note.textContent = call.endpoint
+    ? [call.endpoint, call.model].filter(Boolean).join(" · ")
+    : "nearest equivalent: no wire request; inspectable, not replayable";
+  roundPanel.appendChild(note);
+
+  if (record.ending) roundPanel.appendChild(roundEndingLine(record.ending));
+
+  const slug = call.agent ? downloadSlug(call.agent) : "";
+  const stem = (/^\d+$/.test(turn || "") ? `turn-${turn}-` : "") + `round-${round}` + (slug ? "-" + slug : "");
+
+  const request = roundSection(roundPanel, "round-request", "Request", ref, stem + "-request.json", "request-download");
+  request.content.className = "request-tree";
+  if (!ref) request.empty("not captured");
+  else if (call.payload_chars > REQUEST_INLINE_CEILING) request.empty("too large to show here; download it");
+  else {
+    fetch(ref)
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then((text) => { if (shownRound === record) renderJsonNode(JSON.parse(text), request.content, 0); })
+      .catch(() => { if (shownRound === record) request.empty("could not load the request"); });
+  }
+
+  const reply = roundSection(roundPanel, "round-response", "Response", responseRef, stem + "-response.json", "response-download");
+  if (!responseRef) reply.empty("not captured");
+  else {
+    fetch(responseRef)
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+      .then((text) => { if (shownRound === record) renderResponse(JSON.parse(text), reply.content); })
+      .catch(() => { if (shownRound === record) reply.empty("could not load the response"); });
+  }
+}
+
+function roundEndingLine(ending) {
+  const line = document.createElement("div");
+  line.className = "round-ending";
+  line.textContent = endingText(ending);
+  return line;
+}
+
+// The round whose details the panel shows, or null while it is closed. Closed on every page load and
+// on every history replay, since the log it pointed into is rebuilt.
+let shownRound = null;
+// The top-level log's rounds, oldest first. A sub-agent card keeps its own list on the card.
+let topRounds = [];
+
+// `refocus` hands keyboard focus back to the round's button, for a close from inside the panel (its close
+// button, or Escape) where focus would otherwise be left on an element that just went away.
+function closeRoundPanel(refocus) {
+  const closing = shownRound;
+  if (closing) {
+    closing.output.classList.remove("round-selected");
+    closing.button.setAttribute("aria-expanded", "false");
+  }
+  shownRound = null;
+  roundPanel.hidden = true;
+  roundPanel.replaceChildren();
+  document.body.classList.remove("round-panel-open");
+  if (refocus && closing && closing.button.isConnected) closing.button.focus();
+}
+
+function openRoundPanel(record) {
+  if (shownRound) {
+    shownRound.output.classList.remove("round-selected");
+    shownRound.button.setAttribute("aria-expanded", "false");
+  }
+  shownRound = record;
+  record.output.classList.add("round-selected");
+  record.button.setAttribute("aria-expanded", "true");
+  roundPanel.hidden = false;
+  document.body.classList.add("round-panel-open");
+  renderRoundDetails(record);
+  roundPanel.scrollTop = 0;
+}
+
+// What a round button may sit on: the model's own output. A user's bubble, a mid-turn message, the
+// loop's injected-round marker, a phase divider, and the page's notices are not it.
+const ROUND_OUTPUT = ".bubble:not(.user, .phase, .notice, .approval, .inbox, .loop, .mid-turn)";
+
+// Blocks that can sit between a round's output and its request without being either: a message the user
+// typed into the running turn (`.sent-mid-turn` is added when the page draws it, since the server's
+// `.mid-turn` mark only arrives later), the injected-round marker, a delivered note, and the page's own
+// notices and approval prompts. Anything else that is not output (a turn-opening user bubble, a phase
+// divider) ends the search.
+const ROUND_PASSTHROUGH = ".mid-turn, .sent-mid-turn, .inbox, .loop, .notice, .approval";
+
+// The model's own output a request describes: the nearest one above the end of `container`, looking past
+// ROUND_PASSTHROUGH blocks. Null when a turn boundary comes first (the round produced nothing).
+function roundOutputIn(container) {
+  let el = container === log ? lastContentElement() : container.lastElementChild;
+  while (el && el.matches(ROUND_PASSTHROUGH)) el = el.previousElementSibling;
+  return el && el.matches(ROUND_OUTPUT) ? el : null;
+}
+
+// The button's tooltip and accessible name: the turn it belongs to and its round, or the round alone
+// while the turn is not yet numbered.
+function labelRoundButton(button, record, output) {
+  const turn = output ? enclosingTurn(output) : null;
+  const label = (/^\d+$/.test(turn || "") ? `turn ${turn}, ` : "") + `round ${record.round}`;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
+// One round's button, on the output its request arrived after. A round that produced none (it failed
+// first, or only the user's bubble precedes it) gets a small row of its own holding the button.
+function addRound(call, container, rounds, agent) {
+  let output = roundOutputIn(container);
+  const record = { call, round: (Number.isInteger(call.round) ? call.round : 0) + 1, ending: null, agent };
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "round-button";
+  button.textContent = "{ }";
+  labelRoundButton(button, record, output);
+  button.dataset.round = String(record.round);
+  button.setAttribute("aria-controls", "round-panel");
+  button.setAttribute("aria-expanded", "false");
+  // The turn is numbered only once it is saved, so a live button is drawn before its turn is known;
+  // the label is recomputed when someone is about to read it.
+  const relabel = () => labelRoundButton(button, record, record.output);
+  button.addEventListener("mouseenter", relabel);
+  button.addEventListener("focus", relabel);
+  button.addEventListener("click", () => {
+    if (shownRound === record) closeRoundPanel();
+    else openRoundPanel(record);
+  });
+  record.button = button;
+  placeRoundButton(record, output, container);
+  latestRound.set(container, record);
+  rounds.push(record);
+  autoscroll();
+  return record;
+}
+
+// Put a round's button on `output`, or, with no output, in a small row of its own in `container`.
+function placeRoundButton(record, output, container) {
+  const button = record.button;
+  if (output && output.classList.contains("foldable")) {
+    // A foldable's header is itself the <button> that folds it, and a button cannot hold another, so
+    // the round button sits in a slot pinned over the header's right end instead (see .round-slot);
+    // the header reserves room for however many buttons the slot holds.
+    let slot = output.querySelector(":scope > .round-slot");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.className = "round-slot";
+      output.appendChild(slot);
+    }
+    // Info, buttons, timestamp: the caption leaves the header (where it would sit left of the buttons)
+    // and rides the end of the slot, after the buttons, at the same right edge it had.
+    const caption = output.querySelector(":scope > .fold-header > .fold-ts");
+    if (caption) slot.appendChild(caption);
+    slot.insertBefore(button, slot.querySelector(".fold-ts"));
+    output.style.setProperty("--round-buttons", String(slot.children.length));
+  } else if (output) bubbleMetaRow(output).appendChild(button);
+  else {
+    output = document.createElement("div");
+    output.className = "round-orphan";
+    output.appendChild(button);
+    appendToLog(output, container === log ? undefined : container);
+  }
+  record.output = output;
+}
+
+// Take a round's button off the output holding it, undoing what placeRoundButton did there: an orphan
+// row goes, and a foldable whose slot is left with no button gets its caption back in its header.
+function releaseRoundButton(record) {
+  const held = record.output;
+  record.button.remove();
+  if (!held) return;
+  held.classList.remove("round-selected");
+  if (held.classList.contains("round-orphan")) {
+    held.remove();
+    return;
+  }
+  const slot = held.querySelector(":scope > .round-slot");
+  if (!slot) return;
+  if (slot.querySelector(".round-button")) {
+    held.style.setProperty("--round-buttons", String(slot.children.length));
+    return;
+  }
+  const caption = slot.querySelector(".fold-ts");
+  const header = held.querySelector(":scope > .fold-header");
+  if (caption && header) header.appendChild(caption);
+  slot.remove();
+  held.style.removeProperty("--round-buttons");
+}
+
+// A dispatch result (a tool card, a sub-agent card, a generated image) is the last thing its round
+// produced, but it reaches the page after that round's request: a round's record completes when the
+// model's response ends, and the tool it asked for runs afterwards. A live tool round's button is
+// therefore drawn first on whatever came before (the round's reasoning, or a row of its own), and a
+// sub-agent card, whose entries are stored in that same arrival order, does the same on reload. So when a
+// dispatch result lands right after the latest round's output (looking past ROUND_PASSTHROUGH), the
+// button moves onto it: the output a top-level replay, which orders the tool card first, puts it on.
+// Model output (an answer, reasoning) never takes it, since that belongs to the round that comes next.
+function adoptRoundButton(el, container) {
+  if (!el.matches(DISPATCH_RESULT)) return;
+  const record = latestRound.get(container);
+  if (!record || !record.output) return;
+  // Only a round whose response asked for tools has dispatch results. Without this, a card a reload
+  // places at a turn's end (one matched to no call, such as a plan reviewer's) would take the button of
+  // a round that only answered. A record with no count (written before it was recorded) is not moved.
+  if (!(record.call.tool_call_count > 0)) return;
+  let previous = el.previousElementSibling;
+  while (previous && previous.matches(ROUND_PASSTHROUGH)) previous = previous.previousElementSibling;
+  if (previous !== record.output) return;
+  const selected = shownRound === record;
+  releaseRoundButton(record);
+  placeRoundButton(record, el, container);
+  if (selected) el.classList.add("round-selected");
+}
+
+function renderRequest(call, opts) {
+  const card = opts && opts.card;
+  if (card) {
+    card.rounds = card.rounds || [];
+    return addRound(call, card.body, card.rounds, call.agent || card.role);
+  }
+  return addRound(call, log, topRounds, call.agent);
+}
+
+// An ending belongs to the latest round of its run, so its wording and its warning tint ride that
+// round's button instead of a line in the log. With no such round (capture always records calls, so
+// this should be rare) the old inline line stands, so the information is never lost.
+function renderEnding(ending, opts) {
+  const card = opts && opts.card;
+  let target = null;
+  if (card) target = card.rounds && card.rounds.length ? card.rounds[card.rounds.length - 1] : null;
+  else target = [...topRounds].reverse().find((r) => r.call.run_id === ending.run_id) || null;
+  if (!target) return renderEndingLine(ending, opts);
+  target.ending = ending;
+  if (ending.ended_by === "wrap_up" || ending.ended_by === "error") target.button.classList.add("warn");
+  if (shownRound === target) {
+    const line = roundEndingLine(ending);
+    const existing = roundPanel.querySelector(".round-ending");
+    if (existing) existing.replaceWith(line);
+    else roundPanel.insertBefore(line, roundPanel.querySelector(".round-request"));
+  }
+  return target;
+}
+
+// How a tool loop ended, worded as the terminal and the Markdown export word it. A forced wrap-up
+// names the cap rather than a round.
+function endingText(ending) {
+  const limit = ending.max_iterations;
+  const ofLimit = limit != null ? ` of ${limit}` : "";
+  const position = `round ${ending.round + 1}${ofLimit}`;
+  if (ending.ended_by === "answered") return `ended: answered at ${position}`;
+  if (ending.ended_by === "wrap_up") {
+    const cap = limit != null ? `limit of ${limit} rounds` : "limit";
+    return `ended: tool-use ${cap} reached; answered on a forced wrap-up call`;
+  }
+  if (ending.ended_by === "error") return `ended: error${ending.error ? ` (${ending.error})` : ""} at ${position}`;
+  return `ended at ${position}`;
+}
+
+function renderEndingLine(ending, opts) {
+  const el = document.createElement("div");
+  el.className = "ending";
+  el.textContent = endingText(ending);
+  if (ending.agent) el.title = ending.agent;
+  appendToLog(el, opts && opts.parent);
+  autoscroll();
+  return el;
+}
+
+function jsonSizeHint(length) {
+  return length >= 1000 ? `${Math.round(length / 1000)}k chars` : `${length} chars`;
+}
+
+function jsonKey(parent, key, hint) {
+  const span = document.createElement("span");
+  span.className = "json-key";
+  span.textContent = key == null ? "" : String(key);
+  parent.appendChild(span);
+  if (hint) {
+    const size = document.createElement("span");
+    size.className = "json-size";
+    size.textContent = " " + hint;
+    parent.appendChild(size);
+  }
+}
+
+function isImageData(text) {
+  if (text.length < IMAGE_DATA_MIN) return false;
+  if (text.startsWith("data:image/")) return true;
+  // Bare base64 has no marker of its own, and "xxxx..." is valid base64 too, so a run of a few
+  // distinct characters is prose-like or padding, not an encoded image.
+  return BASE64_ONLY.test(text) && new Set(text.slice(0, 200)).size >= 16;
+}
+
+function renderJsonString(text, parent) {
+  const image = isImageData(text);
+  const el = document.createElement(image ? "div" : "pre");
+  el.className = image ? "json-image" : "json-string";
+  const clamped = text.length > JSON_STRING_CLAMP;
+  el.textContent = image ? `image data, ${formatPayloadSize(text.length)}` : text.slice(0, JSON_STRING_CLAMP);
+  parent.appendChild(el);
+  if (!clamped && !image) return;
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "json-more";
+  more.textContent = `show all (${text.length} chars)`;
+  more.addEventListener("click", () => {
+    el.textContent = text;
+    el.classList.add("json-full");
+    more.remove();
+  });
+  parent.appendChild(more);
+}
+
+// A parsed request as a tree, a level at a time. An object or array is a <details> whose children are
+// built on its first `toggle` open, so an unopened subtree costs one element however much it holds;
+// depth 0 (the request itself) lists its own children at once, the summary the reader asked for.
+// Everything from the payload reaches the DOM through textContent: it is model and user content.
+function renderJsonNode(value, parent, depth, key) {
+  if (value !== null && typeof value === "object") {
+    const entries = Array.isArray(value)
+      ? value.map((item, index) => [index, item])
+      : Object.entries(value);
+    if (depth === 0) {
+      for (const [childKey, child] of entries) renderJsonNode(child, parent, 1, childKey);
+      return;
+    }
+    const node = document.createElement("details");
+    node.className = "json-node";
+    const summary = document.createElement("summary");
+    jsonKey(summary, key, Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`);
+    node.appendChild(summary);
+    let filled = false;
+    node.addEventListener("toggle", () => {
+      if (!node.open || filled) return;
+      filled = true;
+      const children = document.createElement("div");
+      children.className = "json-children";
+      node.appendChild(children);
+      for (const [childKey, child] of entries) renderJsonNode(child, children, depth + 1, childKey);
+    });
+    parent.appendChild(node);
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "json-leaf";
+  const isString = typeof value === "string";
+  jsonKey(row, key, isString && value.length > JSON_STRING_CLAMP ? `(${jsonSizeHint(value.length)})` : "");
+  if (isString) renderJsonString(value, row);
+  else {
+    const scalar = document.createElement("span");
+    scalar.className = "json-scalar";
+    scalar.textContent = String(value);
+    row.appendChild(scalar);
+  }
+  parent.appendChild(row);
+}
+
+// A turn's number on its opening bubble, in the meta row beside the datetime and turn controls.
+function addTurnBadge(bubble, turn) {
+  if (!Number.isInteger(turn) || bubble.dataset.turn) return;
+  bubble.dataset.turn = String(turn);
+  const badge = document.createElement("span");
+  badge.className = "turn-badge";
+  badge.textContent = `turn ${turn}`;
+  bubbleMetaRow(bubble).appendChild(badge);
+}
+
 // Foldable tool / continuation blocks. The header carries the call and its condensed arguments, so a
 // folded row says what was called without being opened; the body holds the full untruncated arguments
 // and, for a tool call, the result it returned. Shared by live frames, history replay, and (via
-// `opts.parent`) a sub-agent card's nested tool calls.
+// `opts.parent`) a sub-agent card's nested tool calls. `opts.toolset` names the toolset the call came
+// from, shown as `toolset.tool` (the name a gate or an `available` list uses); absent, the call is bare.
 function renderTool(name, args, ts, opts) {
   // An absent response means no result was recorded (a transcript stored before results were
   // replayed, a turn cut short mid-dispatch); an empty one means the tool returned nothing. Neither
@@ -1517,7 +2052,8 @@ function renderTool(name, args, ts, opts) {
   // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
   // expanded.
   const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
-  const parts = { kind: "tool", payload: toolLine(name, args), metric };
+  const label = opts && opts.toolset ? `${opts.toolset}.${name}` : name;
+  const parts = { kind: "tool", payload: toolLine(label, args), metric };
   const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
   f.body.appendChild(document.createTextNode(toolArgs(args)));
   if (returned) {
@@ -1635,12 +2171,20 @@ function handleFrame(event) {
     autoscroll();
   } else if (frame.type === "tool") {
     thinkingBlock = null;
-    renderTool(frame.name, frame.arguments, new Date(), { response: frame.response });
+    renderTool(frame.name, frame.arguments, new Date(), { response: frame.response, toolset: frame.toolset });
   } else if (frame.type === "loop") {
     // Agent-loop continuation boundary. Like a tool block, it ends the answer segment above it: the
     // next tokens open their own bubble below this marker.
     thinkingBlock = null;
     renderLoop(frame.text, new Date(), { reason: frame.reason });
+  } else if (frame.type === "request") {
+    // Arrives when the call completes, so it sits after that round's output; like a tool block it ends
+    // the answer segment above it.
+    thinkingBlock = null;
+    renderRequest(frame);
+  } else if (frame.type === "ending") {
+    thinkingBlock = null;
+    renderEnding(frame);
   } else if (frame.type === "token") {
     thinkingBlock = null;
     // A block that landed since the last token (a tool call, a loop marker, an image) ended the answer
@@ -1690,7 +2234,7 @@ function handleFrame(event) {
     // minutes ago counts on from there rather than restarting at zero.
     setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
-    renderApproval(frame.name, frame.arguments);
+    renderApproval(frame.name, frame.arguments, frame.agent);
   } else if (frame.type === "auto_approval") {
     renderAutoApproval(frame);
   } else if (frame.type === "plan") {
@@ -1711,6 +2255,8 @@ function handleFrame(event) {
   } else if (frame.type === "tasks") {
     lastTasks = frame.items;
     renderSidebar();
+  } else if (frame.type === "models") {
+    renderModels(frame);
   } else if (frame.type === "download") {
     // A synthetic anchor rather than location.href. Today /download/{name} answers as an attachment
     // (Content-Disposition, from FileResponse(path, filename=name) on the server), so Chromium never
@@ -1741,6 +2287,7 @@ function handleFrame(event) {
         // two would otherwise say the message both did and did not become a turn.
         pending.classList.remove("mid-turn");
         stampTurnControls(pending, frame.message_index, frame.conversation_id);
+        addTurnBadge(pending, frame.turn);
       }
     }
   } else if (frame.type === "inbox") {
@@ -1771,6 +2318,9 @@ function handleFrame(event) {
     if (midTurn) midTurn.classList.add("mid-turn");
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
+    closeRoundPanel();  // it points into the log being replaced
+    topRounds = [];
+    latestRound.delete(log);  // its button lived in the transcript being replaced
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
     // Drop the references to the bubbles just removed. Without this they stay live but detached, and
@@ -1804,7 +2354,11 @@ function handleFrame(event) {
         replayTurnIndex = item.message_index;
         replayTurnStamped = false;
       }
-      if (item.type === "user") stampTurnStart(addBubble("user", item.text, item.ts));
+      if (item.type === "user") {
+        const bubble = addBubble("user", item.text, item.ts);
+        addTurnBadge(bubble, item.turn);
+        stampTurnStart(bubble);
+      }
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
       else if (item.type === "partial" && !isBlank(item.text)) {
         streamingText = item.text;
@@ -1815,15 +2369,20 @@ function handleFrame(event) {
         const bubble = addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
         // An image the user uploaded can be a turn's opening bubble (an image-only message emits no
         // "user" item at all); one the assistant generated is mid-turn and never opens it.
-        if (item.from !== "assistant") stampTurnStart(bubble);
+        if (item.from !== "assistant") {
+          addTurnBadge(bubble, item.turn);
+          stampTurnStart(bubble);
+        }
       }
       else if (item.type === "artifact") renderArtifact(item, item.ts);
+      else if (item.type === "request") renderRequest(item);
+      else if (item.type === "ending") renderEnding(item);
       else if (item.type === "thinking") {
         const f = addFoldable("thinking", { kind: "thinking" }, undefined, item.ts);
         f.body.textContent = item.text || "";
         setFoldLabel(f.label, "thinking", "", lineMetric(item.text));
       }
-      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
+      else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response, toolset: item.toolset });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       // A message sent into a turn already running, read from the stored record
       // (`record_turn_provenance`'s `messages` map) rather than a frame about a turn still open: this
@@ -1862,14 +2421,37 @@ function handleFrame(event) {
   }
 }
 
+// Which model is answering, in the header. Painted once per connection and never updated, because the
+// server cannot tell it anything newer: a model is read as the agents are built and is not a runtime
+// setting, so it holds for the life of the process that sent this frame. The label is the entry agent's
+// model and the tooltip is the whole record, each agent that declares its own on a line of its own,
+// which is what `/diag` prints as prose in the terminal.
+//
+// textContent and `title` throughout, never markup: the strings are config.toml's, and `update_config`
+// is a tool the assistant holds, so they are no more trusted here than a tool result is.
+function renderModels(frame) {
+  const model = typeof frame.model === "string" ? frame.model : "";
+  modelLabel.textContent = model;
+  const lines = model ? [`${frame.agent}: ${model}`] : [];
+  const overrides = frame.overrides && typeof frame.overrides === "object" ? frame.overrides : {};
+  for (const [agent, declared] of Object.entries(overrides)) {
+    // The entry agent appears in both halves when its own table names a model, and the label above is
+    // already that string; the record stays faithful to what the config declares, so the skip is here.
+    if (agent !== frame.agent) lines.push(`${agent}: ${declared}`);
+  }
+  modelLabel.title = lines.join("\n");
+}
+
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
 // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
-function renderApproval(name, args) {
+function renderApproval(name, args, agent) {
   const el = document.createElement("div");
   el.className = "bubble approval";
   const prompt = document.createElement("div");
   prompt.className = "prompt";
-  prompt.textContent = "Allow ";
+  // Naming the agent matters because a delegated worker's call lands in the same log as the entry
+  // agent's; without it the user cannot tell whose action they are allowing.
+  prompt.textContent = agent ? `Allow ${agent} to run ` : "Allow ";
   const code = document.createElement("code");
   code.textContent = toolLine(name, args);
   prompt.appendChild(code);
@@ -1911,7 +2493,11 @@ function renderAutoApproval(frame) {
   el.className = frame.approved ? "bubble approval auto-approved" : "bubble approval auto-escalated";
   const prompt = document.createElement("div");
   prompt.className = "prompt";
-  prompt.textContent = frame.approved ? `${frame.model} auto-approved ` : `${frame.model} is asking you to approve `;
+  // The agent is named for the reason the approval prompt names it: a worker's call lands in the same log.
+  const call = frame.agent ? `${frame.agent}'s ` : "";
+  prompt.textContent = frame.approved
+    ? `${frame.model} auto-approved ${call}`
+    : `${frame.model} is asking you to approve ${call}`;
   const code = document.createElement("code");
   code.textContent = toolLine(frame.name, frame.arguments);
   prompt.appendChild(code);
@@ -1998,7 +2584,8 @@ let reconnectAt = 0;
 // The two flags below separate the ways a socket can close, because only one of them is worth
 // retrying. A server that is not up yet closes having sent nothing, which is the ordinary restart
 // case. A server that answered and refused us sends one message frame and closes without syncing:
-// the one-connection guard's "busy in another tab", or a config error reported in place of a
+// the one-connection guard's "busy in another tab" (or "still closing", when the connection a reload
+// replaced outlasted the server's wait for its teardown), or a config error reported in place of a
 // session. Retrying a refusal would thrash and bury its own message under repetitions of itself, so
 // only a connection that synced, or one that never heard from a server at all, reconnects.
 let synced = false;
@@ -2256,6 +2843,10 @@ form.addEventListener("submit", (e) => {
   // The first bubble this message draws is the turn's opening bubble, whichever it is: an image-only
   // message has no text bubble, so its control has to land on the image instead.
   let opening = text ? addBubble("user", text, now) : null;  // the user's own words, not the /plan wrapper
+  // Sent while a turn is running, so it is a mid-turn message even before the server says so: round
+  // buttons look past it to the output above (see ROUND_PASSTHROUGH).
+  const sentMidTurn = !stopBtn.classList.contains("hidden");
+  if (opening && sentMidTurn) opening.classList.add("sent-mid-turn");
   for (const item of attached) {
     const bubble = addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
     if (!opening) opening = bubble;

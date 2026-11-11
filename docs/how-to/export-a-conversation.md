@@ -23,6 +23,7 @@ kokua export abcdef01              # a full id, or a unique leading fragment of 
 kokua export abcdef01 -o notes.md  # write somewhere specific
 kokua export abcdef01 -o -         # write to stdout instead of a file
 kokua export abcdef01 --full       # do not truncate long tool arguments and results
+kokua export abcdef01 --turn 3     # one turn, with every request the model was sent
 ```
 
 The conversation argument takes an id, a unique leading fragment of one (at least 6 characters,
@@ -51,10 +52,38 @@ Each turn after that is one `## Turn N` section: the user's message, the model's
 run streamed a `thinking` block or a verbose trace's `reasoning` segments), its answer, and, for
 each tool call, the tool's name, its arguments, and what it returned. A line under the turn heading
 names the model and reasoning effort it ran at, when either was recorded, and a line beneath that
-reports what the turn cost. A sub-agent the turn spawned gets its own nested card with the same
-shape: its own reasoning, tool calls, and answer. If a turn stopped short (a tool call was
+reports what the turn cost. Every tool loop ends with a closing italic line saying which rule ended it,
+such as `_[ended: answered at round 2 of 10]_` or `_[ended: tool-use limit of 10 rounds reached; answered
+on a forced wrap-up call]_`. A sub-agent the turn spawned gets its own nested card with the same
+shape (its own ending line included): its own reasoning, tool calls, and answer. If a turn stopped short (a tool call was
 denied, a reviewer sent it back for revision, an error cut it off), the reason appears as a quoted
 note where the turn stopped.
+
+A turn's block also shows the system prompt each agent ran under, as a `**System prompt (agent):**`
+heading and a fenced block, but only where it is news: the first time that agent appears in the
+conversation, and again whenever it differs from that agent's previous one. The entry agent and each
+sub-agent are tracked separately, so a sub-agent's prompt is never compared against the entry agent's.
+Prompts come from the recorded request payloads, so a turn whose payload was not captured shows none, and a payload that is readable but holds no system prompt Kokua can find (an in-process provider's raw prompt, say) shows `_(system prompt not found in the recorded request; see kokua export --turn N)_` once for that agent instead, and each is capped like any payload unless you pass `--full`. A turn shows each agent's prompt from its first readable call, so a change between rounds of one turn is not shown. The web download and the assistant's `export_conversation` file include them too.
+
+## One turn, in full
+
+`kokua export <conversation> --turn N` writes a single turn instead of the whole conversation, to
+`$KOKUA_HOME/data/downloads/<conversation id>.turn-N.md` (or wherever `-o` says; `-o -` is stdout). It
+holds the user's message, then every model call the turn made, grouped by run with the entry agent
+first, each under a `### agent · round R` heading naming the run, provider, endpoint, model, and how
+the call stopped. Under each is the request as recorded, pretty-printed, and the response: text,
+reasoning, and tool calls. The loop's ending follows. Nothing is truncated, so `--full` is accepted and
+changes nothing (a one-line note on stderr says so). A turn with no recorded calls (it predates capture)
+reads `_No model calls were recorded for this turn._` after the user's message.
+
+The request is exactly what was sent. A provider that runs in-process has no wire request, so its
+entry says `no wire request (nearest equivalent; not replayable)`: the payload shown is the nearest
+equivalent Kokua could record, not something you can send again. A payload or response that was not
+captured, or whose file has since been deleted, reads `_not captured_`. A number outside the
+conversation's turns exits with status 2 and names the valid range.
+
+This file contains everything the agent saw, including the system prompt, tool results, and any
+documents or credentials they carried. Treat it as private.
 
 ## Two honesty rules
 
@@ -121,7 +150,7 @@ about a run rather than a file about it. Ask in plain words:
 > and what did it return?
 
 The assistant finds the conversation (`list_conversations` or `search_conversations`), exports it, and
-gets back a path plus how long the file is. What happens next depends on the length, and that is the
+gets back a path plus how long the file is. The file includes each agent's system prompt (at its first occurrence and whenever it changes, capped like any payload unless `full`), since the export is the artifact an evaluation reads. What happens next depends on the length, and that is the
 part worth understanding.
 
 **A path, not the transcript.** The tool answers with a file path on purpose. `read_file` returns 2,000

@@ -12,7 +12,8 @@ from tests.helpers import MockAsyncModelClient
 
 async def test_create_registers_scheduling_tools(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    names = {getattr(fn, "__name__", None) for fn in assistant._agent.tools}
+    await assistant._agent.load_tool_group("scheduling")  # the shipped entry agent defers it
+    names = {getattr(fn, "__name__", None) for fn in assistant._agent._effective_tools(None)}
     assert {
         "schedule_task",
         "list_scheduled_tasks",

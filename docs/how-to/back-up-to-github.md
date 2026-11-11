@@ -35,6 +35,7 @@ Everything else under `data/` is left out on purpose:
 | `data/logs/` | rotating, noisy, and rewritten on every run |
 | `data/downloads/` | generated artifacts such as rendered PDFs |
 | `data/images/` | generated and attached images, which are binary and bulky |
+| `data/pages/` | pages the `web` toolset's `fetch_page` stored, a cache of pages that are still on the web |
 | `data/mcp-oauth/` | the OAuth tokens Kokua holds for your MCP servers, which are credentials |
 | `data/backup/` | the working tree the backup itself pushes from |
 | `.git/` and `__pycache__/` inside any copied directory | tooling artifacts, not state to restore |
@@ -128,14 +129,14 @@ running process is holding; `repo` is read once on top of that, when an agent's 
 ## 5. Give an agent the toolset
 
 A capability is declared, never defaulted, so installing the toolset is not enough. Add
-`"github_backup"` to the `tools` list of the agent you talk to. Add, not replace: every name in that
+`"github_backup"` to the `available` list of the agent you talk to. Add, not replace: every name in that
 list is valid on its own, so dropping one loses a capability silently rather than failing at startup.
 
 ```toml
-[agents.assistant]
+[agents.assistant.tools]
 # what `kokua config init` writes, with one name appended
-tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations",
-         "planning", "capabilities", "time", "github_backup"]
+available = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations",
+             "planning", "capabilities", "time", "benchmark", "messaging", "github_backup"]
 ```
 
 `[agents.*]` is **locked by default**: `[security].locked_config_keys` refuses the whole section by
@@ -208,7 +209,7 @@ since there is nobody watching to answer the prompt. A backup tool that took a `
 argument would have to be gated (it could be pointed anywhere), and a gated backup tool cannot be
 scheduled. Because the repository, the branch, and the file list all come from `config.toml`, there is
 nothing a per-call approval would be protecting, which is what earns this tool a place outside
-`[security].confirm_tools`.
+`[assistant.tools]`'s `confirm` and `review` lists.
 
 Two things follow that are worth knowing before you leave it running:
 

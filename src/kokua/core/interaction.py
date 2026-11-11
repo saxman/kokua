@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Optional, TypeVar
 
 from kokua.core.auto_approval import AutoApproval, review_call
+
+if TYPE_CHECKING:
+    from kokua.core.approval import ApprovalPolicies
 
 logger = logging.getLogger(__name__)
 
@@ -113,24 +116,28 @@ class HumanGate:
         active_id: Callable[[], str],
         is_proactive: Callable[[], bool],
         turn_conversation: Callable[[], Optional[str]],
+        toolset_of: Callable[[Optional[str], str], Optional[str]] = lambda agent, tool: None,
     ):
         self._ui = ui
         self._active_id = active_id
         self._is_proactive = is_proactive
         self._turn_conversation = turn_conversation
-        # The tool names [security].confirm_tools resolves to, assigned once every agent has been wired
-        # (core.agents.resolve_confirm_tools, called from Assistant.start). None until then,
+        # Names the toolset a gated call came from, so a prompt asks about `toolset.tool`: the name the
+        # `confirm` or `review` entry that gated it was written in.
+        self._toolset_of = toolset_of
+        # Every agent's resolved approval policy, assigned once every agent has been wired
+        # (core.approval.resolve_approval_policies, called from Assistant.start). None until then,
         # deliberately, rather than an empty set: this gate is built in the composition root's __init__
         # because wiring needs `approve` to hand to each agent, while the vocabulary a config entry
         # resolves against does not exist until that wiring finishes. An empty default would make the
         # window between the two read as "nothing is gated", which is the exact silent failure the
         # startup check exists to prevent, so `approve` raises in it instead. The window is wider than
         # it looks: boot's remote half runs in `start`, so it spans every MCP handshake.
-        self.gated_tools: Optional[frozenset[str]] = None
+        self.policies: Optional[ApprovalPolicies] = None
         # The gate [security.auto_approval] resolves to, or None when it is off, assigned from the same
-        # place and at the same point as `gated_tools` above (core.auto_approval.resolve_auto_approval,
+        # place and at the same point as `policies` above (core.auto_approval.resolve_auto_approval,
         # called from Assistant.start). Unlike that one, None is a real answer here rather than a
-        # not-yet-wired sentinel: the feature ships off, and `gated_tools is None` already refuses every
+        # not-yet-wired sentinel: the feature ships off, and `policies is None` already refuses every
         # call made before wiring finishes, so one sentinel covers both.
         self.auto_approval: Optional[AutoApproval] = None
         self.approval: PendingRequest[bool] = PendingRequest(default=False)
@@ -150,11 +157,13 @@ class HumanGate:
         self.approval.abandon()
         self.decision.abandon()
 
-    async def approve(self, name: str, arguments: dict) -> bool:
+    async def approve(self, agent: str, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
-        Ungated tools pass, and what is gated is ``gated_tools``: the tool names startup resolved
-        ``[security].confirm_tools`` to, not the config entries themselves, which name a toolset each.
+        ``agent`` is the name the calling agent was wired with (``Assistant._gate_for`` binds it), so the
+        call is judged by that agent's own policy. Ungated tools pass, and what is gated is that
+        policy's ``gated`` set: the tool names startup resolved its ``confirm`` and ``review`` entries
+        to, not the config entries themselves, which name a toolset each.
         A proactive/scheduled turn always auto-denies a gated tool: it is
         unattended, so nobody is watching to confirm, and a firing that fell back to the viewed
         conversation would otherwise look foreground (its turn conversation equals the viewed one) and
@@ -163,7 +172,7 @@ class HumanGate:
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
 
-        A gated tool named by ``[security.auto_approval]`` is reviewed just before that prompt, and
+        A gated tool in the agent's ``review`` list is reviewed (when ``[security.auto_approval]`` is on) just before that prompt, and
         only there: both auto-denials above run first, so a review happens exactly where a human would
         otherwise have been asked and nowhere else, and the switched-away one is asked again after the
         review, since a review is a model call the user can switch conversations during. The ordering
@@ -178,20 +187,21 @@ class HumanGate:
         are reported as a card, because an auto-approval nobody saw is a decision made on the user's
         behalf in silence.
         """
-        if self.gated_tools is None:
+        if self.policies is None:
             raise RuntimeError(
                 "the tool-approval gate was asked about a call before startup resolved "
-                f"[security].confirm_tools, so it cannot say whether {name!r} is gated. Nothing may run "
+                f"the approval policies, so it cannot say whether {name!r} is gated. Nothing may run "
                 "a tool before Assistant.start has finished wiring."
             )
-        if name not in self.gated_tools:
+        policy = self.policies.for_agent(agent)
+        if name not in policy.gated:
             return True
         if self._is_proactive():
             return False
         turn_conversation = self._turn_conversation()
         if turn_conversation != self._active_id():
             return await self._deny_switched_away(name, turn_conversation)
-        if self.auto_approval is not None and name in self.auto_approval.tools:
+        if self.auto_approval is not None and name in policy.review:
             # No `try`: `review_call` turns every failure into an outcome that escalates, so the fall
             # through below is the only thing a failed review can reach.
             outcome = await review_call(self.auto_approval, tool=name, arguments=arguments)
@@ -207,16 +217,22 @@ class HumanGate:
             if self._turn_conversation() != self._active_id():
                 return await self._deny_switched_away(name, turn_conversation)
             await self._ui.show_auto_approval(
-                name,
+                self._label(agent, name),
                 arguments,
                 approved=outcome.approved,
                 reason=outcome.reason,
                 model=outcome.model,
                 conversation_id=turn_conversation,
+                agent=agent,
             )
             if outcome.approved:
                 return True
-        return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
+        return await self.approval.ask(lambda: self._ui.ask_approval(self._label(agent, name), arguments, agent=agent))
+
+    def _label(self, agent: str, name: str) -> str:
+        """``name`` as the prompt shows it: ``toolset.tool``, or bare when no toolset is known."""
+        toolset = self._toolset_of(agent, name)
+        return f"{toolset}.{name}" if toolset else name
 
     async def _deny_switched_away(self, name: str, turn_conversation: Optional[str]) -> bool:
         """Deny a gated call whose turn is not the conversation on screen, and say so. Always False.

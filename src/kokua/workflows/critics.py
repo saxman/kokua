@@ -37,7 +37,7 @@ from kokua.core.metrics import record_event
 # `execute_python` and `run_command`, which run arbitrary code with the user's privileges and no
 # sandbox. A reviewer cannot be approval-gated (an autonomous critic has nobody to ask mid-review, and a
 # gate it could not satisfy would just deadlock it), so mounting either one here would hand it a
-# capability `[security] confirm_tools` exists to hold back, with the gate structurally unable to apply.
+# capability the approval policies (`[assistant.tools]`) exist to hold back, with the gate structurally unable to apply.
 # Arithmetic is the only thing a verdict actually needs computed, and `calculate` covers it.
 #
 # Naming individual callables rather than groups is what kept that true through AIMU 0.31.0, which put
@@ -45,7 +45,7 @@ from kokua.core.metrics import record_event
 # this line read `[*builtin.fs]` for the file reads a reviewer might want, the same release would have
 # handed an ungateable agent a writer at any path. `web` is taken whole deliberately, being the one
 # group whose every member only reads, and `tests/workflows/planning/test_reviewers.py` pins the
-# absences against the shipped `confirm_tools` default so a name added there fails the suite until this
+# absences against the shipped `[assistant.tools]` default so a name added there fails the suite until this
 # toolset is re-checked.
 REVIEWER_TOOLS: list[Callable] = [*builtin.web, builtin.calculate, builtin.get_current_date_and_time]
 

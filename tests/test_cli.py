@@ -72,7 +72,7 @@ def test_two_mcp_urls_on_one_host_get_distinct_names():
     from kokua.core.agents import build_registry
 
     config = AssistantConfig(
-        agents={"assistant": AgentConfig(tools=names)},
+        agents={"assistant": AgentConfig(available=names)},
         entry_agent="assistant",
         mcp_servers=servers,
     )
@@ -82,11 +82,11 @@ def test_two_mcp_urls_on_one_host_get_distinct_names():
 
 def test_confirm_tools_flag_parses():
     cfg = resolve_config(build_arg_parser().parse_args(["--confirm-tools", "add_skill_script, execute_python"]))
-    assert cfg.confirm_tools == ["add_skill_script", "execute_python"]
+    assert cfg.default_confirm == ["add_skill_script", "execute_python"]
 
 
 def test_confirm_tools_flag_empty_disables():
-    assert resolve_config(build_arg_parser().parse_args(["--confirm-tools", ""])).confirm_tools == []
+    assert resolve_config(build_arg_parser().parse_args(["--confirm-tools", ""])).default_confirm == []
 
 
 def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
@@ -314,7 +314,7 @@ def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, t
     # asserted-on string is `[agents.coder]`'s tools line, which is why it fails loudly if that line is
     # edited without editing this: a no-op replace leaves a *valid* config and the test stops testing.
     broken = settings.example_text().replace(
-        'tools = ["fs", "fs_write", "compute", "time", "messaging"]', 'tools = ["fs", "nope", "time"]'
+        'available = ["fs", "fs_write", "compute", "time", "messaging"]', 'available = ["fs", "nope", "time"]'
     )
     assert "nope" in broken, "the [agents.coder] tools line moved; this replace no longer breaks anything"
     text = broken
@@ -514,3 +514,241 @@ def test_export_output_flag_still_wins_over_the_fidelity_name(monkeypatch, tmp_p
 
     assert capsys.readouterr().out.strip() == str(target)
     assert target.exists()
+
+
+def test_export_turn_prints_the_per_turn_document(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "--turn", "1", "-o", "-"], expect_exit=0)
+    out = capsys.readouterr().out
+    assert out.startswith("# A run: turn 1")
+    assert "what is it" in out
+
+
+def test_export_turn_out_of_range_exits_two_with_the_range(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "--turn", "9"], expect_exit=2)
+    assert "turns 1 to 1" in capsys.readouterr().err
+
+
+def test_export_turn_default_path_ends_in_turn_suffix(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "--turn", "1", "--full"], expect_exit=0)
+    assert capsys.readouterr().out.strip().endswith(".turn-1.md")
+
+
+def test_export_turn_with_full_notes_on_stderr_that_full_has_no_effect(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "--turn", "1", "--full", "-o", "-"], expect_exit=0)
+    captured = capsys.readouterr()
+    assert "--full has no effect with --turn" in captured.err
+    assert "--full" not in captured.out
+
+
+def test_export_turn_without_full_prints_no_note_and_says_when_no_calls_were_recorded(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "--turn", "1", "-o", "-"], expect_exit=0)
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "_No model calls were recorded for this turn._" in captured.out
+
+
+# --- kokua agents and the startup summary -----------------------------------------------------
+
+
+def _write_example_config(monkeypatch, tmp_path, transform=lambda text: text):
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(transform(settings.example_text()), encoding="utf-8")
+
+
+def test_summary_line_per_agent():
+    from kokua.cli import access_summary_lines
+    from kokua.registry.registry import register
+    from kokua.config.schema import AgentConfig
+
+    config = _config(
+        Path("/tmp"),
+        agents={
+            "assistant": AgentConfig(available=[f"a{n}" for n in range(12)], resident=[f"a{n}" for n in range(7)]),
+            "coder": AgentConfig(available=[f"b{n}" for n in range(5)], confirm=["compute.run_command"], review=[]),
+        },
+        default_confirm=["x", "y", "z"],
+        default_review=["p", "q", "r"],
+    )
+
+    assert access_summary_lines(config, register([])) == [
+        "assistant: 12 available, 7 resident, 3 confirm, 3 review (from [assistant.tools])",
+        "coder: 5 available, 5 resident, 1 confirm, 0 review (from [agents.coder.tools])",
+    ]
+
+
+def test_agents_command_prints_each_agents_three_axes(monkeypatch, tmp_path, capsys):
+    _write_example_config(monkeypatch, tmp_path)
+
+    _run_main(monkeypatch, ["agents"])
+
+    out = capsys.readouterr().out
+    assert "assistant\n  available: " in out
+    assert "  resident:  memory, config, conversations, planning, capabilities, time, messaging" in out
+    assert "  resident:  every available toolset" in out
+    confirm = "skills.add_skill_script, mcp.add_mcp_server, config.update_config"
+    review = "compute.run_command, compute.execute_python, fs_write"
+    assert f"  confirm:   {confirm}  (from [assistant.tools])" in out
+    assert f"  review:    {review}  (from [assistant.tools])" in out
+    assert f"composed workers, confirm (from [assistant.tools]): {confirm}" in out
+    assert f"composed workers, review (from [assistant.tools]): {review}" in out
+
+
+def test_agents_command_shows_a_declared_pair_source(monkeypatch, tmp_path, capsys):
+    anchor = 'available = ["fs", "fs_write", "compute", "time", "messaging"]'
+
+    def declare_pair(text):
+        assert anchor in text
+        return text.replace(anchor, anchor + '\nconfirm = ["compute.run_command"]\nreview = []')
+
+    _write_example_config(monkeypatch, tmp_path, declare_pair)
+
+    _run_main(monkeypatch, ["agents"])
+
+    assert "  confirm:   compute.run_command  (from [agents.coder.tools])" in capsys.readouterr().out
+
+
+_CODER_AVAILABLE = 'available = ["fs", "fs_write", "compute", "time", "messaging"]'
+
+
+def _declare_coder_all(text):
+    assert _CODER_AVAILABLE in text
+    return text.replace(_CODER_AVAILABLE, 'available = "all"\nresident = ["time"]')
+
+
+def _coder_config_and_registry():
+    from kokua.core.agents import build_registry
+
+    config = resolve_config(build_arg_parser().parse_args([]))
+    return config, build_registry(config)
+
+
+def test_agents_command_expands_all_in_trust_order(monkeypatch, tmp_path, capsys):
+    from kokua.core.agents import available_for
+
+    _write_example_config(monkeypatch, tmp_path, _declare_coder_all)
+    config, registry = _coder_config_and_registry()
+    expanded = available_for(config, registry, "coder")
+
+    _run_main(monkeypatch, ["agents"])
+
+    out = capsys.readouterr().out
+    assert f"  available: all ({len(expanded)}): {', '.join(expanded)}" in out
+    assert "  resident:  time" in out
+
+
+def test_summary_counts_an_all_agent(monkeypatch, tmp_path):
+    from kokua.cli import access_summary_lines
+    from kokua.core.agents import available_for
+
+    _write_example_config(monkeypatch, tmp_path, _declare_coder_all)
+    config, registry = _coder_config_and_registry()
+    expanded = available_for(config, registry, "coder")
+
+    lines = access_summary_lines(config, registry)
+
+    coder = next(line for line in lines if line.startswith("coder:"))
+    assert coder.startswith(f"coder: all ({len(expanded)}) available, 1 resident, ")
+
+
+def test_summary_is_skipped_when_the_registry_cannot_assemble(monkeypatch, tmp_path, capsys):
+    from kokua.cli import print_access_summary
+    from kokua.registry.registry import ToolsetError
+
+    def collide(config):
+        raise ToolsetError("two toolsets claim the name 'dup'")
+
+    _write_example_config(monkeypatch, tmp_path)
+    config, _ = _coder_config_and_registry()
+    monkeypatch.setattr("kokua.core.agents.build_registry", collide)
+
+    print_access_summary(config)
+
+    assert capsys.readouterr().err == ""
+
+
+def test_agents_command_reports_a_bad_config_and_exits_2(monkeypatch, tmp_path, capsys):
+    def break_coder(text):
+        broken = text.replace(
+            'available = ["fs", "fs_write", "compute", "time", "messaging"]', 'available = ["fs", "nope", "time"]'
+        )
+        assert "nope" in broken, "the [agents.coder] tools line moved; this replace no longer breaks anything"
+        return broken
+
+    _write_example_config(monkeypatch, tmp_path, break_coder)
+
+    _run_main(monkeypatch, ["agents"], expect_exit=2)
+
+    assert "nope" in capsys.readouterr().err
+
+
+def test_agents_command_builds_no_toolset(monkeypatch, tmp_path):
+    _write_example_config(monkeypatch, tmp_path)
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("kokua agents must not build a toolset")
+
+    monkeypatch.setattr("kokua.registry.registry.build_tools", refuse)
+    monkeypatch.setattr("kokua.core.build.build_tools", refuse)
+
+    _run_main(monkeypatch, ["agents"])
+
+
+def _start(monkeypatch, capsys, argv: list[str]) -> tuple[str, list]:
+    """Run startup against a stub front end; return stderr as it stood when the front end ran, and the
+    config it was handed."""
+    from kokua import plugins
+    from kokua.plugins import FrontEnd
+
+    stderr_at_run: list[str] = []
+    configs: list = []
+
+    async def run(config, args):
+        stderr_at_run.append(capsys.readouterr().err)
+        configs.append(config)
+
+    # configure_logging enables faulthandler, which needs a real stderr fileno that capture does not give.
+    monkeypatch.setattr("kokua.cli.configure_logging", lambda config: None)
+    monkeypatch.setattr(plugins, "get_frontend", lambda name: FrontEnd(name="stub", description="", run=run))
+    _run_main(monkeypatch, argv)
+    return stderr_at_run[0], configs
+
+
+def test_startup_keeps_the_summary_off_stderr_by_default(monkeypatch, tmp_path, capsys):
+    _write_example_config(monkeypatch, tmp_path)
+
+    stderr, _ = _start(monkeypatch, capsys, [])
+
+    assert "assistant: " not in stderr
+
+
+def test_debug_flag_prints_the_summary_and_logs_at_debug(monkeypatch, tmp_path, capsys):
+    _write_example_config(monkeypatch, tmp_path)
+
+    stderr, configs = _start(monkeypatch, capsys, ["--debug"])
+
+    assert "assistant: " in stderr and "resident" in stderr
+    assert configs[0].log_level == "DEBUG"
+
+
+def test_logging_level_debug_prints_the_summary(monkeypatch, tmp_path, capsys):
+    _write_example_config(monkeypatch, tmp_path, lambda text: text.replace('level = "INFO"', 'level = "DEBUG"'))
+
+    stderr, _ = _start(monkeypatch, capsys, [])
+
+    assert "assistant: " in stderr
+
+
+def test_the_summary_is_logged_whatever_the_level(monkeypatch, tmp_path, capsys, caplog):
+    _write_example_config(monkeypatch, tmp_path)
+
+    with caplog.at_level("INFO", logger="kokua.cli"):
+        _start(monkeypatch, capsys, [])
+
+    assert any(record.getMessage().startswith("assistant: ") for record in caplog.records)

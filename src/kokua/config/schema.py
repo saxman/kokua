@@ -13,6 +13,9 @@ from typing import Optional, Union
 
 from kokua.config import paths as paths
 
+#: The default approval tier's name, used as a policy's source label. No agent can have it: brackets and
+#: dots cannot appear in a TOML bare key.
+DEFAULT_POLICY_SOURCE = "[assistant.tools]"
 DEFAULT_SYSTEM_MESSAGE = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 
 #: The write policy Kokua ships with, and the default of ``[security].locked_config_keys``. A pattern is
@@ -24,6 +27,9 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     "email.to",
     "paths.data_dir",
     "agents.*",
+    # The default approval tier decides which calls reach the user at all, so it is locked for the reason
+    # `security.*` locked `confirm_tools` before the gate moved here.
+    "assistant.tools.*",
     # A reviewer's prompt and model decide how the assistant's own work is judged, including whether a
     # gated tool call is waved through, so it is locked for the reason [agents.*] is: update_config is a
     # tool the assistant holds.
@@ -35,12 +41,48 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
 )
 
 
+class AllToolsets:
+    """The declaration ``available = "all"``: every installed toolset, which config cannot enumerate.
+
+    ``config/`` is the bottom layer and cannot see the toolset registry, so it keeps the declaration
+    as this sentinel and leaves expansion to a caller that can. Iterating it raises rather than
+    yielding, so a reader that forgot to expand it fails loudly instead of walking the letters of
+    ``"all"`` or silently treating the agent as holding nothing. There is one instance,
+    ``ALL_TOOLSETS``, compared by identity.
+    """
+
+    def __iter__(self):
+        raise TypeError('available = "all" must be expanded with core.agents.available_for')
+
+    def __repr__(self) -> str:
+        return "all"
+
+    # Copying or pickling a config must hand back this same instance, since every reader asks
+    # `is ALL_TOOLSETS`.
+    def __copy__(self) -> AllToolsets:
+        return self
+
+    def __deepcopy__(self, memo: dict) -> AllToolsets:
+        return self
+
+    def __reduce__(self) -> str:
+        return "ALL_TOOLSETS"
+
+
+ALL_TOOLSETS = AllToolsets()
+
+
 @dataclass
 class AgentConfig:
     """One agent, declared whole in ``config.toml``.
 
-    ``tools`` names toolsets in the single registry namespace, so an entry may be an AIMU built-in
-    group, a plugin, or a configured MCP server, and the agent does not say which. A non-empty
+    An agent's tool access is declared whole in its ``[agents.<name>.tools]`` subtable. ``available``
+    names toolsets in the single registry namespace, so an entry may be an AIMU built-in group, a
+    plugin, or a configured MCP server, and the agent does not say which. ``confirm`` and ``review``
+    are its approval pair: the calls that ask the user, and the calls that ask a reviewer first. Both
+    ``None`` means the agent inherits ``[assistant.tools]``; the parser never leaves exactly one of
+    them ``None``, so a pair is declared or inherited whole (see ``AssistantConfig.approval_entries_for``).
+    A non-empty
     ``delegates_to`` is what makes this agent a delegator: there is no separate switch that could
     disagree with it.
 
@@ -62,7 +104,13 @@ class AgentConfig:
     model: Optional[str] = None
     thinking: Optional[Union[bool, str]] = None
     generation: dict = field(default_factory=dict)
-    tools: list[str] = field(default_factory=list)
+    available: Union[list[str], AllToolsets] = field(default_factory=list)
+    confirm: Optional[list[str]] = None
+    review: Optional[list[str]] = None
+    # The subset of `available` whose tool schemas are sent from the first turn. None means every
+    # available toolset is resident. The parser checks a declared list against a declared `available`
+    # list; against "all", which only the registry can expand, `core.agents.validate_agents` checks it.
+    resident: Optional[list[str]] = None
     delegates_to: list[str] = field(default_factory=list)
     # This agent's tool-loop cap, overriding [assistant].max_iterations for it alone (see
     # AssistantConfig.max_iterations_for). None means undeclared. The parse layer rejects anything
@@ -123,16 +171,21 @@ class MCPServerConfig:
     """A remote MCP server to connect at startup.
 
     ``name`` is how the server enters the toolset namespace, so an agent declares it exactly as it
-    declares any other capability. It is required: a server no agent can name reaches no agent.
+    declares any other capability. It is required: a server no agent can name reaches no agent, not even
+    one declaring ``available = "all"``, which holds every server registered by name at startup.
 
     ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
     the secret stays out of the config file. It is unset for an unauthenticated server, or one using
     the OAuth flow that triggers on an auth challenge.
+
+    ``description`` is the catalogue line for the server's toolset, which an agent reads to decide
+    whether to load it; unset, the catalogue says only where the server is.
     """
 
     url: str
     name: str
     token_env: Optional[str] = None
+    description: Optional[str] = None
 
 
 @dataclass
@@ -213,18 +266,22 @@ class AssistantConfig:
     # the first message truncated. Runtime-mutable, so it is also a CORE_RUNTIME_SETTINGS entry: the
     # spawn reads it per conversation, which is what makes a change apply with no restart.
     generate_titles: bool = True
-    # Tools that require interactive confirmation before each call (see assistant._approve). These
-    # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
+    # Hot: one of ``CORE_RUNTIME_SETTINGS`` (config/table.py); read once per turn by ``TurnRunner``.
+    capture_requests: bool = True
+    # The default tier of tools that require interactive confirmation before each call, for every agent
+    # that does not declare its own pair in [agents.<name>.tools] ([assistant.tools].confirm); see the
+    # per-agent gate, core.interaction.HumanGate.approve. These run with full machine access. Emptying
+    # both this and default_review turns default approvals off. Proactive turns auto-deny them.
     # Each entry names the toolset providing the tool: "<toolset>" or "<toolset>.*" for all of them,
     # "<toolset>.<tool>" for one, with "core" reserved for the tools no toolset provides. Resolved to
-    # tool names at startup by core.agents.resolve_confirm_tools, which rejects an entry gating nothing.
+    # tool names at startup by core.approval.resolve_approval_policies, which rejects an entry gating nothing.
     # `fs_write` is named bare where the others name a tool, and the asymmetry is the point: that toolset
     # is `select(builtin.fs, include=builtin.unscoped)`, so it holds every writer AIMU puts in that group
     # and nothing else. Naming its two tools would gate today's writers and leave tomorrow's ungated on
     # an upgrade, which is the drift `toolsets/fs.py` selects by reach to avoid, reappearing one layer up.
     # `compute` cannot be named bare for the same reason in reverse: it carries `calculate`, which no gate
     # should stop.
-    confirm_tools: list[str] = field(
+    default_confirm: list[str] = field(
         default_factory=lambda: [
             "skills.add_skill_script",
             "mcp.add_mcp_server",
@@ -234,11 +291,11 @@ class AssistantConfig:
             "config.update_config",
         ]
     )
-    # Tools no reviewer may ever approve, whatever [security.auto_approval].tools names, in the same
-    # vocabulary confirm_tools uses. These three change what may act *later* rather than acting once, so
+    # Tools no reviewer may ever approve, whatever a review list names, in the same
+    # vocabulary a confirm list uses. These three change what may act *later* rather than acting once, so
     # the arguments a review was about stop constraining anything the moment the write lands: a waved
     # `update_config` can widen this very list, a waved `add_skill_script` writes a script that becomes a
-    # tool, and a waved `add_mcp_server` adds a tool source. Naming one in auto_approval_tools is a
+    # tool, and a waved `add_mcp_server` adds a tool source. Naming one in a review list is a
     # startup error. Editable, like every control in this section, and only by hand: the shipped
     # `security.*` lock pattern keeps update_config out of here.
     never_auto_approve: list[str] = field(
@@ -248,13 +305,14 @@ class AssistantConfig:
             "mcp.add_mcp_server",
         ]
     )
-    # Whether a declared reviewer may approve a gated tool call in place of the user, and which tools it
-    # may be asked about. Off by default, and startup-only: the whole table is locked by `security.*`, so
+    # Whether a declared reviewer may approve a gated tool call in place of the user; which tools it may
+    # be asked about is the `review` list of [assistant.tools] and [agents.<name>.tools]. Off by default, and startup-only: the whole table is locked by `security.*`, so
     # only a hand-edit changes it, and a hand-edit can restart. A reviewer is named here and declared in
     # [reviewers.<name>]; naming more than one requires all of them to agree.
     auto_approval_enabled: bool = False
     auto_approval_reviewers: list[str] = field(default_factory=list)
-    auto_approval_tools: list[str] = field(default_factory=list)
+    # The default tier of tools a reviewer is asked about before the user is ([assistant.tools].review).
+    default_review: list[str] = field(default_factory=list)
     # Past this, the review escalates rather than being waited on any longer.
     auto_approval_timeout_seconds: float = 10.0
     # Most auto-approvals one turn may collect. A loop calling one tool twenty times must not collect
@@ -348,6 +406,19 @@ class AssistantConfig:
         declared = agent.thinking if agent else None
         return self.thinking if declared is None else declared
 
+    def approval_entries_for(self, agent_name: str) -> tuple[list[str], list[str], str]:
+        """``(confirm, review, source)`` for ``agent_name``: its own pair, else the ``[assistant.tools]`` pair.
+
+        The pair is inherited whole, never per key. A per-key merge could hand an agent that declared only
+        ``confirm`` an inherited ``review`` naming the same tool, and a tool in both lists has no single
+        meaning. ``source`` names the table the entries came from so a startup error can point at the
+        line to edit. A name not in ``agents`` (a composed worker) takes the default tier.
+        """
+        agent = self.agents.get(agent_name)
+        if agent is not None and agent.confirm is not None and agent.review is not None:
+            return agent.confirm, agent.review, f"[agents.{agent_name}.tools]"
+        return self.default_confirm, self.default_review, DEFAULT_POLICY_SOURCE
+
     def generation_for(self, agent_name: str) -> dict:
         """The generation parameters ``agent_name`` runs with: ``[assistant.generation]``, per-key
         overridden by its own ``[agents.<name>.generation]``.
@@ -425,6 +496,11 @@ class AssistantConfig:
     @property
     def documents_path(self) -> Path:
         return self.data_dir / "documents"
+
+    @property
+    def pages_path(self) -> Path:
+        """Pages the `web` toolset's `fetch_page` stored, as plain files. Never pruned automatically."""
+        return self.data_dir / "pages"
 
     @property
     def downloads_path(self) -> Path:

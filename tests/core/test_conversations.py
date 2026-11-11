@@ -1202,6 +1202,7 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
     assistant, parent = await _assistant_with_branchable_parent(
         tmp_path,
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
+        requests={"1": {"calls": [], "endings": []}, "5": {"calls": [], "endings": []}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
         # Shaped like `usage`/`model` above, not `subagent`'s list-per-event map, but it rides the
@@ -1217,6 +1218,7 @@ async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
 
     branched = assistant._store.get(branch_id)
     assert branched.metadata["usage"] == {"1": {"calls": 1}}
+    assert branched.metadata["requests"] == {"1": {"calls": [], "endings": []}}
     assert branched.metadata["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in branched.metadata
     assert branched.metadata["undelivered"] == {
@@ -1434,6 +1436,7 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
     assistant, parent = await _assistant_with_branchable_parent(
         tmp_path,
         usage={"1": {"calls": 1}, "5": {"calls": 2}},
+        requests={"1": {"calls": [], "endings": []}, "5": {"calls": [], "endings": []}},
         model={"1": "ollama:gemma", "5": "ollama:gemma"},
         subagent={"5": [{"task": "check the ferry times"}]},
         undelivered={
@@ -1447,6 +1450,7 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
     kept = assistant._store.get(parent.key).metadata
     # Filtered, not remapped: a prefix cut leaves every surviving index where it was.
     assert kept["usage"] == {"1": {"calls": 1}}
+    assert kept["requests"] == {"1": {"calls": [], "endings": []}}
     assert kept["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in kept
     assert kept["undelivered"] == {"1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}
@@ -1862,3 +1866,33 @@ def test_artifacts_are_turn_keyed_so_a_branch_keeps_them():
     from kokua.core.conversations import TURN_KEYED_METADATA
 
     assert "artifacts" in TURN_KEYED_METADATA
+
+
+def test_turn_numbers_skip_loop_nudges_agent_messages_and_mid_turn_messages():
+    from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
+
+    from kokua.core.conversations import turn_numbers
+
+    messages = [
+        {"role": "user", "content": "first"},  # 0 -> turn 1
+        {"role": "assistant", "content": "a"},
+        {"role": "user", "content": "nudge", PROVENANCE_KEY: PROVENANCE_CONTINUATION},
+        {"role": "user", "content": "typed mid-turn"},  # 3, recorded mid-turn
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "second"},  # 5 -> turn 2
+    ]
+    assert turn_numbers(messages, {"messages": {"0": [3]}}) == {0: 1, 5: 2}
+
+
+def test_turn_numbers_skip_a_mixed_delivery_which_replay_also_does_not_open_a_turn_at():
+    from aimu.models import PROVENANCE_KEY
+
+    from kokua.core.conversations import turn_numbers
+    from kokua.core.messages import PROVENANCE_MIXED
+
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "user", "content": "both", PROVENANCE_KEY: PROVENANCE_MIXED},
+        {"role": "user", "content": "second"},
+    ]
+    assert turn_numbers(messages, {}) == {0: 1, 2: 2}

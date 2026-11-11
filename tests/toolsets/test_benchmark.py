@@ -26,6 +26,7 @@ from kokua.toolsets.benchmark import (
     format_report,
     measure_run,
 )
+from tests.helpers import allow_all_gates
 
 
 class FakeStreamingClient:
@@ -341,8 +342,8 @@ def _delegating_config(tmp_path):
         data_dir=tmp_path,
         model="ollama:entry",
         agents={
-            "assistant": AgentConfig(tools=["benchmark"], delegates_to=["researcher"]),
-            "researcher": AgentConfig(tools=["benchmark"], model="ollama:worker"),
+            "assistant": AgentConfig(available=["benchmark"], delegates_to=["researcher"]),
+            "researcher": AgentConfig(available=["benchmark"], model="ollama:worker"),
         },
     )
 
@@ -365,7 +366,7 @@ async def test_benchmark_model_measures_with_its_own_agents_reasoning_effort(mon
     config = AssistantConfig(
         data_dir=tmp_path,
         thinking="high",
-        agents={"assistant": AgentConfig(), "researcher": AgentConfig(tools=["benchmark"], thinking=False)},
+        agents={"assistant": AgentConfig(), "researcher": AgentConfig(available=["benchmark"], thinking=False)},
     )
     client = _install_client(
         monkeypatch, FakeStreamingClient([_text(["a"])] * (TIMED_RUNS + 1), usage={"output_tokens": 1})
@@ -384,7 +385,7 @@ async def test_a_declared_worker_holding_the_toolset_measures_its_own_model(monk
     from kokua.registry.context import LiveState
 
     config = _delegating_config(tmp_path)
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     _install_client(monkeypatch, FakeStreamingClient([_text(["a"])] * (TIMED_RUNS + 1), usage={"output_tokens": 1}))
 
     specs = build_agent_specs(config, state, "assistant")

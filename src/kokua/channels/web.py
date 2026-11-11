@@ -12,7 +12,7 @@ carries the running turn's conversation id (set by ``Assistant._handle``/``_proa
 running that turn); :meth:`WebChannel._foreground` compares it against
 :attr:`WebChannel.active_conversation_id` (the viewed conversation) to decide whether to emit. ``None``
 means "no turn context" (e.g. a direct push, or the CLI channel, which has no muting at all) and is
-always treated as foreground. ``Assistant._approve`` reads the same contextvar (against
+always treated as foreground. ``HumanGate.approve`` reads the same contextvar (against
 ``Assistant._active_id`` rather than this channel's ``active_conversation_id``) to gate tool approval on
 foreground: a background turn auto-denies a gated tool since no user is watching to confirm it.
 
@@ -35,7 +35,7 @@ from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional, Union
 
 from aimu.aio.channels.base import ChannelMessage
 from aimu.aio.channels.web import WebChannel as BaseWebChannel
@@ -51,7 +51,7 @@ streaming_conversation: ContextVar[Optional[str]] = ContextVar("streaming_conver
 # True while a proactive/scheduled turn runs in this task (set by Assistant._proactive /
 # _run_in_new_session). Unlike streaming_conversation, this does not depend on which conversation is
 # viewed: a firing on a channel with no conversation list runs in the viewed conversation and would
-# otherwise look foreground, so Assistant._approve reads this to auto-deny a
+# otherwise look foreground, so HumanGate.approve reads this to auto-deny a
 # gated tool for any proactive turn (nobody is watching to confirm an unattended full-access call).
 proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 
@@ -83,6 +83,8 @@ _TURN_FRAMES = frozenset(
         "plan",
         "phase",
         "subagent",
+        "request",
+        "ending",
     }
 )
 
@@ -90,6 +92,22 @@ _TURN_FRAMES = frozenset(
 def _now() -> str:
     """Now, in the ISO form the page's timestamp captions parse (the same form persisted messages use)."""
     return datetime.now().isoformat()
+
+
+def _tool_frame(call: Any) -> dict:
+    """A ``tool`` frame for one TOOL_CALLING chunk's content: AIMU's frame plus the ``toolset`` the call
+    came from, which ``ChannelUI`` adds to the chunk and AIMU's own mapping would drop. Absent, not
+    ``None``, when no toolset is known, so the page tells "unknown" from a toolset by the key alone."""
+    call = call if isinstance(call, dict) else {}
+    frame = {
+        "type": "tool",
+        "name": call.get("name"),
+        "arguments": call.get("arguments"),
+        "response": call.get("response"),
+    }
+    if call.get("toolset"):
+        frame["toolset"] = call["toolset"]
+    return frame
 
 
 class _CatchUpRecord:
@@ -299,7 +317,9 @@ class WebChannel(BaseWebChannel):
             frame["elapsed"] = elapsed
         await self.send_frame(frame)
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
+    async def send_turn_saved(
+        self, conversation_id: str, message_index: int, *, token: Optional[str] = None, turn: Optional[int] = None
+    ) -> None:
         """Tell the page a turn has reached the store, and where in the transcript it starts.
 
         Never muted (``turn_saved`` is not in ``_TURN_FRAMES``): it carries the conversation it is
@@ -318,7 +338,13 @@ class WebChannel(BaseWebChannel):
         }
         if token is not None:
             frame["token"] = token
+        if turn is not None:
+            frame["turn"] = turn
         await self.send_frame(frame)
+
+    async def send_turn(self, number: int) -> None:
+        """Nothing: the page gets a turn's number from ``turn_saved`` and from history, so the plain-line
+        fallback ``ChannelUI.show_turn`` would otherwise print is suppressed by defining this."""
 
     async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
         """Tell the page a message it drew has joined the turn already running rather than starting one.
@@ -387,6 +413,25 @@ class WebChannel(BaseWebChannel):
             else:
                 yield ChannelMessage(text=item, sender="web", channel=self.name)
 
+    async def send(
+        self,
+        content: Union[str, AsyncIterator[StreamChunk]],
+        *,
+        reply_to: Optional[ChannelMessage] = None,
+    ) -> None:
+        """Stream a reply, sending the frames this subclass maps itself along the way.
+
+        Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
+        hook); strings (including proactive pushes) pass straight through. A
+        background turn needs no special path here: the base loop drains the whole stream either way
+        (so the agent run completes and its state persists), and each frame it produces is muted or not
+        on its own, as the view stands when that frame is sent (see the module docstring).
+        """
+        if isinstance(content, str):
+            await super().send(content, reply_to=reply_to)
+            return
+        await super().send(self._forward_own_frames(content), reply_to=reply_to)
+
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream the agentic loop live and return the accumulated GENERATING text.
 
@@ -410,15 +455,7 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.THINKING and chunk.content:
                 await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING:
-                call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame(
-                    {
-                        "type": "tool",
-                        "name": call.get("name"),
-                        "arguments": call.get("arguments"),
-                        "response": call.get("response"),
-                    }
-                )
+                await self.send_frame(_tool_frame(chunk.content))
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
@@ -432,6 +469,21 @@ class WebChannel(BaseWebChannel):
                 sent = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "inbox", "text": sent.get("text", "")})
         return "".join(parts)
+
+    async def _forward_own_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Pass ``chunks`` on to the base ``send`` loop, sending the one frame that loop cannot produce.
+
+        A tool call is sent here instead and *not* passed on, because the base loop's ``tool`` frame has no
+        ``toolset`` (see :func:`_tool_frame`) and sending both would draw the call twice. An image a tool
+        generates is not spotted here: the tool publishes it to the turn (``core/artifacts.py``), which
+        reaches the page as an ``artifact`` frame from any agent, a worker included.
+        """
+        async for chunk in chunks:
+            if chunk.phase == StreamingContentType.TOOL_CALLING:
+                if self.stream_tools:
+                    await self.send_frame(_tool_frame(chunk.content))
+                continue
+            yield chunk
 
     async def send_conversations(self, items: list[dict]) -> None:
         """Send the conversation list so the page can render the sidebar."""
@@ -465,6 +517,8 @@ class WebChannel(BaseWebChannel):
             failure=meta.get("failure"),
             mid_turn=meta.get("messages"),
             undelivered=meta.get("undelivered"),
+            requests=meta.get("requests"),
+            toolsets=meta.get("toolsets"),
             artifacts=meta.get("artifacts"),
         )
         record = self._catch_up.get(self.active_conversation_id)
@@ -479,6 +533,25 @@ class WebChannel(BaseWebChannel):
         preference that never reaches the server. The frame stays part of the transport's contract.
         """
         await self.send_frame({"type": "settings", "values": values})
+
+    async def send_models(self, models: dict) -> None:
+        """Say which models this session runs on, so the page can show the one answering.
+
+        One frame per connection, sent once the assistant has started, because the answer is
+        startup-only: ``[assistant].model`` and each ``[agents.<name>].model`` are read as the agents
+        are built, so nothing during the session can change it and nothing has to refresh it. That is
+        exactly why the page needs telling at all: a running session otherwise cannot say which model
+        it is talking to, which is the question ``/diag`` answers in the terminal.
+
+        ``models`` reaches the wire as the fields ``build.model_record`` returned, not as a sentence:
+        the page writes its own words for them (a header label from ``model``, the whole record in its
+        tooltip), the way the sidebar words a task's status for a person.
+
+        Like ``send_settings`` and ``send_tasks``, a front-end concern rather than part of
+        ``RichChannel``: the core never sends it, so there is no capability for ``ChannelUI`` to
+        degrade. A terminal asks the same question with ``/diag`` and gets prose back.
+        """
+        await self.send_frame({"type": "models", **models})
 
     async def send_tasks(self, items: list[dict]) -> None:
         """Send the scheduled tasks so the page can populate its sidebar task section.
@@ -523,13 +596,13 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "download", "name": name, "url": url})
 
-    async def send_approval_request(self, name: str, arguments: Any) -> None:
+    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
         """
-        await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
+        await self.send_frame({"type": "approval", "name": name, "arguments": arguments, "agent": agent})
 
     async def send_auto_approval(
         self,
@@ -540,6 +613,7 @@ class WebChannel(BaseWebChannel):
         reason: str,
         model: str,
         conversation_id: Optional[str] = None,
+        agent: Optional[str] = None,
     ) -> None:
         """Show the page a reviewer's answer about a gated tool call. Nothing replies to this frame.
 
@@ -562,6 +636,7 @@ class WebChannel(BaseWebChannel):
                 "reason": reason,
                 "model": model,
                 "conversation_id": conversation_id,
+                "agent": agent,
             }
         )
 
@@ -594,7 +669,7 @@ class WebChannel(BaseWebChannel):
         verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
         and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
         entries (a ``"tool"`` entry carrying ``name``/``arguments``/``response``, the last being what the
-        call returned), closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
+        call returned, and ``toolset`` when it is known), closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
         reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
         no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
 
@@ -613,6 +688,19 @@ class WebChannel(BaseWebChannel):
         Muted for a background turn (see the module docstring)."""
         frame = {key: record[key] for key in ("url", "filename", "mime")}
         await self.send_frame({"type": "artifact", **frame})
+
+    async def send_request(self, record: dict) -> None:
+        """Mark one completed model call. Only the entry agent's run (no ``parent_run_id``) is sent; a
+        sub-agent's calls appear in its own card instead. ``TurnRunner`` decides which records reach here.
+        Muted for a background turn."""
+        if record.get("parent_run_id") is None:
+            await self.send_frame({"type": "request", **record})
+
+    async def send_ending(self, ending: dict) -> None:
+        """Say how the entry agent's tool loop ended; a sub-agent's ending appears in its card.
+        ``TurnRunner`` decides which records reach here. Muted for a background turn."""
+        if ending.get("parent_run_id") is None:
+            await self.send_frame({"type": "ending", **ending})
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'

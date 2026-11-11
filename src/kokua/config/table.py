@@ -108,8 +108,12 @@ class RuntimeSetting:
 # is not a capability anyone grants: `Assistant._spawn_title` reads it, and nothing else can.
 # Hot rather than startup-only because the read happens per conversation, so a change genuinely applies
 # without a restart -- the test every candidate has to pass (see ``core.settings_runtime`` on the model,
-# which fails it).
-CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (RuntimeSetting("generate_titles", "assistant", bool),)
+# which fails it). ``capture_requests`` passes both bars the same way: the core reads it, in
+# ``TurnRunner``, once as each turn opens, so a change applies from the next turn without a restart.
+CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
+    RuntimeSetting("generate_titles", "assistant", bool),
+    RuntimeSetting("capture_requests", "assistant", bool),
+)
 
 
 def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:

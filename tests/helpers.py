@@ -16,6 +16,19 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
 
 
+def allow_all_gates(agent_name: str):
+    """A ``LiveState.gate_for`` that approves every call, for tests that build agents without an assistant.
+
+    A started assistant binds each agent to ``HumanGate.approve``; a test constructing a bare
+    ``LiveState`` has no gate to bind, and an agent wired without one would fail to build.
+    """
+
+    async def approve(name: str, arguments: dict) -> bool:
+        return True
+
+    return approve
+
+
 def core_table() -> SettingsTable:
     """The table for a test that has to pass one to ``config.file.load`` or ``apply_setting``.
 
@@ -25,9 +38,9 @@ def core_table() -> SettingsTable:
     not about a contributed setting. A test that needs one uses ``build_settings_table()``, or builds its
     own table with the entries it needs.
 
-    Holds Kokua's own runtime settings, which today is ``[assistant].generate_titles`` and nothing else.
-    A test that needs a hot key it can set freely, rather than a core-only *schema*, wants
-    :func:`hot_table` instead.
+    Holds Kokua's own runtime settings, which today is ``[assistant].generate_titles`` and
+    ``[assistant].capture_requests``. A test that needs a hot key it can set freely, rather than a core-only *schema*,
+    wants :func:`hot_table` instead.
     """
     return SettingsTable(CORE_RUNTIME_SETTINGS)
 

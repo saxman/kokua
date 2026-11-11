@@ -125,7 +125,7 @@ async def test_a_failed_start_does_not_retry(tmp_path, monkeypatch):
     cfg = _config(
         tmp_path,
         mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc")],
-        confirm_tools=["execute_pythn"],
+        default_confirm=["execute_pythn"],
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -155,7 +155,7 @@ async def test_start_validates_the_approval_gates(tmp_path):
     """`confirm_tools` can only be checked once every tool exists, which is now a `start` concern.
     A gate naming no real tool is a hard error rather than a prompt that never comes."""
     assistant = await Assistant.create(
-        _config(tmp_path, confirm_tools=["execute_pythn"]), FakeChannel(), client=MockAsyncModelClient([])
+        _config(tmp_path, default_confirm=["execute_pythn"]), FakeChannel(), client=MockAsyncModelClient([])
     )
 
     with pytest.raises(ConfigError) as error:

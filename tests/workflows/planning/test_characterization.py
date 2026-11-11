@@ -35,6 +35,9 @@ class RecordingChannel(Channel):
         if not phases:  # a channel that cannot render a verbose trace
             self.send_phase = None
 
+    async def send_turn(self, number: int) -> None:
+        pass  # the turn marker is not what these tests are about
+
     async def receive(self):
         if False:
             yield None

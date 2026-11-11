@@ -93,10 +93,11 @@ def test_a_bare_channel_streams_reasoning_and_tool_calls():
 
 
 async def test_a_mid_turn_chunk_prints_its_own_marker(capsys):
-    """Kokua's `CLIChannel` defines no `send` of its own, so a message typed mid-turn reaches the
-    terminal only because AIMU's base channel already prints one. This pins that inherited behaviour:
-    Kokua overriding `send` later (for `/attach`-style markers, say) without carrying this arm forward
-    would make a redirect typed mid-turn vanish on the one channel with no bubble to confirm it landed.
+    """Kokua's `CLIChannel.send` only renames tool calls before handing the stream to AIMU's base
+    channel, so a message typed mid-turn reaches the terminal only because that base already prints one.
+    This pins that inherited behaviour: an override that took over more of the loop without carrying
+    this arm forward would make a redirect typed mid-turn vanish on the one channel with no bubble to
+    confirm it landed.
 
     The marker text is AIMU's own choice, not Kokua's: AIMU renamed the chunk from `STEERING` to
     `INBOX` and relabelled the line it prints from `[steering]` to `[message]` in the same release.
@@ -107,3 +108,34 @@ async def test_a_mid_turn_chunk_prints_its_own_marker(capsys):
 
     await CLIChannel().send(gen())
     assert "[message] use the cache" in capsys.readouterr().out
+
+
+async def test_a_tool_call_prints_as_toolset_dot_tool(capsys):
+    async def gen():
+        yield StreamChunk(
+            StreamingContentType.TOOL_CALLING, {"name": "calculate", "arguments": {}, "toolset": "compute"}
+        )
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "mystery", "arguments": {}})
+
+    await CLIChannel().send(gen())
+    out = capsys.readouterr().out
+    assert "[tool] compute.calculate()" in out
+    assert "[tool] mystery()" in out
+
+
+async def test_the_terminal_prints_the_turn_line_and_every_ending(capsys):
+    from kokua.channels.ui import ChannelUI
+
+    ui = ChannelUI(CLIChannel())
+    await ui.show_turn(3)
+    await ui.show_ending(
+        {"agent": "assistant", "ended_by": "answered", "round": 0, "max_iterations": 10, "error": None}
+    )
+    await ui.show_ending(
+        {"agent": "assistant", "ended_by": "wrap_up", "round": 10, "max_iterations": 10, "error": None}
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        "[turn 3]",
+        "[assistant] ended: answered at round 1 of 10",
+        "[assistant] ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call",
+    ]

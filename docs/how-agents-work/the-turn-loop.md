@@ -87,6 +87,19 @@ arrived, not a formatting slip in this page.
 second agent built for the occasion. [Delegation](delegation.md) is that mechanism in full; here it is
 just a tool that took a while to return.
 
+The web UI exposes the loop's boundaries too, without drawing them into the conversation. Each model
+call puts a small `{ }` button on its own output (`round 1`, `round 2`, counted the way a person
+counts), and clicking it opens a panel on the right with that round's details. When the loop stops, the
+panel for its last round carries one line saying which rule stopped it: `ended: answered at round 2 of
+10`, `ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call` for the forced
+wrap-up, or `ended: error (...) at round 3 of 10`. A wrap-up or an error also tints that round's button,
+so a loop that did not end normally is visible without opening anything. That line is the answer to "why
+did it stop", and the last round's request is the last request the model saw. Every surface counts
+rounds from 1, and the wrap-up line names the cap instead of a round, since the forced call is the one
+that is not counted. The panel shows the round's request and its response side by side, with download
+links to keep the exact JSON; a request over two million characters is download-only. The terminal
+still prints each loop's ending line, since it has no panel to put it in. Each user message also carries a `turn N` badge, the number a download is named with.
+
 ## In Kokua
 
 The loop itself is not in this repository. It belongs to
@@ -214,10 +227,19 @@ toward. That seam is marked now, though where it shows up depends on whose round
 `CLIChannel` prints the injected round (`[continuing: final_answer] <prompt>`), which Kokua's terminal
 channel inherits with no code of its own. A *worker's* rounds never reach that method: they arrive as
 `subagent` card entries by way of `ChannelUI.show_subagent`, and the terminal offers no frame for those,
-so the call is a documented no-op there. A worker's boundary is drawn in the web UI's sub-agent card
-instead, carrying which injection it was and the exact words the worker was given (see
+so the call is a documented no-op there. What the terminal does get is the ending itself:
+the terminal channel prints one line per ending
+(`[researcher] ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call`) for every
+entry-agent and sub-agent loop, and a channel with no ending frame of its own is told only of the two
+endings that are not routine (the cap and an error). A worker's boundary is drawn in full in the web UI's sub-agent card,
+carrying which injection it was and the exact words the worker was given (see
 [Delegation](delegation.md)). Either way the record says why the answer is thinner rather than reading
 as one that simply ran short.
+The delegating model is told as well, not just you. AIMU's wrap-up prompt asks the worker to name what it
+did not finish, keeping what it checked and found nothing on apart from what it never reached, and the
+spawn tool puts a note in front of a capped worker's answer (`[The sub-agent 'researcher' reached its
+tool-use limit of 25 rounds before it finished, ...]`), so the assistant reads that the work is partial
+before it reads the work. Before AIMU 0.38.0 the assistant learned this only if the worker chose to say so.
 That edge is real enough to have moved this project's AIMU floor: before AIMU 0.26.0, hitting the cap
 with a call still pending produced a provider rejection instead of a wrap-up, and Kokua saw it as
 sub-agents failing rather than answering. The whole story is in [the architecture doc's account of the

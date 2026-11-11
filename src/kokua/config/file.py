@@ -24,7 +24,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
-from kokua.config.schema import AgentConfig, MCPServerConfig, ReviewerConfig
+from kokua.config.schema import ALL_TOOLSETS, AgentConfig, AllToolsets, MCPServerConfig, ReviewerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -199,6 +199,10 @@ _GENERATION_SECTION = "assistant.generation"
 # their own rather than into one shared dict.
 _AUTO_APPROVAL_SECTION = "security.auto_approval"
 
+# The default approval tier, a dotted section like the two above and routed the same way (through the flat
+# schema). Its two keys are a pair: see the rule applied after the flat loop in `load`.
+_ASSISTANT_TOOLS_SECTION = "assistant.tools"
+
 
 def _generation_value(section: str, key: str, value: Any) -> Any:
     """Validate one generation parameter, naming the table it came from.
@@ -279,17 +283,20 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
         if not isinstance(name, str) or not name:
             raise ConfigError(
                 f"[[mcp.server]] requires a string 'name' (server {url}): a server is named so an "
-                "agent can declare it in its tools list."
+                "agent can name it in its available list."
             )
-        unknown = set(entry) - {"url", "token_env", "name"}
+        description = entry.get("description")
+        if description is not None and not isinstance(description, str):
+            raise ConfigError(f"[[mcp.server]].description must be a string (server {url})")
+        unknown = set(entry) - {"url", "token_env", "name", "description"}
         if unknown:
             raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
-        servers.append(MCPServerConfig(url=url, name=name, token_env=token_env))
+        servers.append(MCPServerConfig(url=url, name=name, token_env=token_env, description=description))
     return servers
 
 
 # String-list agent keys share the _str_list validator.
-_AGENT_LIST_KEYS = {"tools", "delegates_to"}
+_AGENT_LIST_KEYS = {"delegates_to"}
 # Agent keys whose value set is closed rather than merely typed, so a validator decides instead of an
 # isinstance check. `thinking` is a bool-or-string union besides, which the type map below cannot express.
 _AGENT_VALIDATED_KEYS = {"thinking": _thinking, "generation": _generation, "max_iterations": _positive_int}
@@ -299,16 +306,115 @@ _AGENT_KEYS = {
     "model": str,
     "thinking": object,  # value set checked by _AGENT_VALIDATED_KEYS; listed here so it is a known key
     "generation": object,  # a sub-table, validated by _AGENT_VALIDATED_KEYS; listed here for the same reason
-    "tools": list,
+    "tools": object,  # a table, validated by _parse_agent_tools; listed here so it is a known key
     "delegates_to": list,
     # `object`, not `int`: the fallback check below is a bare isinstance and bool is an int subclass, so
     # `max_iterations = true` would pass as 1. _AGENT_VALIDATED_KEYS' _positive_int rejects it.
     "max_iterations": object,
 }
-# Per-agent keys the old [subagents.roles.*] vocabulary used, now folded into the single `tools` list:
-# a group, a tool-pack, and an MCP server reference all named a toolset by a different vocabulary word,
-# and the registry that replaced that vocabulary makes the distinction moot.
+# Per-agent keys the old [subagents.roles.*] vocabulary used, now folded into `available` in the agent's
+# `tools` table: a group, a tool-pack, and an MCP server reference all named a toolset by a different
+# vocabulary word, and the registry that replaced that vocabulary makes the distinction moot.
 _REMOVED_AGENT_KEYS = {"groups", "tool_packs", "mcp_servers"}
+
+
+# Keys an agent's `tools` table takes.
+_AGENT_TOOLS_KEYS = ("available", "confirm", "review", "resident")
+
+
+def check_resident_within_available(
+    name: str, resident: Optional[list[str]], available: Union[list[str], AllToolsets]
+) -> None:
+    """Refuse a ``resident`` entry that ``available`` does not hold, and ``available = "all"`` with no
+    ``resident`` at all.
+
+    Shared by the file parser, ``update_config``'s dry run, and ``core.agents.validate_agents``, since the
+    last two see configs built without the parser, so both orderings (a bad resident write, and an
+    available write that strands an existing resident) get the same refusal instead of a file the next
+    startup rejects. Which names an ``available = "all"`` declaration holds is not checked here: config
+    cannot see the registry that says what "all" holds, so that check happens where the expansion does.
+    """
+    if available is ALL_TOOLSETS:
+        if resident is None:
+            raise ConfigError(
+                f'[agents.{name}.tools].available = "all" needs a resident list: with every installed toolset '
+                "available, resident says which ones are in the agent's tools from its first turn."
+            )
+        return
+    for entry in resident or []:
+        if entry not in available:
+            raise ConfigError(
+                f"[agents.{name}.tools].resident names {entry!r}, which is not in available. A resident "
+                "toolset is one this agent already holds; add it to available or drop it here."
+            )
+
+
+def _available_shape_error(section: str) -> ConfigError:
+    return ConfigError(
+        f'[{section}].available must be a list of toolset names, or the string "all" (lowercase, '
+        "not in a list) for every installed toolset."
+    )
+
+
+def _lists_all(names: list) -> bool:
+    """Whether a list of names holds ``"all"`` in any casing, which only the bare string may mean.
+
+    Case-insensitive because a near miss deserves the sentence naming the fix: ``["All"]`` would otherwise
+    pass this check and fail later as an unknown toolset, which says nothing about the spelling that works.
+    """
+    return any(isinstance(name, str) and name.lower() == "all" for name in names)
+
+
+def _available_value(section: str, key: str, value: list) -> Union[list[str], str]:
+    """An ``update_config`` write to ``available``: a list of names, or the string ``"all"``.
+
+    The tool hands every value over as a string and a list key splits it on commas, so ``"all"`` arrives
+    as ``["all"]`` and is read back as the string it was written as. Anything else naming ``"all"``, in
+    another casing (``"ALL"``) or beside other names, is refused in the parser's words.
+    """
+    if value == ["all"]:
+        return "all"
+    if _lists_all(value):
+        raise _available_shape_error(section)
+    return _str_list(section, key, value)
+
+
+def _parse_agent_tools(name: str, value: Any) -> dict:
+    """Validate an agent's ``tools`` table into ``AgentConfig`` field values.
+
+    Declaring either ``confirm`` or ``review`` declares both, the other being ``[]``: the pair is
+    inherited whole or declared whole, so a declared ``confirm`` can never sit beside an inherited
+    ``review`` naming the same tool.
+    """
+    if isinstance(value, list):
+        raise ConfigError(
+            f"[agents.{name}].tools = [...] is now a table: write [agents.{name}.tools] with "
+            "available = [...] (or tools = { available = [...] } on one line)."
+        )
+    if not isinstance(value, dict):
+        raise ConfigError(f"[agents.{name}.tools] must be a table")
+    for key in value:
+        if key not in _AGENT_TOOLS_KEYS:
+            raise ConfigError(f"unknown config key [agents.{name}.tools].{key}")
+    if "available" not in value:
+        raise ConfigError(f"[agents.{name}.tools] needs available = [...]: the toolsets this agent can use.")
+    section = f"agents.{name}.tools"
+    fields: dict = {}
+    declared_available = value["available"]
+    if declared_available != "all" and (not isinstance(declared_available, list) or _lists_all(declared_available)):
+        raise _available_shape_error(section)
+    for key in _AGENT_TOOLS_KEYS:
+        if key == "available" and declared_available == "all":
+            fields[key] = ALL_TOOLSETS
+        elif key in value:
+            if not isinstance(value[key], list):
+                raise ConfigError(f"[{section}].{key} must be a list of strings")
+            fields[key] = _str_list(section, key, value[key])
+    check_resident_within_available(name, fields.get("resident"), fields["available"])
+    if "confirm" in fields or "review" in fields:
+        fields.setdefault("confirm", [])
+        fields.setdefault("review", [])
+    return fields
 
 
 def _parse_agent(name: str, spec: Any) -> AgentConfig:
@@ -319,13 +425,15 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
     for key, value in spec.items():
         if key in _REMOVED_AGENT_KEYS:
             raise ConfigError(
-                f"[agents.{name}].{key} is gone. List it in [agents.{name}].tools instead; every "
+                f"[agents.{name}].{key} is gone. List it in [agents.{name}.tools].available instead; every "
                 "toolset (AIMU group, plugin, or MCP server) is named the same way there now."
             )
         expected = _AGENT_KEYS.get(key)
         if expected is None:
             raise ConfigError(f"unknown config key [agents.{name}].{key}")
-        if key in _AGENT_LIST_KEYS:
+        if key == "tools":
+            fields.update(_parse_agent_tools(name, value))
+        elif key in _AGENT_LIST_KEYS:
             fields[key] = _str_list(f"agents.{name}", key, value)
         elif key in _AGENT_VALIDATED_KEYS:
             fields[key] = _AGENT_VALIDATED_KEYS[key](f"agents.{name}", key, value)
@@ -513,11 +621,11 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("email", "from"): ("email_from", (str,), "a string", None),
     ("email", "to"): ("email_to", (str,), "a string", None),
     ("email", "use_ssl"): ("email_use_ssl", (bool,), "a boolean", None),
-    ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
+    (_ASSISTANT_TOOLS_SECTION, "confirm"): ("default_confirm", (list,), "a list of strings", _str_list),
+    (_ASSISTANT_TOOLS_SECTION, "review"): ("default_review", (list,), "a list of strings", _str_list),
     ("security", "never_auto_approve"): ("never_auto_approve", (list,), "a list of strings", _str_list),
     (_AUTO_APPROVAL_SECTION, "enabled"): ("auto_approval_enabled", (bool,), "true or false", None),
     (_AUTO_APPROVAL_SECTION, "reviewers"): ("auto_approval_reviewers", (list,), "a list of strings", _str_list),
-    (_AUTO_APPROVAL_SECTION, "tools"): ("auto_approval_tools", (list,), "a list of strings", _str_list),
     (_AUTO_APPROVAL_SECTION, "timeout_seconds"): (
         "auto_approval_timeout_seconds",
         (int, float),
@@ -608,7 +716,7 @@ def _named_section(section: str) -> str:
     """A schema section written the way a config file writes it, for error text only.
 
     The inverse of :func:`_schema_section`, and it exists because a hint is something a model acts on
-    literally: told "did you mean [agents.*].tools?", it calls ``update_config`` with that section
+    literally: told "did you mean [agents.*.tools]?", it calls ``update_config`` with that section
     verbatim, and a write policy that has unlocked agent tables then creates an agent named ``*``. The
     placeholder cannot be actioned that way, so a misread costs a second attempt rather than a junk
     table on disk.
@@ -629,9 +737,14 @@ AGENT_SCHEMA: dict[tuple[str, str], tuple] = {
     ("agents.*", "system_message"): ("system_message", (str,), "a string", None),
     ("agents.*", "model"): ("model", (str,), "a string", None),
     ("agents.*", "thinking"): ("thinking", (bool, str), "true, false, or low/medium/high", _thinking),
-    ("agents.*", "tools"): ("tools", (list,), "a list of strings", _str_list),
     ("agents.*", "delegates_to"): ("delegates_to", (list,), "a list of strings", _str_list),
     ("agents.*", "max_iterations"): ("max_iterations", (int,), "an integer >= 1", _positive_int),
+    **{
+        ("agents.*.tools", key): (key, (list,), "a list of strings", _str_list)
+        for key in _AGENT_TOOLS_KEYS
+        if key != "available"
+    },
+    ("agents.*.tools", "available"): ("available", (list,), 'a list of strings, or "all"', _available_value),
     **{
         ("agents.*.generation", key): ("generation", types, label, _generation_value)
         for key, (types, label, _) in _GENERATION_KEYS.items()
@@ -840,6 +953,11 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
                 f"[{section}] does not name an agent: {fault}. Name a real agent, for instance "
                 'section="agents.researcher"; a name holds letters, digits, hyphens, or underscores.'
             )
+    if section.startswith("agents.") and section.count(".") == 1 and key == "tools":
+        raise ConfigError(
+            f"[{section}].tools is a table, not a scalar. Write one list at a time with "
+            f'section="{section}.tools", for instance key="available".'
+        )
     if section.startswith("agents.") and key == "generation":
         raise ConfigError(
             f"[{section}].generation is a table, not a scalar. Set one parameter at a time with "
@@ -869,7 +987,24 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
 # so an old config gets a targeted error instead of a generic unknown-key one. A `None` key matches the
 # whole section, for a table that no longer exists at all regardless of which key inside it is set.
 _REMOVED_KEYS = {
-    ("tools", None): "[tools] is gone. Each agent now lists what it holds in [agents.<name>].tools.",
+    ("tools", None): "[tools] is gone. Each agent now lists what it holds in [agents.<name>.tools].available.",
+    ("security", "confirm_tools"): (
+        "[security].confirm_tools is gone. Gated tools are now [assistant.tools].confirm (asks you) and "
+        "[assistant.tools].review (asks a reviewer first), or the same two keys in an agent's own "
+        "[agents.<name>.tools]. If [security].locked_config_keys is written out in your config.toml, add "
+        '"assistant.tools.*" to it, or update_config can rewrite this policy.'
+    ),
+    (_AUTO_APPROVAL_SECTION, "tools"): (
+        "[security.auto_approval].tools is gone. Move those entries to [assistant.tools].review and remove "
+        "them from confirm; an agent can declare its own review in [agents.<name>.tools]."
+    ),
+    **{
+        (_ASSISTANT_TOOLS_SECTION, key): (
+            f"[assistant.tools].{key} is not a default: availability is declared per agent, never defaulted, "
+            "so each agent declares its own in [agents.<name>.tools]."
+        )
+        for key in ("available", "resident")
+    },
     ("subagents", "concurrent"): "[subagents].concurrent is now [assistant].concurrent_tools.",
     ("assistant", "memory"): (
         "[assistant].memory is gone. Declare the 'memory' and 'documents' toolsets in an agent's "
@@ -1010,6 +1145,12 @@ def load(
                 overrides.setdefault("toolset_settings", {}).setdefault(toolset, {})[setting_key] = coerced
             else:
                 overrides[target] = coerced
+    # [assistant.tools] is a pair: declaring one list declares the other empty, so the default tier is
+    # inherited whole or replaced whole, never half of each.
+    declared_default = {key for key in ("confirm", "review") if f"default_{key}" in overrides}
+    if len(declared_default) == 1:
+        overrides.setdefault("default_confirm", [])
+        overrides.setdefault("default_review", [])
     # Run once the whole file is parsed, because it is the only point where both halves exist: the
     # patterns the user wrote, and the schema naming every section this install really has.
     for pattern in overrides.get(_LOCK_LIST_KEY, ()):

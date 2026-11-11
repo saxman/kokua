@@ -1,13 +1,17 @@
 # Auto-approval
 
-Kokua stops and asks you before it runs a shell command, executes Python, or writes a file. That is
-[`[security].confirm_tools`](../reference/configuration.md#confirm_tools), and it is the control that
-makes a real assistant with real machine access something you can leave running. It is also the
-control you get tired of. A turn that reads six files and runs four commands is ten prompts, and a
+Kokua stops and asks you before it runs a shell command, executes Python, or writes a file. That is each
+agent's approval policy, the `confirm` and `review` lists of
+[`[assistant.tools]`](../reference/configuration.md#assistanttools) or of the agent's own
+[`[agents.<name>.tools]`](../reference/configuration.md#agentsnametools) (the approval axis in
+[Tool access](tool-access.md)), and it is the control that makes a real assistant with real machine
+access something you can leave running. It is also the control you get tired of. A turn that reads six files and runs four commands is ten prompts, and a
 prompt you answer without reading is worse than no prompt at all.
 
 Auto-approval is an optional layer over that gate: a declared model reviewer, running on its own model
-with a prompt you wrote, may answer some of those prompts in your place. It ships **off**, and this
+with a prompt you wrote, may answer the prompts for calls in a policy's `review` list in your place. Which
+calls those are is declared per agent, in the same table as the rest of its approval policy, so a `coder`
+can have a reviewer on `fs_write` while a `researcher` has none. It ships **off**, and this
 page is meant to be read before you switch it on.
 
 ## The security claim, in one sentence
@@ -72,12 +76,15 @@ Three tools are therefore floored in
 [`[security].never_auto_approve`](../reference/configuration.md#never_auto_approve), and no reviewer
 may ever answer for them:
 
-- `config.update_config` can widen `[security].confirm_tools`, or `never_auto_approve` itself.
+- `config.update_config` can widen an approval policy's `confirm` or `review` lists, or `never_auto_approve`
+  itself.
 - `skills.add_skill_script` writes a script that becomes a tool the next turn can call.
 - `mcp.add_mcp_server` adds a whole source of tools.
 
-Naming one of them in `[security.auto_approval].tools` is a startup error, not a warning. The list is
-yours to empty by hand, like every control in that section, and what emptying it buys is a reviewer
+Naming one of them in any policy's `review` list is a startup error, not a warning, whether by the
+tool itself or by its whole toolset (`mcp`, `mcp.*`), and even while that toolset is still waiting to be
+loaded, though only when auto-approval is enabled: with it off nothing consults the floor, so there is nothing for the entry to
+fail to hold back. The list is yours to empty by hand, like every control in that section, and what emptying it buys is a reviewer
 that can approve a capability grant.
 
 Everything else a gate holds back is eligible, and the shipped list is worth reading as an argument
@@ -194,8 +201,8 @@ turn a withheld answer into an approval.
 **The agent being reviewed can read the reviewer's prompt.** `config.toml` is the single source of
 settings and it is yours, so the assistant's own `read_config` hands back the file unredacted; the
 shipped `[agents.assistant]` holds the `config` toolset, so the agent whose calls are being reviewed
-can read `[reviewers.approval].system_message` verbatim, along with `[security.auto_approval].tools`
-and `max_per_turn`. `[security].confirm_tools` was already readable the same way, and this is the same
+can read `[reviewers.approval].system_message` verbatim, along with its own `review` list and
+`max_per_turn`. The `confirm` list was already readable the same way, and this is the same
 consequence of the same principle rather than a new one. It is a different claim from the admission
 above: that one is about *you* editing the standard, this one is about the reviewed model knowing which
 standard it will be held to, which tools it is worth trying, and how many attempts the budget allows.
@@ -218,7 +225,7 @@ exercising your own budget. The whole of that rule is one sender test in `Messag
 Worth reading even if you never turn this on, because the differences are design decisions rather than
 details. What follows describes each project as its own documentation and configuration had it in
 September 2026, when this page was written. None of it can be checked from inside this repository, so
-every figure and every enumerated rule below is attributed to whoever published it. All three projects
+every figure and every enumerated rule below is attributed to whoever published it. All of these projects
 move faster than this page will: treat a claim here as a pointer to their documentation rather than as
 its current state.
 
@@ -240,6 +247,13 @@ read it as the order of magnitude a sandboxed, allowlist-first design reached an
 hold anyone to. Cursor states plainly that the classifier is best-effort convenience and explicitly not
 a security boundary.
 
+**Managed Agents** (Anthropic) has the same three-way split Kokua's policy has, under other names: a
+tool's permission policy is `always_allow`, `always_ask`, or `auto`. The first two are Kokua's "no entry"
+and `confirm`; `auto` is the one that resembles `review`, and the difference is the one this page
+is about. Under `auto` the model's verdict stands, so a reviewer can both approve and refuse. In Kokua a
+`review` reviewer can only approve, and a withheld answer arrives at your prompt, so there is no bucket in
+which a model's no is final.
+
 **Hermes Agent** deliberately does not do this at all. Its Tirith layer is documented as four static
 risk tiers plus human approval, with a hardline blocklist that trips before the approval layer sees a
 command and has no override flag. That is a considered rejection rather than an absence, and it is the
@@ -260,32 +274,38 @@ support than either.
 Kokua's [design principles](design-principles.md) say capability should arrive as a plugin, so a
 feature landing in `core/` owes an argument. This one is not a capability: it is a change to how an
 existing human decision point behaves, inside the one function that owns that decision
-(`HumanGate.approve`). A toolset cannot express it, because a toolset contributes tools and settings,
+(`HumanGate.approve`, which takes the asking agent's name and judges the call by that agent's own
+policy). A toolset cannot express it, because a toolset contributes tools and settings,
 not a fork in the gate every tool passes through.
 
 It also lands squarely inside principle 6 (security is explicit and user controlled) rather than beside
-it. Every part of it is a value in `config.toml` you can read: which tools, which reviewers, which
-prompt, how long to wait, how many per turn. A control that would do nothing (a reviewer nobody
+it. Every part of it is a value in `config.toml` you can read: which tools (each policy's `review` list),
+which reviewers, which prompt, how long to wait, how many per turn. A control that would do nothing (a reviewer nobody
 declared, a tool nothing gates, a prompt nobody wrote) is a hard startup error, because the symptom of
 a broken gate is the absence of a symptom.
 
 ## Turning it on
 
-Read [`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) and
+Move the entries you want reviewed from `confirm` into `review` (see
+[`[assistant.tools]`](../reference/configuration.md#assistanttools); enabling the feature with no `review`
+entry anywhere is a startup error). Read
+[`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) and
 [`[reviewers.<name>]`](../reference/configuration.md#reviewersname) for every key, then edit
-`config.toml` by hand (the whole `[security]` section is locked against the assistant's own
-`update_config`, and this table is startup-only, so a hand-edit and a restart is the only route).
+`config.toml` by hand (the whole `[security]` section and `[assistant.tools]` are locked against the
+assistant's own `update_config`, and both are startup-only, so a hand-edit and a restart is the only
+route).
 
 The shipped
 [`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml)
 already carries a `[reviewers.approval]` table with a real prompt, so switching on is `enabled = true`
-plus a decision about which tools and which model. Two suggestions worth taking:
+plus a decision about which tools go in `review` and which model. Two suggestions worth taking:
 
 - **Point the reviewer at a different model from `[assistant].model`.** A reviewer running the same
   model as the agent it reviews can be talked out of the same judgement by the same text. Startup warns
   when the two match.
-- **Start with one tool.** `tools = ["fs_write"]` on a machine where you have backups tells you what
-  the reviewer's judgement is actually like, at a cost you can see.
+- **Start with one tool.** `review = ["fs_write"]` in `[assistant.tools]` (with the rest moved to
+  `confirm`) on a machine where you have backups tells you what the reviewer's judgement is actually like,
+  at a cost you can see.
 
 ## See also
 

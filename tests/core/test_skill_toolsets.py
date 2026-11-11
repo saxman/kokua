@@ -14,6 +14,7 @@ import pytest
 from kokua.config.schema import AgentConfig
 from kokua.core.agents import build_agent_specs, build_registry, without_skill_names
 from kokua.registry.context import LiveState
+from tests.helpers import allow_all_gates
 from kokua.registry.registry import ToolsetError, select
 from tests.channels import _config
 
@@ -33,7 +34,7 @@ def write_skill(config, name: str, description: str, script: str | None = None) 
 
 
 def _state(config) -> LiveState:
-    return LiveState(config=config, registry=build_registry(config))
+    return LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
 
 
 def test_a_skill_on_disk_is_registered_under_its_name(tmp_path):
@@ -81,8 +82,8 @@ def test_a_worker_declaring_a_skill_receives_its_tools(tmp_path):
     """A worker is a plain agent, so the registry is the only way a skill reaches it."""
     config = _config(tmp_path)
     write_skill(config, "citation-check", "Verify a claim.", script="print('checked')\n")
-    config.agents["assistant"] = AgentConfig(tools=["time"], delegates_to=["checker"])
-    config.agents["checker"] = AgentConfig(description="Checks claims.", tools=["citation-check", "time"])
+    config.agents["assistant"] = AgentConfig(available=["time"], delegates_to=["checker"])
+    config.agents["checker"] = AgentConfig(description="Checks claims.", available=["citation-check", "time"])
     state = _state(config)
 
     spec = build_agent_specs(config, state, "assistant")["checker"]
@@ -95,8 +96,8 @@ def test_a_worker_declaring_a_skill_receives_its_tools(tmp_path):
 def test_a_workers_prompt_carries_the_declared_skills_description(tmp_path):
     config = _config(tmp_path)
     write_skill(config, "citation-check", "Verify a claim against its source.")
-    config.agents["assistant"] = AgentConfig(tools=["time"], delegates_to=["checker"])
-    config.agents["checker"] = AgentConfig(description="Checks claims.", tools=["citation-check"])
+    config.agents["assistant"] = AgentConfig(available=["time"], delegates_to=["checker"])
+    config.agents["checker"] = AgentConfig(description="Checks claims.", available=["citation-check"])
     state = _state(config)
 
     spec = build_agent_specs(config, state, "assistant")["checker"]
@@ -108,8 +109,8 @@ def test_a_worker_does_not_receive_a_skill_it_did_not_declare(tmp_path):
     config = _config(tmp_path)
     write_skill(config, "wanted", "Keep me.", script="print('wanted')\n")
     write_skill(config, "unwanted", "Not for this worker.", script="print('unwanted')\n")
-    config.agents["assistant"] = AgentConfig(tools=["time"], delegates_to=["checker"])
-    config.agents["checker"] = AgentConfig(description="Checks.", tools=["wanted"])
+    config.agents["assistant"] = AgentConfig(available=["time"], delegates_to=["checker"])
+    config.agents["checker"] = AgentConfig(description="Checks.", available=["wanted"])
     state = _state(config)
 
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["checker"]["tools"]}
@@ -123,7 +124,7 @@ def test_the_entry_agents_catalogue_is_scoped_to_what_it_declares(tmp_path):
     config = _config(tmp_path)
     write_skill(config, "declared", "Named by the entry agent.")
     write_skill(config, "undeclared", "Present on disk, named by nobody.")
-    config.agents["assistant"] = AgentConfig(tools=["time", "declared"])
+    config.agents["assistant"] = AgentConfig(available=["time", "declared"])
     state = _state(config)
 
     assert sorted(state.skill_manager.skills) == ["declared"]
@@ -138,7 +139,7 @@ def test_an_authoring_entry_agent_sees_every_skill(tmp_path):
     config = _config(tmp_path)
     write_skill(config, "declared", "Named by the entry agent.")
     write_skill(config, "undeclared", "Present on disk, named by nobody.")
-    config.agents["assistant"] = AgentConfig(tools=["time", "skills", "declared"])
+    config.agents["assistant"] = AgentConfig(available=["time", "skills", "declared"])
     state = _state(config)
 
     assert sorted(state.skill_manager.skills) == ["declared", "undeclared"]
@@ -152,10 +153,10 @@ def test_a_skill_name_is_dropped_from_what_a_skill_agent_resolves(tmp_path):
     """
     config = _config(tmp_path)
     write_skill(config, "citation-check", "Verify a claim.")
-    config.agents["assistant"] = AgentConfig(tools=["time", "skills", "citation-check"])
+    config.agents["assistant"] = AgentConfig(available=["time", "skills", "citation-check"])
     registry = build_registry(config)
 
-    assert without_skill_names(config.agents["assistant"].tools, registry) == ["time", "skills"]
+    assert without_skill_names(config.agents["assistant"].available, registry) == ["time", "skills"]
 
 
 def test_a_skill_resolves_through_select_so_a_typo_is_still_caught(tmp_path):
@@ -173,3 +174,79 @@ def _ctx(state: LiveState):
     from kokua.registry.context import ToolsetContext
 
     return ToolsetContext(state=state, agent=None, agent_name="assistant")
+
+
+def test_a_skill_tools_refresh_retires_its_client_until_close(tmp_path, monkeypatch):
+    """A worker spawned before a refresh may still call the old client's tools, so the old client stays
+    open until the state closes, and closing releases every client ever built."""
+    closed: list[int] = []
+
+    class FakeClient:
+        def __init__(self, server):
+            self.number = len(built)
+            built.append(self)
+
+        def as_tools(self):
+            return []
+
+        def close(self):
+            closed.append(self.number)
+
+    built: list[FakeClient] = []
+    monkeypatch.setattr("aimu.tools.MCPClient", FakeClient)
+    config = _config(tmp_path)
+    write_skill(config, "citation-check", "Verify a claim.")
+    state = _state(config)
+
+    assert "citation-check" in state.skill_tools
+    write_skill(config, "weekly-digest", "Digest the week.")
+    state.refresh_skill_tools()
+
+    assert "weekly-digest" in state.skill_tools
+    assert closed == []
+    state.close()
+    assert closed == [0, 1]
+
+
+def test_a_build_finishing_after_a_refresh_does_not_restore_the_old_map(tmp_path, monkeypatch):
+    """A deferred skill group builds in a worker thread. A build that read the skills before a refresh and
+    stores its map after it would hand every worker the pre-refresh map until the next write, so the
+    refresh has to wait for a build already under way."""
+    import threading
+
+    class FakeClient:
+        def __init__(self, server):
+            pass
+
+        def as_tools(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("aimu.tools.MCPClient", FakeClient)
+    config = _config(tmp_path)
+    write_skill(config, "citation-check", "Verify a claim.")
+    state = _state(config)
+    computed, release = threading.Event(), threading.Event()
+    build = state._build_skill_tools
+
+    def paused_build():
+        result = build()
+        computed.set()
+        release.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(state, "_build_skill_tools", paused_build)
+    reader = threading.Thread(target=lambda: state.skill_tools)
+    reader.start()
+    assert computed.wait(timeout=5)
+    write_skill(config, "weekly-digest", "Digest the week.")
+    refresher = threading.Thread(target=state.refresh_skill_tools)
+    refresher.start()
+    refresher.join(timeout=0.2)
+    release.set()
+    reader.join(timeout=5)
+    refresher.join(timeout=5)
+
+    assert "weekly-digest" in state.skill_tools

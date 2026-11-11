@@ -24,6 +24,7 @@ from typing import Any, Optional
 from aimu.models import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
 
+from kokua.core.conversations import turn_numbers
 from kokua.core.messages import (
     INJECTED_USER_PROVENANCE,
     LOOP_INJECTED_PROVENANCE,
@@ -315,7 +316,7 @@ def image_refs_of(content: Any) -> list[str]:
     return list(dict.fromkeys(refs))  # de-dupe, preserving order
 
 
-def _tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
+def tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
     """Map each tool result in ``messages`` to the id of the call it answers.
 
     A live ``tool`` frame carries the call and its result together (AIMU emits ``TOOL_CALLING`` only once
@@ -338,6 +339,8 @@ def replay_items(
     failure: Optional[dict] = None,
     mid_turn: Optional[dict] = None,
     undelivered: Optional[dict] = None,
+    requests: Optional[dict] = None,
+    toolsets: Optional[dict] = None,
     artifacts: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
@@ -348,7 +351,7 @@ def replay_items(
     below the cards. The system message is omitted (live chat shows none).
 
     A ``role: "tool"`` message is not replayed as an item of its own, but its content is rejoined to the
-    call it answers (see :func:`_tool_results_by_call_id`) and rides that call's item as ``response``, so
+    call it answers (see :func:`tool_results_by_call_id`) and rides that call's item as ``response``, so
     a replayed tool card carries the output a live one showed. ``response`` is ``None`` where no result
     message exists -- a transcript stored before results were replayed, or a turn cut short mid-dispatch
     -- and the page then renders the card exactly as it always did.
@@ -423,17 +426,39 @@ def replay_items(
     it (AIMU reports a call only once it returns). A turn with no record still has its tool results
     scanned for ``/images/`` references, which is how a transcript stored before this record existed
     keeps its images.
+
+    ``requests`` is keyed the same way and holds what ``TurnRequests`` recorded for the turn: its
+    ``entry_run_id``, every model ``calls`` record, and every loop's ``endings``. Only the entry
+    agent's records become top-level items (a call or ending whose ``run_id`` is the record's
+    ``entry_run_id``; a workflow turn records None and so gets none, and a sub-agent's records already
+    live in its card). Each round's ``request`` item goes immediately *after* the j-th assistant
+    message of the turn, the order the live marker arrives in (it is sent when the call completes, so
+    it follows that round's output); rounds with no assistant message to follow (a turn that failed
+    before answering) go at the turn's end. The entry agent's ``ending`` goes last, before any
+    ``notice``. Both carry the shape a live frame folds into on a catch-up record, so the page treats a
+    replayed one and a watched one alike.
+
+    ``toolsets`` is keyed the same way and maps each of the entry agent's tool call ids to the toolset
+    that served it, which rides that call's item as ``toolset``, as it rides a live ``tool`` frame. A
+    call with no entry (a transcript stored before toolsets were recorded) gets no key and replays bare.
+
+    Every item opening a turn carries ``turn``, its ordinal from
+    :func:`kokua.core.conversations.turn_numbers`.
     """
     subagent = subagent or {}
     artifacts = artifacts or {}
     trace = trace or {}
     failure = failure or {}
     undelivered = undelivered or {}
+    requests = requests or {}
+    turns = turn_numbers(messages, {"messages": mid_turn or {}})
     # Flattened across turns: the question asked per message is "was this one mid-turn", and a
     # message belongs to at most one turn, so which turn recorded it adds nothing here.
     mid_turn_set = {index for indices in (mid_turn or {}).values() for index in indices}
     items: list[dict] = []
-    results = _tool_results_by_call_id(messages)
+    results = tool_results_by_call_id(messages)
+    # Flattened across turns for `mid_turn_set`'s reason: a call id belongs to one turn.
+    call_toolsets = {call_id: toolset for calls in (toolsets or {}).values() for call_id, toolset in calls.items()}
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
     pending_undelivered: Optional[tuple[list[dict], object]] = None  # (the turn's reports, its timestamp)
     # The turn's spawn cards not yet placed, each a lineage from `_spawn_lineages` with its turn's
@@ -446,6 +471,11 @@ def replay_items(
     # `/images/` references in its tool results, and a turn that has one must not do both.
     pending_artifacts: list[tuple[dict, object]] = []
     turn_has_record = False
+    # The turn's entry-agent round markers not yet placed, one list per round in order, and its entry
+    # endings; placed by `emit_request_group` and `flush_turn_end` with the turn's timestamp.
+    pending_request_groups: list[list[dict]] = []
+    pending_endings: list[dict] = []
+    current_turn_ts: object = None
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -475,6 +505,11 @@ def replay_items(
                 return True
         return False
 
+    def emit_request_group(timestamp) -> None:
+        if pending_request_groups:
+            for call in pending_request_groups.pop(0):
+                add({"type": "request", **call}, timestamp)
+
     def flush_turn_end() -> None:
         """Close the turn in progress with its recorded failure and whatever it reported as
         undelivered, if either survived to the end of the turn.
@@ -493,9 +528,14 @@ def replay_items(
         for lineage, turn_ts in pending_cards:
             add_lineage(lineage, turn_ts)
         pending_cards.clear()
-        for record, turn_ts in pending_artifacts:
-            add_artifact(record, turn_ts)
+        for artifact, turn_ts in pending_artifacts:
+            add_artifact(artifact, turn_ts)
         pending_artifacts.clear()
+        while pending_request_groups:
+            emit_request_group(current_turn_ts)
+        for ending in pending_endings:
+            add({"type": "ending", **ending}, current_turn_ts)
+        pending_endings.clear()
         if pending_failure is not None:
             reason, turn_ts = pending_failure
             pending_failure = None
@@ -558,24 +598,34 @@ def replay_items(
                 add(item, ts)
                 continue
             flush_turn_end()  # whatever turn was in progress ends where this one begins
+            current_turn_ts = ts
+            record = requests.get(str(index)) or {}
+            entry_run_id = record.get("entry_run_id")
+            if entry_run_id is not None:
+                rounds: dict[int, list[dict]] = {}
+                for call in record.get("calls") or []:
+                    if call.get("run_id") == entry_run_id:
+                        rounds.setdefault(call.get("round", 0), []).append(call)
+                pending_request_groups.extend(rounds[round_] for round_ in sorted(rounds))
+                pending_endings.extend(e for e in record.get("endings") or [] if e.get("run_id") == entry_run_id)
             if str(index) in failure:
                 pending_failure = (failure[str(index)], ts)
             if str(index) in undelivered:
                 pending_undelivered = (undelivered[str(index)], ts)
             turn_has_record = str(index) in artifacts
-            pending_artifacts.extend((record, ts) for record in artifacts.get(str(index), []))
+            pending_artifacts.extend((artifact, ts) for artifact in artifacts.get(str(index), []))
             text = message_text(message.get("content"))
             if text:
                 # Stamped with this message's position in the transcript, the key record_turn_provenance
                 # writes a turn's model, effort, usage, and failure under. A caller (the Markdown export)
                 # joins on this instead of deriving the index itself, which is how the off-by-one
                 # resolve_user_index's docstring warns about would come back in a second place.
-                add({"type": "user", "text": text, "message_index": index}, ts)
+                add({"type": "user", "text": text, "message_index": index, "turn": turns[index]}, ts)
             for url in image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
                 # Carries the same message_index as the text item above (or is the only item to carry
                 # it, when the user sent an image with no text): the renderer opens a turn at the first
                 # item bearing this index, and an image-only user message must still open one.
-                add({"type": "image", "url": url, "from": "user", "message_index": index}, ts)
+                add({"type": "image", "url": url, "from": "user", "message_index": index, "turn": turns[index]}, ts)
             events = subagent.get(str(index), [])
             if str(index) in trace:  # verbose turn: replay the raw trace, not the verdict cards
                 for segment in trace[str(index)]:
@@ -608,18 +658,21 @@ def replay_items(
                 name = fn.get("name")
                 if place_card_for(spawn_task(name, fn.get("arguments")), ts):
                     continue  # the card stands in for its call; see SPAWN_TOOL_NAMES
-                add(
-                    {
-                        "type": "tool",
-                        "name": name,
-                        "arguments": fn.get("arguments"),
-                        "response": results.get(call.get("id")),
-                    },
-                    ts,
-                )
+                item = {
+                    "type": "tool",
+                    "name": name,
+                    "arguments": fn.get("arguments"),
+                    "response": results.get(call.get("id")),
+                }
+                if call.get("id") in call_toolsets:
+                    item["toolset"] = call_toolsets[call["id"]]
+                add(item, ts)
+            emit_request_group(ts)
+            # After the round's request marker: live, the marker is sent when the model call returns,
+            # and a file is published later, while the tool that round asked for runs.
             if message.get("tool_calls"):
-                for record, _ in [entry for entry in pending_artifacts if entry[0].get("after") == index]:
-                    add_artifact(record, ts)
+                for artifact, _ in [entry for entry in pending_artifacts if entry[0].get("after") == index]:
+                    add_artifact(artifact, ts)
                 pending_artifacts[:] = [entry for entry in pending_artifacts if entry[0].get("after") != index]
         elif role == "tool" and not turn_has_record:
             # Serves a transcript stored before artifacts were recorded: its generate_image result

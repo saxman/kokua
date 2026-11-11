@@ -14,10 +14,12 @@ anyway, exactly as it picks a skill from its catalogue.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
 from aimu.tools import tool
+from aimu.tools.context import ToolContext
 
+from kokua.config import ConfigError
 from kokua.registry.registry import Setting, Toolset, ToolsetError, build_tools, select
 
 if TYPE_CHECKING:
@@ -195,7 +197,8 @@ def _make_list_tool(state: "LiveState") -> Callable:
 
         Each line is a capability name, the kind of provider it came from, and what it does. Use this
         when a task needs something none of your own tools and none of your named sub-agent roles
-        cover, then pass the names you need to compose_subagent.
+        cover, or when its output would flood your context, then pass the names you need to
+        compose_subagent.
 
         Args:
             filter: Optional. Show only capabilities whose name or description contains this text.
@@ -222,7 +225,9 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
     """
 
     @tool
-    async def compose_subagent(name: str, task: str, tools: list[str], instructions: str) -> str:
+    async def compose_subagent(
+        name: str, task: str, tools: list[str], instructions: str, ctx: Optional[ToolContext] = None
+    ) -> str:
         """Build a sub-agent with exactly the capabilities a task needs, run one task on it, and return
         its answer.
 
@@ -256,6 +261,12 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             spec = _compose_spec(label, tools, instructions, state, extra_tools=extra_tools, model=model)
         except ToolsetError as error:
             return f"Could not compose {label!r}: {error}"
+        except ConfigError as error:
+            # The approval hook refusing a build: a gate entry that matches nothing once its toolset
+            # built. It is the user's config to fix, so the user is told, as for a refused load.
+            if state.alert_soon is not None:
+                state.alert_soon(f"Composing {label} failed: {error}")
+            return f"Could not compose {label!r}: {error}"
         # Imported here rather than at module scope because aimu.aio.tools.builtin is the AIMU surface
         # aimu_compat.require_aimu probes, and this module is reached whenever config is resolved (the
         # settings table collects what every installed toolset declares), which happens on invocations
@@ -280,7 +291,9 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             model,
             agent_types={label: spec},
             max_depth=1,
-            tool_approval=state.tool_approval,
+            # The label cannot equal a declared agent's name (validate_agents refuses ':' in one), so a
+            # composed worker always gets the default tier.
+            tool_approval=state.gate_for(_SELECT_LABEL.format(name=label)),
             observer=state.observer,
             # Missing until now, the same way `inbox` was: `_spawn_tool`/`make_delegation_tool` (the
             # declared-worker factories) pass this too, and without it a composed worker's model calls
@@ -295,7 +308,11 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         arguments = {"name": name, "tools": tools, "instructions": instructions, "task": task}
         token = spawn_call.set({"tool": COMPOSE_SUBAGENT_TOOL_NAME, "arguments": arguments})
         try:
-            return await spawn(label, task)
+            # `ctx` is the run that called this tool, injected by the loop and invisible to the model.
+            # Handing it on parents the worker's run to it, the way AIMU's spawn tool does when the loop
+            # calls that tool itself; called directly from here, the spawn tool would otherwise start an
+            # unparented run, and a run with no parent never reaches the card standing in for it.
+            return await spawn(label, task, ctx=ctx)
         finally:
             spawn_call.reset(token)
 
@@ -317,10 +334,11 @@ def make_capability_tools(ctx: "ToolsetContext") -> list:
 # default because its instructions were written for its job, where a composed sub-agent's are written
 # in the moment.
 CAPABILITIES_GUIDANCE = (
-    " You can see every capability installed on this machine, not only the ones you hold. When a task "
-    "needs something you lack, first check whether one of your `spawn_subagent` roles already covers "
-    "it. If none does, call `list_capabilities` to find the capability names, then `compose_subagent` to "
-    "build a sub-agent holding exactly those and give it the task."
+    " You can see every capability installed on this machine, not only the ones you hold. Compose a sub-agent "
+    "for either of two reasons: the task needs a capability you do not hold, or its tool output would flood "
+    "your context (many pages, long files, verbose command output). First check whether one of your "
+    "`spawn_subagent` roles already covers it. If none does, call `list_capabilities` to find the capability "
+    "names, then `compose_subagent` to build a sub-agent holding exactly those and give it the task."
 )
 
 TOOLSET = Toolset(

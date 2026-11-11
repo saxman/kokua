@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 
 import pytest
 
 
 from kokua.config import MCPServerConfig
-from kokua.config.schema import AgentConfig, ReviewerConfig
+from kokua.config.schema import ALL_TOOLSETS, AgentConfig, ReviewerConfig
+from kokua.core.agents import build_registry, deferred_for, resident_for
 from kokua.core.assistant import Assistant
 from kokua.registry.context import LiveState
 from kokua.mcp.auth import OAuthSettings
-from tests.channels import FakeChannel, _config, example_agents
-from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
-from tests.helpers import MockAsyncModelClient
+from tests.channels import AlertCapturingChannel, FakeChannel, _config, example_agents, planning_settings
+from tests.fakes import _RequestsToolOnce, _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
+from tests.helpers import MockAsyncModelClient, allow_all_gates
 
 
 _MEMORY_TOOL_NAMES = {
@@ -33,7 +35,7 @@ def _specs(config, state=None) -> dict[str, dict]:
     from kokua.core.agents import build_agent_specs, build_registry
 
     if state is None:
-        state = LiveState(config=config, registry=build_registry(config))
+        state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     return build_agent_specs(config, state, config.entry_agent)
 
 
@@ -88,8 +90,8 @@ def test_a_worker_resolves_a_group_an_mcp_server_and_a_plugin_from_one_list(tmp_
     cfg = _config(
         tmp_path,
         agents={
-            "assistant": AgentConfig(tools=["time"], delegates_to=["trader"]),
-            "trader": AgentConfig(description="Trades.", tools=["compute", "stocks", "pdf"]),
+            "assistant": AgentConfig(available=["time"], delegates_to=["trader"]),
+            "trader": AgentConfig(description="Trades.", available=["compute", "stocks", "pdf"]),
         },
         mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
     )
@@ -99,11 +101,43 @@ def test_a_worker_resolves_a_group_an_mcp_server_and_a_plugin_from_one_list(tmp_
     # toolset's actual output.
     registry = build_registry(cfg)
     registry["pdf"] = Toolset(name="pdf", description="fake plugin", build=lambda ctx: [make_pdf])
-    state = LiveState(config=cfg, connections=connections, registry=registry)
+    state = LiveState(gate_for=allow_all_gates, config=cfg, connections=connections, registry=registry)
     names = {fn.__name__ for fn in _specs(cfg, state)["trader"]["tools"]}
     assert "stock_quote" in names  # the named MCP server's tool
     assert "make_pdf" in names  # the plugin toolset's tool
     assert "calculate" in names  # the built-in compute group's tool
+
+
+def test_model_record_names_the_entry_agent_and_only_the_agents_that_override_it(tmp_path):
+    """One answer to "which models is this session running", read by `/diag` and by the web header.
+
+    Only declared models are overrides: an agent that names none runs on the entry agent's own model,
+    and listing it would repeat the default once per table and bury the exception among them.
+    """
+    from kokua.core.build import model_record
+
+    agents = example_agents()
+    agents["researcher"].model = "ollama:qwen3:32b"
+    config = _config(tmp_path, model="ollama:qwen3:8b", agents=agents)
+
+    assert model_record(config) == {
+        "agent": "assistant",
+        "model": "ollama:qwen3:8b",
+        "overrides": {"researcher": "ollama:qwen3:32b"},
+    }
+
+
+def test_model_record_falls_back_to_the_model_aimu_resolved(tmp_path):
+    """With nothing declared the label is still a string a user recognizes, endpoint included, because
+    it is the one `AssistantConfig.default_model` resolved rather than anything read off a client."""
+    from kokua.core.build import model_record
+
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    record = model_record(_config(tmp_path, model=None))
+
+    assert record["model"] == TEST_DEFAULT_MODEL
+    assert record["overrides"] == {}
 
 
 # --- Startup validation: every invalid config fails here, naming the offending value ----------
@@ -122,7 +156,7 @@ async def test_an_unknown_toolset_name_refuses_to_start(tmp_path):
     """A misspelled toolset used to leave the agent quietly smaller than the config said."""
     from kokua.config import ConfigError
 
-    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=["bogus"])})
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(available=["bogus"])})
     with pytest.raises(ConfigError, match="bogus"):
         await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -132,7 +166,7 @@ async def test_an_unresolvable_declared_model_refuses_to_start(tmp_path):
     surface mid-turn as a failed spawn rather than at startup."""
     from kokua.config import ConfigError
 
-    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=[], model="nonsense:whatever")})
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(available=[], model="nonsense:whatever")})
     with pytest.raises(ConfigError, match=r"\[agents.assistant\].model"):
         await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -204,8 +238,8 @@ async def test_a_delegation_cycle_refuses_to_start(tmp_path):
     cfg = _config(
         tmp_path,
         agents={
-            "assistant": AgentConfig(tools=["time"], delegates_to=["helper"]),
-            "helper": AgentConfig(tools=["fs"], delegates_to=["assistant"]),
+            "assistant": AgentConfig(available=["time"], delegates_to=["helper"]),
+            "helper": AgentConfig(available=["fs"], delegates_to=["assistant"]),
         },
     )
     with pytest.raises(ConfigError, match="cycle"):
@@ -220,7 +254,7 @@ async def test_a_toolset_name_two_providers_claim_refuses_to_start_as_a_config_e
 
     cfg = _config(
         tmp_path,
-        agents={"assistant": AgentConfig(tools=["shared"])},
+        agents={"assistant": AgentConfig(available=["shared"])},
         mcp_servers=[
             MCPServerConfig(url="https://one/mcp", name="shared"),
             MCPServerConfig(url="https://two/mcp", name="shared"),
@@ -270,10 +304,8 @@ ENTRY_AGENT_TOOLS = {
 # Present because the shipped entry agent declares the `memory` and `documents` toolsets, so they are
 # asserted separately from the rest below.
 STORE_TOOLS = {
-    "aimu make_memory_tools + make_document_tools": {
-        "store_memory",
-        "search_memories",
-        "list_memories",
+    "aimu make_memory_tools": {"store_memory", "search_memories", "list_memories"},
+    "aimu make_document_tools": {
         "save_document",
         "read_document",
         "edit_document",
@@ -281,10 +313,40 @@ STORE_TOOLS = {
         "search_documents",
     },
 }
+# The sources above whose toolsets the shipped entry agent defers: absent from its tools until it loads
+# them, and present in the inventory because they are still part of what it can reach.
+DEFERRED_SOURCES = {
+    "aimu make_document_tools",
+    "kokua toolsets/mcp.py",
+    "kokua toolsets/scheduling.py",
+    "kokua toolsets/benchmark.py",
+    "aimu make_skill_authoring_tool / make_skill_update_tool / make_skill_script_tool",
+}
+# What AIMU adds to an agent holding at least one deferred toolset, so the model can see and load them.
+LOADER_TOOLS = {"available_tools", "load_tools"}
+
+
+async def _loaded_tools(assistant, *toolsets: str) -> list:
+    """The entry agent's tools after loading ``toolsets``, the way a model's `load_tools` call would."""
+    for toolset in toolsets:
+        assert (await assistant._agent.load_tool_group(toolset)).startswith(f"Loaded '{toolset}':")
+    return assistant._agent._effective_tools(None)
 
 
 def _expected(*groups: dict) -> set[str]:
     return {name for group in groups for names in group.values() for name in names}
+
+
+def _resident_expected() -> set[str]:
+    """What the shipped entry agent's tools hold at wiring: the inventory minus its deferred sources, plus the loaders."""
+    inventory = {**ENTRY_AGENT_TOOLS, **STORE_TOOLS}
+    resident = {source: names for source, names in inventory.items() if source not in DEFERRED_SOURCES}
+    return _expected(resident) | LOADER_TOOLS
+
+
+def _deferred_expected() -> set[str]:
+    inventory = {**ENTRY_AGENT_TOOLS, **STORE_TOOLS}
+    return _expected({source: names for source, names in inventory.items() if source in DEFERRED_SOURCES})
 
 
 def _source_of(name: str) -> str:
@@ -298,27 +360,59 @@ def _without(*toolsets: str) -> dict[str, AgentConfig]:
     """The shipped agents with ``toolsets`` struck from the entry agent's declaration."""
     agents = example_agents()
     entry = agents["assistant"]
-    entry.tools = [name for name in entry.tools if name not in toolsets]
+    entry.available = [name for name in entry.available if name not in toolsets]
     return agents
+
+
+def test_shipped_entry_agent_resident_set(tmp_path):
+    config = _config(tmp_path)
+    assert resident_for(config, build_registry(config), "assistant") == [
+        "memory",
+        "config",
+        "conversations",
+        "planning",
+        "capabilities",
+        "time",
+        "messaging",
+    ]
+    assert deferred_for(config, build_registry(config), "assistant") == [
+        "documents",
+        "skills",
+        "mcp",
+        "scheduling",
+        "benchmark",
+    ]
 
 
 async def test_entry_agent_toolset_is_exactly_the_documented_inventory(tmp_path):
     """The entry agent's tool context is the point of the design: what the shipped [agents.assistant]
-    table declares, and nothing else. It holds what mutates shared state (skills, MCP, memory, config,
-    scheduling), reading its other conversations, the clock, the delegate, and `benchmark`, which
-    measures the model this session runs on; the built-in groups and the remaining shipped toolsets are
-    declared by the workers instead, or by nobody.
+    table makes resident, and nothing else. It holds from its first turn what it uses on most turns
+    (memory, config, its other conversations, the clock, the delegate, messaging), and meets the rest
+    (documents, skills, MCP, scheduling, `benchmark`) through `available_tools` / `load_tools`; the
+    built-in groups and the remaining shipped toolsets are declared by the workers instead, or by nobody.
 
     Asserted as an exact set rather than a sample, so a plugin toolset leaking onto the entry agent fails
-    here, and so does adding a tool without updating the inventory table this list mirrors."""
+    here, and so does adding a tool without updating the inventory table this list mirrors. The deferred
+    half is asserted absent, so a toolset quietly becoming resident fails too."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    expected = _expected(ENTRY_AGENT_TOOLS, STORE_TOOLS)
+    names = {fn.__name__ for fn in assistant._agent._effective_tools(None)}
+    expected = _resident_expected()
 
     leaked = sorted(names - expected)
     missing = sorted(expected - names)
     assert not leaked, f"undocumented tools on the entry agent: {leaked} (a worker tool leaking here?)"
     assert not missing, f"documented tools absent: {[(n, _source_of(n)) for n in missing]}"
+    assert names.isdisjoint(_deferred_expected())
+    assistant._state.close()
+
+
+async def test_loading_every_deferred_toolset_completes_the_documented_inventory(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    for toolset in deferred_for(assistant._config, assistant._state.registry, "assistant"):
+        assert (await assistant._agent.load_tool_group(toolset)).startswith(f"Loaded '{toolset}':")
+    names = {fn.__name__ for fn in assistant._agent._effective_tools(None)}
+    assert names == _expected(ENTRY_AGENT_TOOLS, STORE_TOOLS) | LOADER_TOOLS
+    assistant._state.close()
 
 
 async def test_undeclaring_the_store_toolsets_drops_exactly_their_tools(tmp_path):
@@ -326,8 +420,16 @@ async def test_undeclaring_the_store_toolsets_drops_exactly_their_tools(tmp_path
     loses exactly their tools, with nothing else disturbed."""
     config = _config(tmp_path, agents=_without("memory", "documents"))
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert names == _expected(ENTRY_AGENT_TOOLS)
+    # Undeclared, not merely deferred: `documents` is in neither list, so no load can bring it back.
+    assert "documents" not in resident_for(assistant._config, assistant._state.registry, "assistant")
+    assert "documents" not in deferred_for(assistant._config, assistant._state.registry, "assistant")
+    for toolset in deferred_for(assistant._config, assistant._state.registry, "assistant"):
+        await assistant._agent.load_tool_group(toolset)
+    names = {fn.__name__ for fn in assistant._agent._effective_tools(None)}
+    inventory = {**ENTRY_AGENT_TOOLS, **STORE_TOOLS}
+    without_stores = {source: tools for source, tools in inventory.items() if source not in STORE_TOOLS}
+    assert names == _expected(without_stores) | LOADER_TOOLS
+    assistant._state.close()
 
 
 CONVERSATION_TOOL_NAMES = ENTRY_AGENT_TOOLS["kokua toolsets/conversations.py"]
@@ -398,11 +500,11 @@ def _trading_via(name: str, *, url: str) -> dict:
     """
     return {
         "agents": {
-            "assistant": AgentConfig(tools=["mcp", "time"], delegates_to=["trader"]),
-            "trader": AgentConfig(description="Trades.", tools=[name]),
+            "assistant": AgentConfig(available=["mcp", "time"], delegates_to=["trader"]),
+            "trader": AgentConfig(description="Trades.", available=[name]),
         },
         "mcp_servers": [MCPServerConfig(url=url, name=name)],
-        "confirm_tools": [],
+        "default_confirm": [],
     }
 
 
@@ -517,7 +619,9 @@ async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     await assistant.start()
-    assert captured["tool_approval"] == assistant._approve
+    gate = captured["tool_approval"]
+    # The factory-level gate is the default tier's; each worker spec carries its own, bound to its name.
+    assert gate.func == assistant._human.approve and gate.args == ("[assistant.tools]",)
 
 
 async def test_concurrent_tools_flag_reaches_agent(tmp_path):
@@ -533,7 +637,7 @@ async def test_assistant_wires_author_skill_tool(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
-    tools = assistant._agent.tools
+    tools = await _loaded_tools(assistant, "skills")
     author = next((t for t in tools if t.__name__ == "author_skill"), None)
     assert author is not None and author.__tool_is_async__ is True
 
@@ -544,13 +648,14 @@ async def test_assistant_wires_author_skill_tool(tmp_path):
 
 async def test_declaring_the_store_toolsets_wires_both_stores(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
+    names = {fn.__name__ for fn in await _loaded_tools(assistant, "documents")}
     assert _MEMORY_TOOL_NAMES <= names
 
 
 async def test_memory_stores_exist_when_an_agent_declares_them(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     await assistant.start()
+    await _loaded_tools(assistant, "documents")
     assert assistant._memory_store is not None
     assert assistant._document_store is not None
 
@@ -566,8 +671,12 @@ def test_memory_stores_are_not_built_until_a_toolset_asks(tmp_path):
 async def test_no_store_declaration_omits_the_tools_and_the_stores(tmp_path):
     config = _config(tmp_path, agents=_without("memory", "documents"))
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
+    names = {fn.__name__ for fn in assistant._agent._effective_tools(None)}
     assert _MEMORY_TOOL_NAMES.isdisjoint(names)
+    # Deferred would also leave the tools and stores unbuilt, so undeclared is asserted separately.
+    assert "documents" not in assistant._config.agents["assistant"].available
+    assert "load_tools" in names
+    assert (await assistant._agent.load_tool_group("documents")).startswith("No tool group named 'documents'")
     assert assistant._memory_store is None
     assert assistant._document_store is None
 
@@ -575,7 +684,7 @@ async def test_no_store_declaration_omits_the_tools_and_the_stores(tmp_path):
 async def test_document_tools_round_trip(tmp_path):
     """The document tools are wired to a working DocumentStore (pure-Python, hermetic)."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    tools = {fn.__name__: fn for fn in assistant._agent.tools}
+    tools = {fn.__name__: fn for fn in await _loaded_tools(assistant, "documents")}
     assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
@@ -587,7 +696,7 @@ def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
     from kokua.core.agents import build_registry
 
     config = _config(tmp_path)
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
     tools = state.registry["memory"].build(ctx) + state.registry["documents"].build(ctx)
     assert tools
@@ -608,7 +717,7 @@ async def test_assistant_can_fix_a_skill_it_authored(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
-    tools = assistant._agent.tools
+    tools = await _loaded_tools(assistant, "skills")
     author = next(t for t in tools if t.__name__ == "author_skill")
     update = next(t for t in tools if t.__name__ == "update_skill")
 
@@ -625,7 +734,7 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
-    tools = assistant._agent.tools
+    tools = await _loaded_tools(assistant, "skills")
     author = next(t for t in tools if t.__name__ == "author_skill")
     add_script = next(t for t in tools if t.__name__ == "add_skill_script")
     assert add_script.__tool_is_async__ is True
@@ -647,7 +756,7 @@ async def test_skill_authored_in_one_conversation_is_visible_in_another(tmp_path
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
     first_agent = assistant._agent
-    author = next(t for t in first_agent.tools if t.__name__ == "author_skill")
+    author = next(t for t in await _loaded_tools(assistant, "skills") if t.__name__ == "author_skill")
     await author(name="shared-skill", description="Shared.", body="# Shared\n\nDo X.")
 
     await assistant.new_conversation()
@@ -677,7 +786,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         config=config,
         registry=build_registry(config),
         oauth=OAuthSettings(storage_dir=config.data_dir / "mcp-oauth"),
-        tool_approval=lambda name, args: True,
+        gate_for=lambda agent: lambda name, args: True,
         reapply_config=noop,
         for_each_agent=lambda apply: None,
     )
@@ -691,7 +800,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
     agent = build("c1")
     assert agent.tool_approval is not None
     tool_names = {getattr(t, "__name__", None) for t in agent.tools}
-    assert "author_skill" in tool_names
+    assert "store_memory" in tool_names
     # Messages for this conversation were restored onto the fresh agent's client.
     assert any(m.get("content") == "hello" for m in agent.model_client.messages)
 
@@ -743,7 +852,7 @@ async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeyp
     )
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
-    add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    add_mcp = next(t for t in await _loaded_tools(assistant, "mcp") if getattr(t, "__name__", "") == "add_mcp_server")
     captured.clear()
     await add_mcp(url="https://broker/mcp")
 
@@ -763,10 +872,10 @@ def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
 
     config = AssistantConfig(
         data_dir=tmp_path,
-        agents={"assistant": AgentConfig(tools=["time"])},
+        agents={"assistant": AgentConfig(available=["time"])},
         entry_agent="assistant",
     )
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     client = MockAsyncModelClient([])
     client._system_message = "Injected system message."
 
@@ -794,7 +903,7 @@ def _captured_client_model(monkeypatch, config, build) -> object:
 def _live_state(config) -> LiveState:
     from kokua.core.agents import build_registry
 
-    return LiveState(config=config, registry=build_registry(config))
+    return LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
 
 
 def test_an_agents_client_is_built_with_the_model_it_declares(tmp_path, monkeypatch):
@@ -899,11 +1008,11 @@ def test_the_entry_agent_is_built_with_its_own_resolved_cap(tmp_path):
 
     config = AssistantConfig(
         data_dir=tmp_path,
-        agents={"assistant": AgentConfig(tools=[], max_iterations=30)},
+        agents={"assistant": AgentConfig(available=[], max_iterations=30)},
         entry_agent="assistant",
         max_iterations=10,
     )
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     agent = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
     assert agent.max_iterations == 30
 
@@ -915,11 +1024,11 @@ def test_the_entry_agent_falls_back_to_the_global_cap(tmp_path):
 
     config = AssistantConfig(
         data_dir=tmp_path,
-        agents={"assistant": AgentConfig(tools=[])},
+        agents={"assistant": AgentConfig(available=[])},
         entry_agent="assistant",
         max_iterations=15,
     )
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     agent = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
     assert agent.max_iterations == 15
 
@@ -978,11 +1087,866 @@ def test_a_toolset_is_told_which_agent_it_is_building_for(tmp_path):
         holders.append(ctx.agent_name)
         return []
 
-    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=["probe"])})
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(available=["probe"])})
     registry = build_registry(cfg)
     registry["probe"] = Toolset(name="probe", description="records its holder", build=record)
-    state = LiveState(config=cfg, registry=registry)
+    state = LiveState(gate_for=allow_all_gates, config=cfg, registry=registry)
 
     wire_agent(cfg, state, cfg.entry_agent, client=MockAsyncModelClient([]))
 
     assert holders == [cfg.entry_agent]
+
+
+# --- Residency: a deferred toolset is built when the model loads it, a resident one at wiring ----------
+
+_WEB_GUIDANCE_SNIPPET = "training cutoff"
+
+
+def _residency_config(tmp_path, *, available=("memory", "time", "web"), resident=("memory", "time"), **overrides):
+    # No default gate: the shipped one names toolsets this small agent does not declare, which startup
+    # refuses, and these tests are about residency rather than approval.
+    overrides.setdefault("default_confirm", [])
+    return _config(
+        tmp_path,
+        agents={"assistant": AgentConfig(available=list(available), resident=list(resident))},
+        **overrides,
+    )
+
+
+def _wired(config, state=None):
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    if state is None:
+        state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    return wire_agent(config, state, "assistant", client=MockAsyncModelClient([])), state
+
+
+def _tool_names(agent) -> list[str]:
+    return [fn.__name__ for fn in agent._effective_tools(None)]
+
+
+async def test_a_deferred_toolset_is_not_in_the_entry_agents_tools_until_loaded(tmp_path):
+    agent, _ = _wired(_residency_config(tmp_path))
+    names = _tool_names(agent)
+    assert "get_web_content" not in names and "load_tools" in names
+    assert (await agent.load_tool_group("web")).startswith("Loaded 'web':")
+    assert "get_web_content" in _tool_names(agent)
+
+
+async def test_the_prompt_names_deferred_toolsets_and_omits_their_guidance(tmp_path):
+    from kokua.core.build import entry_agent_system_message
+
+    config = _residency_config(tmp_path)
+    _, state = _wired(config)
+    message = entry_agent_system_message(config, state)
+    assert "Also available, load before use: web." in message
+    assert _WEB_GUIDANCE_SNIPPET not in message
+
+
+async def test_the_prompt_has_no_names_line_when_nothing_is_deferred(tmp_path):
+    from kokua.core.build import entry_agent_system_message
+
+    config = _residency_config(tmp_path, resident=("memory", "time", "web"))
+    _, state = _wired(config)
+    message = entry_agent_system_message(config, state)
+    assert "load before use" not in message
+    assert _WEB_GUIDANCE_SNIPPET in message
+
+
+async def test_loading_returns_the_toolsets_guidance(tmp_path):
+    agent, _ = _wired(_residency_config(tmp_path))
+    assert _WEB_GUIDANCE_SNIPPET in await agent.load_tool_group("web")
+
+
+async def test_calling_a_deferred_tool_before_loading_points_at_loading(tmp_path):
+    config = _residency_config(tmp_path)
+    client = _RequestsToolOnce("get_web_content", {"url": "https://example.com"})
+    assistant = await Assistant.create(config, FakeChannel(), client=client)
+    await assistant.start()
+
+    await assistant._agent.run("go")
+
+    results = [m["content"] for m in client.messages if m.get("role") == "tool"]
+    assert results and "call available_tools to see what you can load, then load_tools" in results[-1]
+    assert "get_web_content" not in _tool_names(assistant._agent)
+
+
+async def test_two_conversations_load_independently(tmp_path):
+    from kokua.core.build import wire_agent
+
+    config = _residency_config(tmp_path)
+    first, state = _wired(config)
+    second = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+    await first.load_tool_group("web")
+    assert "get_web_content" in _tool_names(first)
+    assert "get_web_content" not in _tool_names(second)
+
+
+def _registry_with_broken_toolset(config, builds: list):
+    from kokua.core.agents import build_registry
+    from kokua.registry.registry import Toolset
+
+    def explode(ctx):
+        builds.append(1)
+        raise RuntimeError("store locked")
+
+    registry = build_registry(config)
+    registry["broken"] = Toolset(name="broken", description="always fails", build=explode)
+    return registry
+
+
+async def test_a_failing_deferred_build_reports_to_the_model_and_the_user(tmp_path, monkeypatch):
+    import asyncio
+
+    config = _residency_config(tmp_path, available=("time", "broken"), resident=("time",))
+    builds: list = []
+    monkeypatch.setattr("kokua.core.agents.validated_registry", lambda cfg: _registry_with_broken_toolset(cfg, builds))
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    assert (await assistant._agent.load_tool_group("broken")) == "Could not load 'broken': store locked"
+    for _ in range(20):
+        if channel.alerts:
+            break
+        await asyncio.sleep(0.01)
+    assert [text for text, *_ in channel.alerts] == ["Loading broken for assistant failed: store locked"]
+
+    await assistant._agent.load_tool_group("broken")
+    assert len(builds) == 2  # the group stays loadable, so a second load retries the build
+
+
+async def test_alert_soon_is_a_no_op_before_the_assistant_has_started(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assistant._state.alert_soon("nobody is listening yet")  # must not raise
+    assistant._state.close()
+
+
+def test_a_deferred_toolset_carrying_a_workflow_still_offers_its_command(tmp_path):
+    from kokua.core.agents import build_command_map, build_registry
+
+    config = _residency_config(
+        tmp_path, available=("time", "planning"), resident=("time",), toolset_settings=planning_settings()
+    )
+    commands = build_command_map(config, build_registry(config))
+    assert "plan" in commands
+
+
+def test_an_agent_declaring_no_resident_list_has_no_deferred_group(tmp_path):
+    agent, _ = _wired(_config(tmp_path, agents={"assistant": AgentConfig(available=["time"])}))
+    assert "load_tools" not in _tool_names(agent)
+
+
+# --- Deferred loads go through the approval hook, and fail loudly and recoverably -----------------------
+
+
+async def test_loading_a_deferred_toolset_resolves_the_approval_entry_waiting_on_it(tmp_path):
+    config = _residency_config(
+        tmp_path, available=("time", "web"), resident=("time",), default_confirm=["web.get_web_content"]
+    )
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    assert "get_web_content" not in assistant._human.policies.for_agent("assistant").confirm
+
+    assert (await assistant._agent.load_tool_group("web")).startswith("Loaded 'web':")
+
+    assert "get_web_content" in assistant._human.policies.for_agent("assistant").confirm
+    assistant._state.close()
+
+
+async def test_a_misnamed_approval_entry_refuses_the_load_and_no_tool_arrives(tmp_path):
+    import asyncio
+
+    config = _residency_config(tmp_path, available=("time", "web"), resident=("time",), default_confirm=["web.nope"])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    result = await assistant._agent.load_tool_group("web")
+
+    assert result.startswith("Could not load 'web':")
+    for _ in range(20):
+        if channel.alerts:
+            break
+        await asyncio.sleep(0.01)
+    assert channel.alerts and channel.alerts[0][0].startswith("Loading web for assistant failed:")
+    assert "get_web_content" not in _tool_names(assistant._agent)
+    assistant._state.close()
+
+
+async def test_a_deferred_build_sees_the_live_agent(tmp_path):
+    """A toolset that needs the agent object (``skills``) must get it when it is loaded, not None."""
+    from kokua.core.agents import build_registry
+    from kokua.registry.registry import Toolset
+
+    seen: list = []
+
+    def record(ctx) -> list:
+        seen.append(ctx.agent)
+        return []
+
+    config = _residency_config(tmp_path, available=("time", "probe"), resident=("time",))
+    registry = build_registry(config)
+    registry["probe"] = Toolset(name="probe", description="records its agent", build=record)
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=registry)
+    agent, _ = _wired(config, state)
+
+    await agent.load_tool_group("probe")
+
+    assert seen == [agent]
+
+
+async def test_a_closed_loop_does_not_mask_the_real_build_error(tmp_path, monkeypatch):
+    import asyncio
+
+    config = _residency_config(tmp_path, available=("time", "broken"), resident=("time",))
+    monkeypatch.setattr("kokua.core.agents.validated_registry", lambda cfg: _registry_with_broken_toolset(cfg, []))
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    closed = asyncio.new_event_loop()
+    closed.close()
+    assistant._loop = closed
+
+    assert (await assistant._agent.load_tool_group("broken")) == "Could not load 'broken': store locked"
+    assistant._state.close()
+
+
+async def test_pending_alerts_are_cancelled_at_shutdown(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    assistant._alert_soon("will not be delivered")
+    await asyncio.sleep(0)  # the scheduled call runs and creates the task
+    pending = list(assistant._alert_tasks)
+    await assistant._cancel_alerts()
+    assert all(task.done() for task in pending)
+    assert not assistant._alert_tasks
+    assistant._state.close()
+
+
+async def test_a_deferred_mcp_server_that_is_not_connected_refuses_to_load_and_loads_once_it_is(tmp_path):
+    from types import SimpleNamespace
+
+    def stock_quote():  # the resolver only reads __name__
+        pass
+
+    config = _config(
+        tmp_path,
+        agents={"assistant": AgentConfig(available=["time", "stocks"], resident=["time"])},
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
+        default_confirm=[],
+    )
+    agent, state = _wired(config)
+
+    result = await agent.load_tool_group("stocks")
+    assert result.startswith("Could not load 'stocks':") and "not connected" in result
+
+    state.connections.append(SimpleNamespace(url="https://broker/mcp", callables=[stock_quote]))
+    assert (await agent.load_tool_group("stocks")).startswith("Loaded 'stocks':")
+    assert "stock_quote" in _tool_names(agent)
+
+
+async def test_a_resident_mcp_server_that_is_not_connected_still_builds_empty(tmp_path):
+    config = _config(
+        tmp_path,
+        agents={"assistant": AgentConfig(available=["time", "stocks"])},
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
+        default_confirm=[],
+    )
+    agent, _ = _wired(config)
+    assert "load_tools" not in _tool_names(agent)
+
+
+def test_the_prompt_wire_agent_builds_for_itself_names_deferred_toolsets_only(tmp_path, monkeypatch):
+    captured: list[str] = []
+
+    def fake_client(cfg, system_message, agent_name):
+        captured.append(system_message)
+        return MockAsyncModelClient([])
+
+    monkeypatch.setattr("kokua.core.build.build_model_client", fake_client)
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    config = _residency_config(tmp_path)
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    wire_agent(config, state, "assistant")
+
+    assert "Also available, load before use: web." in captured[0]
+    assert _WEB_GUIDANCE_SNIPPET not in captured[0]
+
+
+# --- A rebuilt agent comes back with what its conversation loaded -----------------------------------------
+
+
+def _load_call(arguments, call_id="a") -> dict:
+    return {
+        "role": "assistant",
+        "tool_calls": [{"type": "function", "id": call_id, "function": {"name": "load_tools", "arguments": arguments}}],
+    }
+
+
+def _load_result(call_id, content) -> dict:
+    return {"role": "tool", "name": "load_tools", "content": content, "tool_call_id": call_id}
+
+
+def _load_exchange(name, call_id="a", *, result=None, arguments=None) -> list[dict]:
+    """A stored ``load_tools`` call and the result it got, a successful load unless ``result`` says otherwise."""
+    arguments = {"name": name} if arguments is None else arguments
+    result = f"Loaded {name.strip()!r}: some_tool." if result is None else result
+    return [_load_call(arguments, call_id), _load_result(call_id, result)]
+
+
+def test_loaded_toolsets_in_reads_load_tools_calls_in_order():
+    from kokua.core.build import loaded_toolsets_in
+
+    messages = [
+        *_load_exchange("web", "a"),
+        *_load_exchange("documents", "b", arguments='{"name": "documents"}'),
+        *_load_exchange("web", "c"),
+        *_load_exchange("audio", "d", arguments="not json"),
+        *_load_exchange("audio", "e", arguments="[1, 2]"),
+        *_load_exchange("audio", "f", arguments={"name": 7}),
+        *_load_exchange("audio", "g", arguments={}),
+        {"role": "tool", "tool_calls": [{"function": {"name": "load_tools", "arguments": {"name": "audio"}}}]},
+        {"role": "assistant", "tool_calls": [{"function": {"name": "get_time", "arguments": {"name": "time"}}}]},
+        {"role": "assistant", "content": "no calls"},
+    ]
+    assert loaded_toolsets_in(messages) == ["web", "documents"]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "Tool 'load_tools' was not approved.",
+        "Tool 'load_tools' was not approved: the user declined",
+        "Could not load 'web': the MCP server 'web' (https://x/mcp) is not connected",
+        "Tool 'load_tools' raised an error: boom",
+        "No tool group named 'web'. Loadable: documents.",
+        "Loaded 'documents': read_document.",
+    ],
+)
+def test_a_load_that_did_not_succeed_is_not_restored(result):
+    from kokua.core.build import loaded_toolsets_in
+
+    assert loaded_toolsets_in(_load_exchange("web", result=result)) == []
+
+
+def test_a_load_call_with_no_result_is_not_restored():
+    """A turn cancelled mid-call stores the call and never its result."""
+    from kokua.core.build import loaded_toolsets_in
+
+    assert loaded_toolsets_in([_load_call({"name": "web"}, "a")]) == []
+
+
+def test_a_repeat_load_answered_already_loaded_adds_nothing_the_first_load_did_not():
+    from kokua.core.build import loaded_toolsets_in
+
+    already = _load_exchange("web", "b", result="'web' is already loaded.")
+    assert loaded_toolsets_in(already) == []
+    assert loaded_toolsets_in([*_load_exchange("web", "a"), *already]) == ["web"]
+
+
+def test_a_denied_load_after_a_successful_one_keeps_the_toolset():
+    from kokua.core.build import loaded_toolsets_in
+
+    denied = _load_exchange("web", "b", result="Tool 'load_tools' was not approved.")
+    assert loaded_toolsets_in([*_load_exchange("web", "a"), *denied]) == ["web"]
+
+
+async def test_a_real_load_result_is_what_restoring_reads(tmp_path):
+    from kokua.core.build import loaded_toolsets_in
+
+    agent, _ = _wired(_residency_config(tmp_path))
+    result = await agent.load_tool_group("web")
+
+    assert loaded_toolsets_in([_load_call({"name": "web"}, "a"), _load_result("a", result)]) == ["web"]
+
+
+def _preload_config(tmp_path, **overrides):
+    return _residency_config(
+        tmp_path, available=("memory", "time", "documents", "web"), resident=("memory", "time"), **overrides
+    )
+
+
+def _preloaded(config, names, state=None, client=None):
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    if state is None:
+        state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    client = client or MockAsyncModelClient([])
+    return wire_agent(config, state, "assistant", client=client, preloaded=names), state
+
+
+def _prompted_client(config, system_message, agent_name):
+    client = MockAsyncModelClient([])
+    client.system_message = system_message
+    return client
+
+
+def test_a_rebuilt_agent_has_its_loads_back_in_order(tmp_path):
+    config = _preload_config(tmp_path)
+    resident_names = _tool_names(_preloaded(config, [])[0])
+
+    agent, _ = _preloaded(config, ["documents", "web"])
+
+    names = _tool_names(agent)
+    assert max(names.index(n) for n in resident_names if n in names and n != "spawn_subagent") < names.index(
+        "read_document"
+    )
+    assert names.index("read_document") < names.index("get_web_content")
+
+
+def test_a_restored_toolset_is_resident_and_not_also_loadable(tmp_path):
+    agent, _ = _preloaded(_preload_config(tmp_path), ["web"])
+
+    listing = agent._groups.listing()
+    assert "web [resident]" in listing
+    assert "documents [loadable]" in listing
+
+
+def test_the_names_line_leaves_out_restored_toolsets(tmp_path, monkeypatch):
+    monkeypatch.setattr("kokua.core.build.build_model_client", _prompted_client)
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    config = _preload_config(tmp_path)
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    agent = wire_agent(config, state, "assistant", preloaded=["web"])
+
+    message = agent.model_client.system_message
+    assert "Also available, load before use: documents." in message
+    assert "web" not in message.split("Also available, load before use:")[1]
+
+
+async def test_a_preloaded_toolsets_approval_entry_is_resolved_before_its_tools_exist(tmp_path):
+    config = _preload_config(tmp_path, default_confirm=["web.get_web_content"])
+
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert "get_web_content" not in assistant._human.policies.for_agent("assistant").confirm
+
+        _preloaded(config, ["web"], state=assistant._state)
+
+        assert "get_web_content" in assistant._human.policies.for_agent("assistant").confirm
+    finally:
+        assistant._state.close()
+
+
+def test_a_preload_that_fails_is_skipped_logged_and_still_loadable(tmp_path, caplog):
+    config = _residency_config(tmp_path, available=("time", "broken", "web"), resident=("time",))
+    builds: list = []
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=_registry_with_broken_toolset(config, builds))
+
+    with caplog.at_level("WARNING", logger="kokua.core.build"):
+        agent, _ = _preloaded(config, ["broken", "web"], state=state)
+
+    assert "get_web_content" in _tool_names(agent)
+    assert "'broken'" in caplog.text and "store locked" in caplog.text
+    listing = agent._groups.listing()
+    assert "broken [loadable]" in listing and "web [resident]" in listing
+    assert builds
+
+
+def test_a_failed_preloads_name_stays_in_the_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("kokua.core.build.build_model_client", _prompted_client)
+    from kokua.core.build import wire_agent
+
+    config = _residency_config(tmp_path, available=("time", "broken", "web"), resident=("time",))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=_registry_with_broken_toolset(config, []))
+    agent = wire_agent(config, state, "assistant", preloaded=["broken", "web"])
+
+    assert "Also available, load before use: broken." in agent.model_client.system_message
+
+
+def test_a_preload_no_longer_deferred_is_ignored(tmp_path):
+    config = _preload_config(tmp_path)
+    expected = _tool_names(_preloaded(config, [])[0])
+
+    agent, _ = _preloaded(config, ["memory", "audio", "no-such-toolset", "memory"])
+
+    assert _tool_names(agent) == expected
+
+
+def test_the_agent_builder_restores_what_the_stored_conversation_loaded(tmp_path):
+    from aimu.sessions import Session, TinyDBSessionStore
+    from kokua.core.agents import build_registry
+    from kokua.core.build import make_agent_builder
+
+    config = _preload_config(tmp_path)
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(
+        Session(
+            key="c1",
+            metadata={},
+            messages=[
+                {"role": "user", "content": "hi"},
+                *_load_exchange("documents", "a"),
+                *_load_exchange("web", "b", arguments='{"name": "web"}'),
+            ],
+        )
+    )
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    build = make_agent_builder(
+        config,
+        state,
+        client_factory=lambda cid: MockAsyncModelClient([]),
+        store=store,
+        images_path=config.images_path,
+    )
+
+    names = _tool_names(build("c1"))
+
+    assert names.index("read_document") < names.index("get_web_content")
+    assert "get_web_content" not in _tool_names(build("a-conversation-with-no-session"))
+
+
+def _rebuilt_from(config, messages, registry=None):
+    from aimu.sessions import Session, TinyDBSessionStore
+    from kokua.core.agents import build_registry
+    from kokua.core.build import make_agent_builder
+
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(Session(key="c1", metadata={}, messages=[{"role": "user", "content": "hi"}, *messages]))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=registry or build_registry(config))
+    build = make_agent_builder(
+        config,
+        state,
+        client_factory=lambda cid: MockAsyncModelClient([]),
+        store=store,
+        images_path=config.images_path,
+    )
+    return build("c1")
+
+
+def test_a_denied_load_stays_denied_when_the_agent_is_rebuilt(tmp_path):
+    """The gate refusing ``load_tools`` stores the call anyway, so restoring from calls alone would hand
+    over, at the next restart or eviction, the toolset the user said no to."""
+    agent = _rebuilt_from(
+        _preload_config(tmp_path),
+        [
+            *_load_exchange("web", "a", result="Tool 'load_tools' was not approved."),
+            *_load_exchange("documents", "b"),
+        ],
+    )
+
+    names = _tool_names(agent)
+    assert "get_web_content" not in names and "read_document" in names
+    assert "web [loadable]" in agent._groups.listing()
+
+
+def test_a_failed_load_is_not_retried_when_the_agent_is_rebuilt(tmp_path):
+    config = _residency_config(tmp_path, available=("time", "broken"), resident=("time",))
+    builds: list = []
+
+    agent = _rebuilt_from(
+        config,
+        _load_exchange("broken", result="Could not load 'broken': store locked"),
+        registry=_registry_with_broken_toolset(config, builds),
+    )
+
+    assert builds == []
+    assert "broken [loadable]" in agent._groups.listing()
+
+
+def test_the_restored_prompt_through_the_production_client_path_names_what_is_still_loadable(tmp_path, monkeypatch):
+    from aimu.sessions import Session, TinyDBSessionStore
+    from kokua.core.agents import build_registry
+    from kokua.core.build import entry_agent_system_message, make_agent_builder
+
+    monkeypatch.setattr("kokua.core.build.build_model_client", _prompted_client)
+    config = _preload_config(tmp_path)
+    config.agents["assistant"].available.append("weekly-review")
+    skill_dir = config.skills_dir / "weekly-review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: weekly-review\ndescription: Review the week.\n---\nDo it.\n")
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(Session(key="c1", metadata={}, messages=[{"role": "user", "content": "hi"}, *_load_exchange("web")]))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    build = make_agent_builder(
+        config,
+        state,
+        client_factory=lambda cid: _prompted_client(config, entry_agent_system_message(config, state), "assistant"),
+        store=store,
+        images_path=config.images_path,
+    )
+
+    message = build("c1").model_client.system_message
+
+    assert _WEB_GUIDANCE_SNIPPET in message
+    assert "web" not in message.split("Also available, load before use:")[1]
+    assert "weekly-review" not in message.split("Also available, load before use:")[1]
+
+
+def test_the_entry_agents_own_prompt_does_not_list_skills_as_loadable(tmp_path):
+    from kokua.core.agents import build_registry
+    from kokua.core.build import entry_agent_system_message
+
+    config = _preload_config(tmp_path)
+    config.agents["assistant"].available.append("weekly-review")
+    skill_dir = config.skills_dir / "weekly-review"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: weekly-review\ndescription: Review the week.\n---\nDo it.\n")
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+
+    assert "weekly-review" not in entry_agent_system_message(config, state)
+
+
+def _registry_with_clock_toolset(config):
+    from kokua.core.agents import build_registry
+    from kokua.registry.registry import Toolset
+
+    def convert_time():
+        return "shadow"
+
+    registry = build_registry(config)
+    registry["clock"] = Toolset(name="clock", description="a second clock", build=lambda ctx: [convert_time])
+    return registry
+
+
+def test_a_preload_never_duplicates_a_tool_name_the_agent_already_holds(tmp_path, caplog):
+    config = _residency_config(tmp_path, available=("time", "clock"), resident=("time",))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=_registry_with_clock_toolset(config))
+
+    with caplog.at_level("WARNING", logger="kokua.core.build"):
+        agent, _ = _preloaded(config, ["clock"], state=state)
+
+    assert _tool_names(agent).count("convert_time") == 1
+    assert "convert_time" in caplog.text and "clock" in caplog.text
+
+
+def test_a_failed_preload_does_not_alert_the_user(tmp_path):
+    config = _residency_config(tmp_path, available=("time", "broken"), resident=("time",))
+    alerts: list[str] = []
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=_registry_with_broken_toolset(config, []))
+    state.alert_soon = alerts.append
+
+    _preloaded(config, ["broken"], state=state)
+
+    assert alerts == []
+
+
+async def test_a_model_driven_load_that_fails_still_alerts_the_user(tmp_path):
+    config = _residency_config(tmp_path, available=("time", "broken"), resident=("time",))
+    alerts: list[str] = []
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=_registry_with_broken_toolset(config, []))
+    state.alert_soon = alerts.append
+    agent, _ = _preloaded(config, [], state=state)
+
+    await agent.load_tool_group("broken")
+
+    assert alerts == ["Loading broken for assistant failed: store locked"]
+
+
+def test_preloads_keep_the_order_they_were_loaded_in_not_the_declared_order(tmp_path):
+    agent, _ = _preloaded(_preload_config(tmp_path), ["web", "documents"])
+
+    names = _tool_names(agent)
+
+    assert names.index("get_web_content") < names.index("read_document")
+
+
+def test_loaded_toolsets_in_strips_the_name_as_the_load_does():
+    from kokua.core.build import loaded_toolsets_in
+
+    assert loaded_toolsets_in(_load_exchange(" web ")) == ["web"]
+
+
+# --- available = "all": the expansion is what every agent is built from --------------------------------
+
+
+def _write_digest_skill(config) -> None:
+    skill = config.skills_dir / "weekly-digest"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: weekly-digest\ndescription: Digest the week.\n---\n\nDo the thing.\n", encoding="utf-8"
+    )
+
+
+def _all_worker_config(tmp_path, **explorer):
+    agents = {
+        "assistant": AgentConfig(available=["time"], delegates_to=["explorer"]),
+        "explorer": AgentConfig(description="Explores.", available=ALL_TOOLSETS, resident=["time"], **explorer),
+    }
+    config = _config(tmp_path, agents=agents, default_confirm=[], default_review=[])
+    _write_digest_skill(config)
+    return config
+
+
+async def test_an_all_worker_spec_holds_its_resident_tools_and_loads_the_rest(tmp_path):
+    from aimu import aio
+
+    from kokua.core.agents import available_for
+
+    config = _all_worker_config(tmp_path)
+    spec = _specs(config)["explorer"]
+    expanded = available_for(config, build_registry(config), "explorer")
+
+    assert [fn.__name__ for fn in spec["tools"]] == ["get_current_date_and_time", "convert_time"]
+    groups = spec["tool_groups"]
+    assert [group.name for group in groups] == ["time", *[name for name in expanded if name != "time"]]
+    assert groups[0].resident and not any(group.resident for group in groups[1:])
+    assert "skills" not in [group.name for group in groups]
+    worker = aio.Agent(MockAsyncModelClient([]), tools=spec["tools"], tool_groups=groups)
+    assert {"get_current_date_and_time", "convert_time"} | LOADER_TOOLS == {
+        fn.__name__ for fn in worker._effective_tools(None)
+    }
+
+
+async def test_an_all_entry_agent_holds_skills_and_lists_no_skill_twice(tmp_path):
+    from kokua.core.build import entry_agent_system_message
+
+    agents = {"assistant": AgentConfig(available=ALL_TOOLSETS, resident=["time", "skills"])}
+    config = _config(tmp_path, agents=agents, default_confirm=[], default_review=[])
+    _write_digest_skill(config)
+    agent, state = _wired(config)
+
+    names_line = entry_agent_system_message(config, state).split("Also available, load before use:")[1]
+    assert "weekly-digest" not in names_line
+    assert "author_skill" in _tool_names(agent)
+    assert state.skill_manager is state.all_skills
+
+
+async def test_all_grants_no_core_tool_and_never_reads_as_lean(tmp_path):
+    from kokua.core.agents import DELEGATION_GUIDANCE, LEAN_DELEGATION_GUIDANCE
+
+    alone = _specs(_all_worker_config(tmp_path / "alone"))["explorer"]
+    assert "spawn_subagent" not in [fn.__name__ for fn in alone["tools"]]
+
+    config = _all_worker_config(tmp_path / "delegating", delegates_to=["helper"])
+    config.agents["helper"] = AgentConfig(description="Helps.", available=["time"])
+    message = _specs(config)["explorer"]["system_message"]
+    assert DELEGATION_GUIDANCE in message
+    assert LEAN_DELEGATION_GUIDANCE not in message
+
+
+# --- a skill written mid-session reaches "all" workers on their next spawn ----------------------------
+
+
+def _authoring_all_worker_config(tmp_path):
+    agents = {
+        "assistant": AgentConfig(available=["mcp", "skills", "time"], delegates_to=["explorer", "clock"]),
+        "explorer": AgentConfig(description="Explores.", available=ALL_TOOLSETS, resident=["time"]),
+        "clock": AgentConfig(description="Tells the time.", available=["time"]),
+    }
+    return _config(tmp_path, agents=agents, default_confirm=[], default_review=[])
+
+
+def _group_names(spec) -> list[str]:
+    return [group.name for group in spec["tool_groups"]]
+
+
+def _entry_tool(assistant, name):
+    return next(fn for fn in assistant._agent.tools if getattr(fn, "__name__", "") == name)
+
+
+async def test_a_skill_written_mid_session_reaches_an_all_worker_next_spawn(tmp_path, monkeypatch):
+    import kokua.core.agents as agents_mod
+
+    captured: list = []
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    config = _authoring_all_worker_config(tmp_path)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    clock_before = _group_names(captured[-1]["clock"])
+    assert "weekly-digest" not in _group_names(captured[-1]["explorer"])
+
+    result = await _entry_tool(assistant, "author_skill")(
+        name="weekly-digest", description="Digest the week.", body="Do the thing."
+    )
+
+    assert result.startswith("Created skill 'weekly-digest'")
+    assert "weekly-digest" in _group_names(captured[-1]["explorer"])
+    assert _group_names(captured[-1]["clock"]) == clock_before
+    assistant._state.close()
+
+
+async def test_a_server_added_at_runtime_does_not_reach_an_all_worker(tmp_path, monkeypatch):
+    """The registry's MCP entries come from the config read at startup, so a skill refresh keeps them as
+    they were: a server added since waits for a restart, while a skill written after it does not."""
+    import kokua.core.agents as agents_mod
+
+    async def fake_connect(url, **kwargs):
+        return _FakeMCP([_fake_mcp_tool("get_quote")]), "none"
+
+    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", fake_connect)
+    captured: list = []
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    config = _authoring_all_worker_config(tmp_path)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    await _entry_tool(assistant, "add_mcp_server")(url="https://broker.example/mcp")
+    assert "broker-example" not in _group_names(captured[-1]["explorer"])
+
+    await _entry_tool(assistant, "author_skill")(name="weekly-digest", description="Digest the week.", body="Do it.")
+
+    assert "weekly-digest" in _group_names(captured[-1]["explorer"])
+    assert "broker-example" not in _group_names(captured[-1]["explorer"])
+    assistant._state.close()
+
+
+def test_a_skill_refresh_grows_the_approval_policies_before_any_worker_is_rebuilt(tmp_path):
+    """A rebuilt delegate hands its workers the new scripts, so every gate naming a skill must have seen
+    them first. A prose edit changes no tool, so it reports no build."""
+    from kokua.core.build import refresh_skills
+    from tests.core.test_skill_toolsets import write_skill
+
+    config = _authoring_all_worker_config(tmp_path)
+    write_skill(config, "weekly-digest", "Digest the week.", script="print(1)\n")
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
+    events: list = []
+    state.toolset_built = lambda toolset, names: events.append((toolset, names))
+    state.refresh_workers = lambda agent: events.append("workers rebuilt")
+    state.for_each_agent = lambda fn: fn(object())
+    try:
+        refresh_skills(state, tools_changed=True)
+        assert events == [("weekly-digest", frozenset({"weekly_digest__run"})), "workers rebuilt"]
+
+        events.clear()
+        refresh_skills(state, tools_changed=False)
+        assert events == ["workers rebuilt"]
+    finally:
+        state.close()
+
+
+def test_a_delegate_that_fails_to_build_leaves_the_old_one_in_place(monkeypatch):
+    """Removing the old delegate first would leave the agent unable to delegate at all until the next
+    successful rebuild, for a failure that may have nothing to do with delegation."""
+    from types import SimpleNamespace
+
+    import kokua.core.agents as agents_mod
+    from kokua.core.build import rebuild_delegation_tool
+
+    def spawn_subagent():
+        pass
+
+    def broken(agent, config, state):
+        raise RuntimeError("spec build failed")
+
+    monkeypatch.setattr(agents_mod, "make_delegation_tool", broken)
+    agent = SimpleNamespace(tools=[spawn_subagent])
+    with pytest.raises(RuntimeError, match="spec build failed"):
+        rebuild_delegation_tool(agent, SimpleNamespace(config=None))
+    assert agent.tools == [spawn_subagent]
+
+
+async def test_a_worker_rebuild_that_raises_reaches_the_model_after_the_write(tmp_path):
+    config = _authoring_all_worker_config(tmp_path)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    def broken(agent):
+        raise RuntimeError("spec build failed")
+
+    assistant._state.refresh_workers = broken
+    try:
+        result = await _entry_tool(assistant, "author_skill")(
+            name="weekly-digest", description="Digest the week.", body="Do the thing."
+        )
+        assert result.startswith("Created skill 'weekly-digest'")
+        assert "The write happened, but workers were not given the change: spec build failed" in result
+    finally:
+        assistant._state.close()

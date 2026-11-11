@@ -4,7 +4,7 @@ Resolves an :class:`~kokua.config.AssistantConfig` from (in increasing precedenc
 defaults, an optional TOML config file, and command-line flags, then runs the selected front end
 (default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` lists the
 front-end plugins; ``--list-toolsets`` lists the whole toolset registry, which is the discovery command
-for the single namespace an ``[agents.*]`` table's ``tools`` list draws on.
+for the single namespace an ``[agents.*.tools]`` table's ``available`` list draws on.
 
 Flag defaults are the ``None`` sentinel rather than the real default value, so an unspecified flag
 defers to the config file (and then the built-in default) instead of overriding it.
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -33,12 +34,15 @@ from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
 from kokua.config import settings_sources
+from kokua.config.schema import ALL_TOOLSETS, DEFAULT_POLICY_SOURCE
 from kokua.config.store import disambiguate_name, name_from_url
 
 # Safe at module level, unlike kokua.core.agents below: `from . import plugins` above already imports
 # kokua.toolsets, and registry.py itself imports no AIMU surface the preflight checks.
-from kokua.registry.registry import ToolsetError
+from kokua.registry.registry import ToolsetError, ToolsetRegistry
 from .logging_setup import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
@@ -54,7 +58,7 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     parser.add_argument(
         "--list-toolsets",
         action="store_true",
-        help="List every toolset name an [agents.<name>].tools list may use, grouped by provider, and exit.",
+        help="List every toolset name an [agents.<name>.tools].available list may use, grouped by provider, and exit.",
     )
 
     parser.add_argument(
@@ -92,11 +96,18 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "--confirm-tools",
         default=None,
         metavar="NAMES",
-        help="Comma-separated tools that require interactive confirmation before each call. Each entry "
-        "names its toolset: 'compute' (or 'compute.*') for every tool that capability provides, "
-        "'compute.execute_python' for one, with 'core' reserved for the tools no toolset provides. "
-        "Default: skills.add_skill_script,mcp.add_mcp_server,compute.execute_python,compute.run_command,"
-        "fs_write,config.update_config. Pass an empty string to disable.",
+        help="Comma-separated tools that require interactive confirmation before each call. Replaces only "
+        "[assistant.tools].confirm for this run: [assistant.tools].review and any agent's own "
+        "confirm/review pair are unaffected, so an empty value clears confirm but review still "
+        "prompts. Must not name a tool already in review, or startup fails. Each entry names its "
+        "toolset: 'compute' (or 'compute.*') for every tool that capability provides, "
+        "'compute.execute_python' for one, with 'core' reserved for the tools no toolset provides.",
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Log at DEBUG for this run (overrides [logging].level) and print each agent's access summary at startup.",
     )
 
     # Web front-end binding (ignored by other front ends).
@@ -117,6 +128,11 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Write here instead of the default ($KOKUA_CONFIG or $KOKUA_HOME/config.toml).",
     )
     init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file.")
+
+    subparsers.add_parser(
+        "agents",
+        help="Show each agent's available tools, what is in context, and what asks before it runs.",
+    )
 
     skills_parser = subparsers.add_parser("skills", help="List or install the skills this repository ships.")
     skills_sub = skills_parser.add_subparsers(dest="skills_command")
@@ -148,6 +164,12 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="Do not truncate long tool arguments and results.",
+    )
+    export_parser.add_argument(
+        "--turn",
+        type=int,
+        metavar="N",
+        help="Export turn N alone, with every request the model was sent and every response it gave.",
     )
     return parser
 
@@ -181,7 +203,8 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("model", args.model)
     take("system_message_override", args.system)
     take("mcp_servers", args.mcp, _mcp_servers_from_urls)
-    take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
+    take("default_confirm", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
+    take("log_level", "DEBUG" if args.debug else None)
     take("frontend", args.frontend)
     take("host", args.host)
     take("port", args.port)
@@ -322,7 +345,7 @@ def _install_skills(args: argparse.Namespace) -> int:
         print(f"installed into {target}: {', '.join(installed)}")
     if skipped:
         print(f"already installed (use --force to overwrite): {', '.join(skipped)}")
-    print("\nDeclare a skill by name in an [agents.<name>].tools list to give that agent access to it.")
+    print("\nDeclare a skill by name in an [agents.<name>.tools].available list to give that agent access to it.")
     return 0
 
 
@@ -351,12 +374,108 @@ def _print_toolsets(config: AssistantConfig) -> None:
     for name in registry:
         by_provider.setdefault(registry.providers[name], []).append(name)
 
-    print("Toolsets available to this install. Name any of these in an [agents.<name>].tools list.\n")
+    print("Toolsets available to this install. Name any of these in an [agents.<name>.tools].available list.\n")
     for provider, names in by_provider.items():
         print(f"{provider}:")
         for name in sorted(names):
             print(f"  {name}: {registry[name].description}")
         print()
+
+
+def format_agent_access(config: AssistantConfig, registry: ToolsetRegistry) -> list[str]:
+    """The lines ``kokua agents`` prints: per agent, what it may use, what is in context, what asks first.
+
+    Reads declarations only. Nothing is built, so this runs with the model server down and shows what the
+    config says rather than what a live agent holds. An agent declaring no ``resident`` list holds every
+    available toolset from its first turn, and the line says that instead of repeating the list.
+    """
+
+    # Deferred for the reason `_print_toolsets` defers its import.
+    from kokua.core.agents import available_for, resident_for
+
+    def entries(names: list[str]) -> str:
+        return ", ".join(names) if names else "(none)"
+
+    lines: list[str] = []
+    for name, agent in config.agents.items():
+        confirm, review, source = config.approval_entries_for(name)
+        resident = (
+            entries(resident_for(config, registry, name)) if agent.resident is not None else "every available toolset"
+        )
+        toolsets = available_for(config, registry, name)
+        available = entries(toolsets)
+        if agent.available is ALL_TOOLSETS:
+            available = f"all ({len(toolsets)}): {available}"
+        lines += [
+            name,
+            f"  available: {available}",
+            f"  resident:  {resident}",
+            f"  confirm:   {entries(confirm)}  (from {source})",
+            f"  review:    {entries(review)}  (from {source})",
+            "",
+        ]
+    lines.append(f"composed workers, confirm (from {DEFAULT_POLICY_SOURCE}): {entries(config.default_confirm)}")
+    lines.append(f"composed workers, review (from {DEFAULT_POLICY_SOURCE}): {entries(config.default_review)}")
+    return lines
+
+
+def access_summary_lines(config: AssistantConfig, registry: ToolsetRegistry) -> list[str]:
+    """One line per declared agent, in entries rather than resolved tool names.
+
+    Runs at startup before anything is built, so it counts declarations, with an ``"all"`` agent expanded
+    against the registry and its count shown beside the word.
+    """
+    # Deferred for the reason `_print_toolsets` defers its import.
+    from kokua.core.agents import available_for, resident_for
+
+    lines = []
+    for name, agent in config.agents.items():
+        confirm, review, source = config.approval_entries_for(name)
+        available = str(len(available_for(config, registry, name)))
+        if agent.available is ALL_TOOLSETS:
+            available = f"all ({available})"
+        resident = len(resident_for(config, registry, name))
+        line = f"{name}: {available} available, {resident} resident, {len(confirm)} confirm, {len(review)} review"
+        line += f" (from {source})"
+        lines.append(line)
+    return lines
+
+
+def print_access_summary(config: AssistantConfig) -> None:
+    """Log the summary, and also write it to stderr when the run logs at DEBUG.
+
+    Always logged, so the record of what each agent could reach at startup survives in kokua.log. On the
+    console it is debug output: `kokua agents` shows the same thing, in full, whenever it is wanted. Stderr
+    rather than stdout, so a front end's stdout (and a piped ``kokua``) stays clean.
+
+    Does nothing when the registry will not assemble (two toolsets claiming one name): startup reports
+    that error itself a moment later, where the front end catches it.
+    """
+    from kokua.core.agents import build_registry
+
+    try:
+        registry = build_registry(config)
+    except ToolsetError:
+        return
+    on_console = config.log_level.upper() == "DEBUG"
+    for line in access_summary_lines(config, registry):
+        logger.info(line)
+        if on_console:
+            print(line, file=sys.stderr)
+
+
+def _print_agents(config: AssistantConfig) -> None:
+    """Validate the agents against the registry, then print each one's access. Builds no toolset."""
+    # Deferred for the reason `_print_toolsets` defers it.
+    from kokua.core.agents import build_registry, validate_agents
+
+    try:
+        registry = build_registry(config)
+        validate_agents(config, registry)
+    except (ConfigError, ToolsetError) as e:
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
+    print("\n".join(format_agent_access(config, registry)))
 
 
 def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig) -> tuple[Optional[Session], int]:
@@ -416,7 +535,12 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
     renderer it calls, `render_markdown`, imports neither, and a CLI path that built a front end just to
     read a file back off disk would quietly make the web extra a requirement for exporting again.
     """
-    from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, export_filename, render_markdown
+    from kokua.transcript_export import (
+        DEFAULT_MAX_PAYLOAD_CHARS,
+        export_filename,
+        render_markdown,
+        render_turn_markdown,
+    )
 
     try:
         session, match_count = _resolve_export_session(args, config)
@@ -443,19 +567,28 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
             print(f"no conversation found matching '{args.conversation}'", file=sys.stderr)
         return 2
 
-    markdown = render_markdown(
-        session,
-        max_payload_chars=None if args.full else DEFAULT_MAX_PAYLOAD_CHARS,
-        payloads_path=config.payloads_path,
-    )
+    if args.turn is not None:
+        if args.full:
+            print("note: --full has no effect with --turn; a per-turn export is always whole.", file=sys.stderr)
+        try:
+            markdown = render_turn_markdown(session, args.turn, payloads_path=config.payloads_path)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        default_name = f"{session.key}.turn-{args.turn}.md"
+    else:
+        markdown = render_markdown(
+            session,
+            max_payload_chars=None if args.full else DEFAULT_MAX_PAYLOAD_CHARS,
+            payloads_path=config.payloads_path,
+        )
+        default_name = export_filename(session.key, full=args.full)
 
     if args.output == "-":
         print(markdown, end="")
         return 0
 
-    destination = (
-        Path(args.output) if args.output else config.downloads_path / export_filename(session.key, full=args.full)
-    )
+    destination = Path(args.output) if args.output else config.downloads_path / default_name
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(markdown, encoding="utf-8")
     print(str(destination))
@@ -520,6 +653,10 @@ def main() -> None:
         _print_toolsets(config)
         return
 
+    if args.command == "agents":
+        _print_agents(config)
+        return
+
     # Also after resolve_config, for the same reason: it needs config.sessions_path and
     # config.downloads_path. Unlike running a front end, it builds no Assistant and configures no
     # logging, since reading a stored conversation back off disk needs neither.
@@ -528,6 +665,7 @@ def main() -> None:
 
     configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)
+    print_access_summary(config)
     try:
         asyncio.run(frontend.run(config, args))
     except KeyboardInterrupt:

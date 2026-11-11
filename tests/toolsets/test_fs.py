@@ -15,6 +15,7 @@ from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.registry import LiveState, ToolsetContext
 from kokua.toolsets.fs import TOOLSET as FS
 from kokua.toolsets.fs_write import TOOLSET as FS_WRITE
+from tests.helpers import allow_all_gates
 
 
 def _ctx(tmp_path, agent_name="assistant"):
@@ -53,10 +54,10 @@ def test_the_shipped_introspector_reads_files_and_cannot_write_them(tmp_path):
 
     config = AssistantConfig(data_dir=tmp_path)
     config.agents = {
-        "assistant": AgentConfig(tools=[], delegates_to=["introspector"]),
-        "introspector": AgentConfig(description="Evaluates a conversation.", tools=["fs", "time"]),
+        "assistant": AgentConfig(available=[], delegates_to=["introspector"]),
+        "introspector": AgentConfig(description="Evaluates a conversation.", available=["fs", "time"]),
     }
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
 
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["introspector"]["tools"]}
 
@@ -71,10 +72,10 @@ def test_a_writer_is_reachable_only_by_declaring_the_write_toolset(tmp_path):
 
     config = AssistantConfig(data_dir=tmp_path)
     config.agents = {
-        "assistant": AgentConfig(tools=[], delegates_to=["coder"]),
-        "coder": AgentConfig(description="Writes code.", tools=["fs", "fs_write"]),
+        "assistant": AgentConfig(available=[], delegates_to=["coder"]),
+        "coder": AgentConfig(description="Writes code.", available=["fs", "fs_write"]),
     }
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
 
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["coder"]["tools"]}
 

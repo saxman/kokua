@@ -80,8 +80,10 @@ class _SlowClient(MockAsyncModelClient):
         thinking: str = "",
         blank_lead: str = "",
         lead_delay: float = 0.0,
+        emit_request: bool = False,
     ):
         super().__init__([])
+        self._emit_request = emit_request
         self._delay = delay
         self._lead_delay = lead_delay
         self._reply = reply
@@ -101,6 +103,14 @@ class _SlowClient(MockAsyncModelClient):
 
     async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
         self.messages.append({"role": "user", "content": user_message})
+        if self._emit_request:
+            # MockAsyncModelClient never reaches AIMU's request seam, so emit what a provider would.
+            from aimu.events import RequestPrepared
+            from aimu.models._internal.chat_state import _effective_sink
+
+            sink = _effective_sink(self)
+            if sink is not None:
+                sink(RequestPrepared(provider="Mock", model="qwen", endpoint="http://x", payload={"messages": []}))
         await asyncio.sleep(self._lead_delay)  # the silence a sent message opens with
         if self._thinking:
             yield StreamChunk(StreamingContentType.THINKING, self._thinking)
@@ -178,6 +188,7 @@ def live_server():
         thinking: str = "",
         blank_lead: str = "",
         lead_delay: float = 0.0,
+        emit_request: bool = False,
     ) -> str:
         config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
         if seed is not None:
@@ -193,6 +204,7 @@ def live_server():
                 thinking=thinking,
                 blank_lead=blank_lead,
                 lead_delay=lead_delay,
+                emit_request=emit_request,
             ),
         )
         return _serve(app, _free_port(), started)
@@ -781,6 +793,22 @@ def test_theme_button_cycles_and_persists(page, live_server):
     page.locator("#theme-btn").click()  # dark -> back to auto
     expect(page.locator("#theme-btn")).to_have_attribute("title", "Theme: auto (system)")
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
+
+
+def test_header_names_the_model_answering(page, live_server):
+    """The header label is the page's answer to "which model is this", and the `models` frame is the
+    only place it can come from: a model is read as the agents are built, so nothing the page already
+    holds knows it. This config declares none, so the label is what AIMU's default resolved to
+    (`AIMU_LANGUAGE_MODEL`, pinned by the test suite), endpoint included, which is the form you could
+    type back into config.toml. The tooltip names the agent it belongs to, since a session can run
+    several models at once.
+    """
+    _open(page, live_server(delay=0.0))
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    label = page.locator("#model-label")
+    expect(label).to_have_text(TEST_DEFAULT_MODEL)
+    expect(label).to_have_attribute("title", f"assistant: {TEST_DEFAULT_MODEL}")
 
 
 def test_working_indicator_on_switch_into_running(page, live_server):
@@ -2691,3 +2719,675 @@ def test_alert_cards_group_and_guard_their_controls(page, live_server):
 
     raise_alert(text="authorize at https://auth.example/x", url="https://auth.example/x")
     expect(cards.first.locator(".alert-link")).to_have_attribute("href", "https://auth.example/x")
+
+
+# --- What the model saw: round buttons, the round panel, the size-safe viewer, turn badges -------
+
+_REQUEST_BODY = {
+    "messages": [
+        {"role": "system", "content": "line one\nline two"},
+        {"role": "user", "content": "hi"},
+    ],
+    "tools": [{"name": "t"}],
+}
+
+
+def _request_seed(
+    body=None, *, call=None, ending=None, subagent=None, saved=True, response=None, messages=None, rounds=None
+):
+    """A seeded conversation whose one turn recorded its requests and its ending, as `replay_items` reads them.
+
+    `response`, when given, is saved as the first round's recorded response (`{"text", "thinking",
+    "tool_calls"}`). `rounds` is a list of per-round overrides of the call record (round numbers follow the
+    list), for a turn with more than one model call; `messages` replaces the stored transcript.
+    """
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    from kokua import payloads
+
+    def seed(config):
+        text = json.dumps(_REQUEST_BODY if body is None else body)
+        response_ref = payloads.save_text(config.payloads_path, json.dumps(response)) if response else None
+        calls = []
+        for number, override in enumerate(rounds or [call or {}]):
+            record = {
+                "run_id": "entry-1",
+                "parent_run_id": None,
+                "agent": "assistant",
+                "round": number,
+                "provider": "Mock",
+                "endpoint": "http://batlin.local:8000/v1",
+                "model": "qwen",
+                "message_count": 2,
+                "tool_count": 1,
+                "payload_chars": len(text),
+                "payload_ref": payloads.save_text(config.payloads_path, text) if saved else None,
+                "stop_reason": "stop",
+                "response_ref": response_ref if number == 0 else None,
+                "error": None,
+                "ts": "2026-08-10T00:00:00",
+            }
+            record.update(override)
+            calls.append(record)
+        ending_record = {
+            "run_id": "entry-1",
+            "parent_run_id": None,
+            "agent": "assistant",
+            "ended_by": "answered",
+            "round": len(calls) - 1,
+            "max_iterations": 10,
+            "error": None,
+            "ts": "2026-08-10T00:00:00",
+        }
+        ending_record.update(ending or {})
+        metadata = {
+            "title": "seeded",
+            "created_at": "2026-08-10T00:00:00",
+            "updated_at": "2026-08-10T00:00:00",
+            "requests": {"0": {"entry_run_id": "entry-1", "calls": calls, "endings": [ending_record]}},
+        }
+        if subagent:
+            metadata["subagent"] = {"0": subagent}
+        TinyDBSessionStore(str(config.sessions_path)).save(
+            Session(
+                key="seeded",
+                messages=messages or [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+                metadata=metadata,
+            )
+        )
+
+    return seed
+
+
+_TOOL_TURN = [
+    {"role": "user", "content": "what time is it?"},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"type": "function", "function": {"name": "get_time", "arguments": {}}, "id": "1"}],
+    },
+    {"role": "tool", "name": "get_time", "content": "21:15", "tool_call_id": "1"},
+    {"role": "assistant", "content": "It is 21:15."},
+]
+
+
+def _open_round(page, index=0):
+    """Click the index-th round button in the log and return the panel it opens."""
+    page.locator("#log button.round-button").nth(index).click()
+    panel = page.locator("#round-panel")
+    expect(panel).to_be_visible()
+    return panel
+
+
+def _open_first_message(panel):
+    """Open the request's `messages` node, then its first message, so that message's strings render."""
+    messages = panel.locator(".json-node", has_text="messages").first
+    messages.locator("> summary").click()
+    messages.locator(".json-node").first.locator("> summary").click()
+    return messages
+
+
+def test_a_round_button_opens_the_panel_and_expands_lazily(page, live_server):
+    requested = []
+    page.on("request", lambda request: requested.append(request.url))
+    _open(page, live_server(seed=_request_seed()))
+
+    button = page.locator("#log button.round-button")
+    expect(button).to_have_count(1)
+    expect(button).to_have_text("{ }")
+    button.hover()
+    expect(button).to_have_attribute("title", "turn 1, round 1")
+    expect(button).to_have_attribute("data-round", "1")
+    expect(button).to_have_attribute("aria-controls", "round-panel")
+    expect(button).to_have_attribute("aria-expanded", "false")
+    expect(page.locator("#round-panel")).to_be_hidden()
+    assert not any("/payloads/" in url for url in requested)  # nothing fetched until a round is shown
+
+    panel = _open_round(page)
+    expect(button).to_have_attribute("aria-expanded", "true")
+    expect(panel.locator(".round-panel-title")).to_have_text("Turn 1 · round 1")
+    expect(panel.locator(".round-panel-agent")).to_have_text("assistant")
+    expect(panel.locator(".round-summary")).to_contain_text("2 messages · 1 tools")
+    expect(panel.locator(".request-note")).to_contain_text("batlin.local")
+    expect(panel.locator(".request-download")).to_have_attribute("href", re.compile(r"\?download=turn-1-round-1"))
+    messages = panel.locator(".json-node", has_text="messages").first
+    expect(messages.locator(".json-string")).to_have_count(0)  # children not rendered until opened
+    messages.locator("> summary").click()
+    expect(messages.locator(".json-string")).to_have_count(0)  # the first message is still unopened
+    messages.locator(".json-node").first.locator("> summary").click()
+    expect(panel.locator(".json-string", has_text="line one")).to_be_visible()
+    assert "\\n" not in panel.locator(".json-string", has_text="line one").inner_text()
+    expect(page.locator("#log .bubble.request")).to_have_count(0)
+    expect(page.locator("#log .ending")).to_have_count(0)
+    expect(page.locator(".bubble.user .turn-badge").first).to_have_text("turn 1")
+
+
+def _assert_button_on_header_line(card):
+    """A foldable card's round button sits on its header line, not wrapped below the card."""
+    button = card.locator("> .round-slot > .round-button").first.bounding_box()
+    header = card.locator("> .fold-header").bounding_box()
+    assert button is not None and header is not None
+    assert header["y"] - 2 <= button["y"] < header["y"] + header["height"], (button, header)
+    assert button["x"] + button["width"] <= header["x"] + header["width"] + 2, (button, header)
+
+
+def test_a_foldable_cards_round_button_sits_on_its_header_line(page, live_server):
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}])))
+    tool = page.locator("#log > .bubble.tool").first
+    _assert_button_on_header_line(tool)
+    collapsed = "collapsed" in (tool.get_attribute("class") or "")
+    tool.locator("> .round-slot > .round-button").click()
+    expect(page.locator("#round-panel")).to_be_visible()
+    assert ("collapsed" in (tool.get_attribute("class") or "")) == collapsed  # opening the panel does not fold
+
+
+def test_a_round_button_inside_a_sub_agent_card_sits_on_its_entrys_header_line(page, live_server):
+    entries = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "tool", "name": "web_search", "arguments": {"q": "x"}, "response": "ok"}},
+        {
+            "id": "r-1",
+            "append": {
+                "kind": "request",
+                "round": 0,
+                "payload_ref": None,
+                "payload_chars": 100,
+                "message_count": 3,
+                "tool_count": 1,
+                "endpoint": "http://x",
+                "stop_reason": "tool_use",
+                "error": None,
+                "agent": "researcher",
+            },
+        },
+        {"id": "r-1", "status": "done"},
+    ]
+    _open(page, live_server(seed=_request_seed(subagent=entries)))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    nested = card.locator("> .fold-body > .bubble.tool").first
+    _assert_button_on_header_line(nested)
+
+
+def _live_frame(page, frame):
+    """Deliver one frame through the page's own handler, in the order a live turn sends them."""
+    page.evaluate("frame => handleFrame({data: JSON.stringify(frame)})", frame)
+
+
+_LIVE_CALL = {
+    "type": "request",
+    "run_id": "live-1",
+    "parent_run_id": None,
+    "agent": "assistant",
+    "round": 0,
+    "provider": "Mock",
+    "endpoint": "http://x",
+    "model": "m",
+    "message_count": 1,
+    "tool_count": 1,
+    "payload_chars": 10,
+    "payload_ref": None,
+    "stop_reason": "tool_use",
+    "tool_call_count": 1,
+    "response_ref": None,
+    "error": None,
+}
+
+
+def test_a_live_tool_round_moves_its_button_onto_the_tool_card_that_follows(page, live_server):
+    """Live, a tool round's request arrives before its tool card (the record completes when the model's
+    response ends, and the tool runs after), so its button starts with nothing beneath it; the tool card
+    it asked for then takes the button, the same output a reload attaches it to."""
+    _open(page, live_server(seed=_request_seed()))
+    _live_frame(page, {"type": "thinking", "text": "I should check the clock."})
+    _live_frame(page, _LIVE_CALL)
+    _live_frame(page, {"type": "tool", "name": "get_current_date_and_time", "arguments": {}, "response": "08:48"})
+    tool = page.locator("#log > .bubble.tool").last
+    expect(tool.locator("> .round-slot > .round-button")).to_have_count(1)
+    expect(page.locator("#log > .round-orphan")).to_have_count(0)
+    thinking = page.locator("#log > .bubble.thinking").last
+    expect(thinking.locator(".round-button")).to_have_count(0)
+    expect(thinking.locator("> .fold-header > .fold-ts")).to_have_count(1)  # its caption went back home
+
+
+def test_a_tool_card_names_its_toolset_and_one_without_stays_bare(page, live_server):
+    _open(page, live_server())
+    _live_frame(page, {"type": "tool", "name": "calculate", "arguments": {}, "response": "4", "toolset": "compute"})
+    _live_frame(page, {"type": "tool", "name": "mystery", "arguments": {}, "response": "x"})
+    labels = page.locator("#log > .bubble.tool > .fold-header > .fold-label")
+    expect(labels.nth(0)).to_contain_text("compute.calculate()")
+    expect(labels.nth(1)).to_contain_text("mystery()")
+    expect(labels.nth(1)).not_to_contain_text(".mystery")
+
+
+def test_a_live_tool_round_with_two_calls_puts_its_button_on_the_last(page, live_server):
+    _open(page, live_server(seed=_request_seed()))
+    _live_frame(page, {**_LIVE_CALL, "tool_call_count": 2})
+    _live_frame(page, {"type": "tool", "name": "first", "arguments": {}, "response": "a"})
+    _live_frame(page, {"type": "tool", "name": "second", "arguments": {}, "response": "b"})
+    tools = page.locator("#log > .bubble.tool")
+    expect(tools).to_have_count(2)
+    expect(tools.first.locator(".round-button")).to_have_count(0)
+    expect(tools.last.locator(".round-button")).to_have_count(1)
+    expect(page.locator("#log > .round-orphan")).to_have_count(0)
+
+
+def test_a_card_after_a_round_that_asked_for_no_tools_does_not_take_its_button(page, live_server):
+    """A round that only answered has no dispatch results, so a card that follows it is not its output."""
+    _open(page, live_server(seed=_request_seed()))
+    _live_frame(page, {"type": "token", "text": "Here is the answer."})
+    _live_frame(page, {"type": "done"})
+    _live_frame(page, {**_LIVE_CALL, "stop_reason": "stop", "tool_call_count": 0})
+    _live_frame(page, {"type": "tool", "name": "unrelated", "arguments": {}, "response": "x"})
+    expect(page.locator("#log > .bubble.tool").last.locator(".round-button")).to_have_count(0)
+    expect(page.locator("#log > .bubble.assistant").last.locator(".round-button")).to_have_count(1)
+
+
+def test_the_next_rounds_answer_does_not_take_the_previous_rounds_button(page, live_server):
+    _open(page, live_server(seed=_request_seed()))
+    _live_frame(page, _LIVE_CALL)
+    _live_frame(page, {"type": "tool", "name": "clock", "arguments": {}, "response": "08:48"})
+    _live_frame(page, {"type": "token", "text": "It's 8:48."})
+    _live_frame(page, {"type": "done"})
+    expect(page.locator("#log > .bubble.tool").last.locator(".round-button")).to_have_count(1)
+
+
+def test_a_sub_agent_cards_tool_round_puts_its_button_on_the_tool_entry(page, live_server):
+    """A card's entries are stored in arrival order, request before tool entry, so this holds on reload too."""
+    entries = [
+        {"id": "r-1", "role": "researcher", "task": "t", "status": "running"},
+        {"id": "r-1", "append": {"kind": "reasoning", "text": "look it up"}},
+        {
+            "id": "r-1",
+            "append": {
+                "kind": "request",
+                "round": 0,
+                "payload_ref": None,
+                "payload_chars": 10,
+                "message_count": 1,
+                "tool_count": 1,
+                "endpoint": "http://x",
+                "stop_reason": "tool_use",
+                "tool_call_count": 1,
+                "error": None,
+                "agent": "researcher",
+            },
+        },
+        {"id": "r-1", "append": {"kind": "tool", "name": "web_search", "arguments": {"q": "x"}, "response": "ok"}},
+        {"id": "r-1", "status": "done"},
+    ]
+    _open(page, live_server(seed=_request_seed(subagent=entries)))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    expect(card.locator("> .fold-body > .bubble.tool .round-button")).to_have_count(1)
+    expect(card.locator(".round-orphan")).to_have_count(0)
+
+
+def test_a_two_round_turn_puts_each_button_on_its_own_output(page, live_server):
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}])))
+    first = page.locator("#log > .bubble.tool .round-button")
+    second = page.locator("#log > .bubble.assistant .round-button")
+    expect(first).to_have_count(1)
+    expect(first).to_have_attribute("data-round", "1")
+    expect(second).to_have_count(1)
+    expect(second).to_have_attribute("data-round", "2")
+    expect(page.locator("#log .round-button")).to_have_count(2)
+    expect(page.locator("#log .bubble.request")).to_have_count(0)
+    expect(page.locator("#log .ending")).to_have_count(0)
+
+
+def test_a_round_buttons_title_names_its_turn_and_round(page, live_server):
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}])))
+    tool = page.locator("#log > .bubble.tool")
+    answer = page.locator("#log > .bubble.assistant")
+    tool.hover()
+    tool.locator(".round-button").hover()
+    expect(tool.locator(".round-button")).to_have_attribute("title", "turn 1, round 1")
+    expect(tool.locator(".round-button")).to_have_attribute("aria-label", "turn 1, round 1")
+    answer.hover()
+    answer.locator(".round-button").hover()
+    expect(answer.locator(".round-button")).to_have_attribute("title", "turn 1, round 2")
+
+
+def _opacity(locator):
+    return float(locator.evaluate("e => getComputedStyle(e).opacity"))
+
+
+def test_turn_badge_round_button_and_tool_metric_reveal_on_hover(page, live_server):
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}])))
+    page.mouse.move(0, 0)
+    user = page.locator("#log > .bubble.user")
+    tool = page.locator("#log > .bubble.tool")
+    answer = page.locator("#log > .bubble.assistant")
+    quiet = {
+        "badge": user.locator(".turn-badge"),
+        "tool button": tool.locator(".round-button"),
+        "answer button": answer.locator(".round-button"),
+        "metric": tool.locator("> .fold-header .fold-metric"),
+    }
+    page.wait_for_timeout(300)
+    for name, target in quiet.items():
+        assert _opacity(target) == 0, name
+    for card, names in ((user, ["badge"]), (tool, ["tool button", "metric"]), (answer, ["answer button"])):
+        card.hover()
+        page.wait_for_timeout(300)
+        for name in names:
+            assert _opacity(quiet[name]) == 1, name
+        page.mouse.move(0, 0)
+        page.wait_for_timeout(300)
+
+
+def test_a_warn_round_button_stays_visible_without_hover(page, live_server):
+    ending = {"ended_by": "wrap_up", "round": 1, "max_iterations": 10}
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}], ending=ending)))
+    page.mouse.move(0, 0)
+    page.wait_for_timeout(300)
+    assert _opacity(page.locator("#log > .bubble.assistant .round-button")) == 1
+    assert _opacity(page.locator("#log > .bubble.tool .round-button")) == 0
+
+
+def _right(locator):
+    box = locator.bounding_box()
+    return box["x"] + box["width"]
+
+
+def test_the_right_edge_reads_info_buttons_timestamp_in_one_column(page, live_server):
+    stamped = [{**message, "timestamp": "2026-08-10T00:00:00"} for message in _TOOL_TURN]
+    _open(page, live_server(seed=_request_seed(messages=stamped, rounds=[{}, {}])))
+    tool = page.locator("#log > .bubble.tool")
+    answer = page.locator("#log > .bubble.assistant")
+    tool_ts = tool.locator(".fold-ts")
+    answer_ts = answer.locator(".bubble-ts")
+    assert abs(_right(tool_ts) - _right(answer_ts)) <= 2
+    assert _right(tool.locator(".round-button")) <= tool_ts.bounding_box()["x"] + 0.5
+    assert _right(answer.locator(".round-button")) <= answer_ts.bounding_box()["x"] + 0.5
+    assert (
+        _right(tool.locator("> .fold-header .fold-metric")) <= tool.locator(".round-button").bounding_box()["x"] + 0.5
+    )
+    meta = answer.locator(".bubble-meta")
+    assert abs(_right(meta) - _right(answer_ts)) <= 2
+
+
+def test_the_panel_opens_selects_swaps_and_closes(page, live_server):
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}])))
+    tool_card = page.locator("#log > .bubble.tool")
+    answer = page.locator("#log > .bubble.assistant")
+    panel = page.locator("#round-panel")
+    expect(panel).to_be_hidden()
+    expect(page.locator("body")).not_to_have_class(re.compile("round-panel-open"))
+
+    _open_round(page, 0)
+    expect(tool_card).to_have_class(re.compile(r"\bround-selected\b"))
+    expect(page.locator("body")).to_have_class(re.compile("round-panel-open"))
+    expect(panel.locator(".round-panel-title")).to_have_text("Turn 1 · round 1")
+
+    _open_round(page, 1)  # the other round's button swaps the contents
+    expect(panel.locator(".round-panel-title")).to_have_text("Turn 1 · round 2")
+    expect(answer).to_have_class(re.compile(r"\bround-selected\b"))
+    expect(tool_card).not_to_have_class(re.compile(r"\bround-selected\b"))
+    expect(page.locator("#log .round-selected")).to_have_count(1)
+
+    page.locator("#log button.round-button").nth(1).click()  # the same button again closes it
+    expect(panel).to_be_hidden()
+    expect(answer).not_to_have_class(re.compile(r"\bround-selected\b"))
+    expect(page.locator("body")).not_to_have_class(re.compile("round-panel-open"))
+
+    _open_round(page, 0)
+    page.keyboard.press("Escape")
+    expect(panel).to_be_hidden()
+    expect(page.locator("#log .round-selected")).to_have_count(0)
+
+    _open_round(page, 0)
+    page.locator("#round-panel .round-panel-close").click()
+    expect(panel).to_be_hidden()
+    expect(page.locator("#log .round-selected")).to_have_count(0)
+    expect(page.locator("#log button.round-button").first).to_have_attribute("aria-expanded", "false")
+
+
+def test_a_long_string_is_clamped_until_show_all(page, live_server):
+    body = {"messages": [{"role": "user", "content": "x" * 10_000}]}
+    _open(page, live_server(seed=_request_seed(body)))
+    panel = _open_round(page)
+    _open_first_message(panel)
+    content = panel.locator(".json-string", has_text="xxxx")
+    assert len(content.inner_text()) == 4000
+    expect(panel.locator(".json-more")).to_have_text("show all (10000 chars)")
+    panel.locator(".json-more").click()
+    expect(panel.locator(".json-more")).to_have_count(0)
+    assert len(content.inner_text()) == 10_000
+
+
+def test_a_long_image_data_string_shows_as_image_data(page, live_server):
+    data = "data:image/png;base64," + "A" * 4978
+    body = {"messages": [{"role": "user", "content": data}]}
+    _open(page, live_server(seed=_request_seed(body)))
+    panel = _open_round(page)
+    _open_first_message(panel)
+    expect(panel.locator(".json-image")).to_contain_text("image data")
+    expect(panel.locator(".json-more")).to_have_text("show all (5000 chars)")
+
+
+def test_a_request_over_the_ceiling_is_download_only(page, live_server):
+    requested = []
+    page.on("request", lambda request: requested.append(request.url))
+    _open(page, live_server(seed=_request_seed(call={"payload_chars": 3_000_000})))
+    panel = _open_round(page)
+    expect(panel.locator(".round-request .request-empty")).to_contain_text("too large to show here")
+    expect(panel.locator(".request-download")).to_have_count(1)
+    assert not any("/payloads/" in url for url in requested)
+
+
+def test_a_request_with_no_payload_says_not_captured(page, live_server):
+    _open(page, live_server(seed=_request_seed(saved=False)))
+    panel = _open_round(page)
+    expect(panel.locator(".round-request .request-empty")).to_have_text("not captured")
+    expect(panel.locator(".request-download")).to_have_count(0)
+
+
+def test_a_round_shows_its_request_and_its_response(page, live_server):
+    """A round is one request and the one response it got; both belong in the same panel."""
+    response = {
+        "text": "done",
+        "thinking": "I should look it up first",
+        "tool_calls": [{"name": "lookup", "arguments": {"q": "aimu"}, "id": "x"}],
+    }
+    _open(page, live_server(seed=_request_seed(response=response)))
+    panel = _open_round(page)
+
+    request = panel.locator(".round-request")
+    expect(request.locator(".round-section-title")).to_have_text("Request")
+    expect(request.locator(".request-download")).to_have_attribute("href", re.compile(r"-request\.json$"))
+    expect(request.locator(".json-node", has_text="messages")).to_have_count(1)
+
+    reply = panel.locator(".round-response")
+    expect(reply.locator(".round-section-title")).to_have_text("Response")
+    expect(reply.locator(".response-download")).to_have_attribute("href", re.compile(r"-response\.json$"))
+    expect(reply.locator(".response-thinking")).to_contain_text("I should look it up first")
+    expect(reply.locator(".response-tool .response-tool-name")).to_have_text("lookup")
+    expect(reply.locator(".response-tool .json-string")).to_have_text("aimu")
+    expect(reply.locator(".response-text")).to_have_text("done")
+
+
+def test_a_round_with_no_recorded_response_says_so(page, live_server):
+    _open(page, live_server(seed=_request_seed()))
+    panel = _open_round(page)
+    expect(panel.locator(".round-response .request-empty")).to_have_text("not captured")
+    expect(panel.locator(".round-response .response-download")).to_have_count(0)
+
+
+def test_a_request_with_no_endpoint_names_its_nearest_equivalent(page, live_server):
+    _open(page, live_server(seed=_request_seed(call={"endpoint": None})))
+    panel = _open_round(page)
+    expect(panel.locator(".request-note")).to_contain_text("nearest equivalent: no wire request")
+
+
+def test_an_answered_ending_is_shown_in_the_panel_and_does_not_tint(page, live_server):
+    _open(page, live_server(seed=_request_seed()))
+    button = page.locator("#log button.round-button")
+    expect(button).not_to_have_class(re.compile(r"\bwarn\b"))
+    panel = _open_round(page)
+    expect(panel.locator(".round-ending")).to_have_text("ended: answered at round 1 of 10")
+
+
+def test_an_error_ending_is_worded_like_the_terminal_and_tints_the_button(page, live_server):
+    ending = {"ended_by": "error", "error": "boom", "round": 0, "max_iterations": None}
+    _open(page, live_server(seed=_request_seed(ending=ending)))
+    expect(page.locator("#log button.round-button")).to_have_class(re.compile(r"\bwarn\b"))
+    panel = _open_round(page)
+    expect(panel.locator(".round-ending")).to_have_text("ended: error (boom) at round 1")
+    expect(page.locator("#log .ending")).to_have_count(0)
+
+
+def test_a_wrap_up_ending_reads_as_the_tool_use_limit_and_tints_the_last_round(page, live_server):
+    ending = {"ended_by": "wrap_up", "round": 1, "max_iterations": 10}
+    _open(page, live_server(seed=_request_seed(messages=_TOOL_TURN, rounds=[{}, {}], ending=ending)))
+    buttons = page.locator("#log button.round-button")
+    expect(buttons.nth(0)).not_to_have_class(re.compile(r"\bwarn\b"))
+    expect(buttons.nth(1)).to_have_class(re.compile(r"\bwarn\b"))
+    panel = _open_round(page, 1)
+    expect(panel.locator(".round-ending")).to_have_text(
+        "ended: tool-use limit of 10 rounds reached; answered on a forced wrap-up call"
+    )
+    _open_round(page, 0)
+    expect(panel.locator(".round-ending")).to_have_count(0)  # only the last round carries the ending
+
+
+def test_an_ending_with_no_known_cause_or_error_name_reads_plainly(page, live_server):
+    ending = {"ended_by": None, "round": 1, "max_iterations": 10}
+    _open(page, live_server(seed=_request_seed(ending=ending)))
+    panel = _open_round(page)
+    expect(panel.locator(".round-ending")).to_have_text("ended at round 2 of 10")
+
+
+def test_a_round_with_no_output_gets_an_orphan_button(page, live_server):
+    seed = _request_seed(messages=[{"role": "user", "content": "go"}])
+    _open(page, live_server(seed=seed))
+    orphan = page.locator("#log > .round-orphan")
+    expect(orphan).to_have_count(1)
+    expect(orphan.locator("button.round-button")).to_have_count(1)
+    expect(page.locator("#log .bubble.user .round-button")).to_have_count(0)
+    panel = _open_round(page)
+    expect(panel.locator(".round-panel-title")).to_have_text("Turn 1 · round 1")
+
+
+def test_a_narrow_viewport_overlays_the_panel_instead_of_narrowing_the_log(page, live_server):
+    page.set_viewport_size({"width": 700, "height": 900})
+    _open(page, live_server(seed=_request_seed()))
+    before = page.locator("#log").bounding_box()["width"]
+    _open_round(page)
+    assert page.locator("#log").bounding_box()["width"] == before
+
+
+def test_a_wide_viewport_narrows_the_log_for_the_panel(page, live_server):
+    page.set_viewport_size({"width": 1400, "height": 900})
+    _open(page, live_server(seed=_request_seed()))
+    before = page.locator("#log").bounding_box()["width"]
+    _open_round(page)
+    assert page.locator("#log").bounding_box()["width"] < before
+
+
+def test_a_subagent_card_carries_its_round_button_and_ending_inside_its_body(page, live_server):
+    entries = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {
+            "id": "r-1",
+            "append": {
+                "kind": "request",
+                "round": 0,
+                "payload_ref": None,
+                "payload_chars": 100,
+                "message_count": 3,
+                "tool_count": 0,
+                "endpoint": "http://x",
+                "stop_reason": "stop",
+                "error": None,
+                "agent": "researcher",
+            },
+        },
+        {"id": "r-1", "status": "done"},
+        {"id": "r-1", "append": {"kind": "ending", "ended_by": "wrap_up", "round": 0, "max_iterations": 5}},
+    ]
+    _open(page, live_server(seed=_request_seed(subagent=entries)))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    expect(card.locator(".bubble.request")).to_have_count(0)
+    expect(card.locator(".ending")).to_have_count(0)
+    button = card.locator("button.round-button")
+    expect(button).to_have_count(1)
+    expect(button).to_have_class(re.compile(r"\bwarn\b"))  # the ending arrived after the card's status
+    button.click()
+    panel = page.locator("#round-panel")
+    expect(panel).to_be_visible()
+    expect(panel.locator(".round-summary")).to_contain_text("3 messages")
+    expect(panel.locator(".round-panel-agent")).to_have_text("researcher")
+    expect(panel.locator(".round-ending")).to_contain_text("tool-use limit of 5 rounds reached")
+
+
+def test_a_live_turn_draws_a_round_button_and_numbers_the_user_bubble(page, live_server):
+    _open(page, live_server(emit_request=True))
+    page.fill("#msg", "hello")
+    page.click("#send")
+    expect(page.locator("#log button.round-button")).to_have_count(1, timeout=10_000)
+    expect(page.locator("#log .bubble.request")).to_have_count(0)
+    expect(page.locator("#log .ending")).to_have_count(0)
+    expect(page.locator(".bubble.user .turn-badge").first).to_have_text("turn 1")
+    expect(page.locator(".bubble.user", has_text="hello")).to_be_visible()
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    expect(page.locator("#log .bubble.assistant .round-button")).to_have_count(1)
+    _open_round(page)
+    expect(page.locator("#round-panel .round-summary")).to_be_visible()
+
+
+def test_a_round_button_looks_past_a_mid_turn_message_to_the_output_above_it(page, live_server):
+    """Live, a message typed into the running turn is drawn at once (marked `sent-mid-turn`, the server's
+    `mid-turn` mark comes later) and can sit between a round's output and its request."""
+    _open(page, live_server(seed=_request_seed()))
+    page.evaluate(
+        """() => {
+          const typed = addBubble("user", "typed mid-turn", new Date());
+          typed.classList.add("sent-mid-turn");
+          notice("a notice");
+          renderRequest({ round: 1, run_id: "entry-1", agent: "assistant", payload_chars: 1, message_count: 1 });
+        }"""
+    )
+    expect(page.locator("#log .round-orphan")).to_have_count(0)
+    expect(page.locator("#log > .bubble.assistant .round-button")).to_have_count(2)
+
+
+def test_a_turn_opening_user_bubble_still_orphans_a_round(page, live_server):
+    _open(page, live_server(seed=_request_seed()))
+    page.evaluate(
+        """() => {
+          addBubble("user", "a fresh turn", new Date());
+          renderRequest({ round: 0, run_id: "entry-2", agent: "assistant", payload_chars: 1, message_count: 1 });
+        }"""
+    )
+    expect(page.locator("#log > .round-orphan")).to_have_count(1)
+
+
+def test_the_panel_scrolls_on_its_own_and_returns_focus_when_closed(page, live_server):
+    page.set_viewport_size({"width": 1400, "height": 600})
+    body = {"messages": [{"role": "user", "content": f"message {n}"} for n in range(60)]}
+    _open(page, live_server(seed=_request_seed(body)))
+    panel = _open_round(page)
+    messages = panel.locator(".json-node", has_text="messages").first
+    messages.locator("> summary").click()
+    expect(panel.locator(".json-node")).to_have_count(61)
+    for node in panel.locator(".json-node").all()[1:]:
+        node.locator("> summary").click()
+    sizes = page.evaluate(
+        """() => {
+          const panel = document.getElementById("round-panel");
+          const root = document.documentElement;
+          return { own: panel.scrollHeight - panel.clientHeight, page: root.scrollHeight - root.clientHeight,
+                   scrolled: window.scrollY };
+        }"""
+    )
+    assert sizes["own"] > 0  # the panel scrolls itself
+    assert sizes["page"] <= 0 and sizes["scrolled"] == 0  # and the page does not
+
+    page.keyboard.press("Escape")
+    expect(page.locator("#log button.round-button")).to_be_focused()
+    _open_round(page)
+    page.locator("#round-panel .round-panel-close").click()
+    expect(page.locator("#log button.round-button")).to_be_focused()

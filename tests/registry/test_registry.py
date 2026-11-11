@@ -99,7 +99,7 @@ def test_build_tools_concatenates_and_keeps_the_first_tool_of_a_repeated_name():
 
 
 def test_build_tools_records_each_name_under_the_toolset_that_built_it():
-    """The vocabulary the [security].confirm_tools check matches against is collected here, and it is
+    """The vocabulary the [assistant.tools].confirm check matches against is collected here, and it is
     collected per toolset because a gate entry names one. A name dropped from the returned list as a
     duplicate is still recorded under the toolset that offered it: `b` really does provide `first`, and
     an entry saying so gates a call that `b` can serve on some other agent."""
@@ -131,13 +131,59 @@ def test_build_tools_records_a_toolset_that_built_nothing():
     assert state.tools_by_toolset == {"empty": set()}
 
 
+def test_build_tools_calls_the_hook_and_a_raising_hook_refuses_the_build():
+    from kokua.config import ConfigError
+
+    def first():
+        pass
+
+    def second():
+        pass
+
+    calls = []
+    state = LiveState(config=AssistantConfig())
+    state.toolset_built = lambda name, names: calls.append((name, names))
+    ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
+    assert build_tools([_toolset("a", tools=[first, second])], ctx=ctx) == [first, second]
+    # Once per toolset with the complete set: a bare approval entry is resolved by the first call.
+    assert calls == [("a", frozenset({"first", "second"}))]
+
+    def refuse(name, names):
+        raise ConfigError("refused")
+
+    state.toolset_built = refuse
+    with pytest.raises(ConfigError, match="refused"):
+        build_tools([_toolset("b", tools=[first])], ctx=ctx)
+
+
+def test_the_hook_gets_this_builds_names_not_the_shared_record():
+    """A concurrent build of the same toolset may be adding to the shared set, so the hook is handed
+    what this call built."""
+
+    def mine():
+        pass
+
+    state = LiveState(config=AssistantConfig())
+    state.tools_by_toolset["a"] = {"someone_elses"}
+    calls = []
+    state.toolset_built = lambda name, names: calls.append(names)
+    build_tools([_toolset("a", tools=[mine])], ctx=ToolsetContext(state=state, agent=None, agent_name="x"))
+    assert calls == [frozenset({"mine"})]
+    assert state.tools_by_toolset["a"] == {"someone_elses", "mine"}
+
+
 def test_register_refuses_a_toolset_claiming_the_reserved_gate_namespace():
-    """`core` is the [security].confirm_tools prefix for the tools no toolset builds (spawn_subagent,
+    """`core` is the [assistant.tools].confirm prefix for the tools no toolset builds (spawn_subagent,
     activate_skill). A toolset of that name would make those gates unwritable, so it fails at
     registration rather than at the gate."""
     with pytest.raises(ToolsetError) as error:
         register([("a plugin", [_toolset("core")])])
     assert "core" in str(error.value)
+
+
+def test_a_toolset_named_all_is_refused_at_registration():
+    with pytest.raises(ToolsetError, match="'all'.*reserved"):
+        register([("plugin", [Toolset(name="all", description="x", build=lambda ctx: [])])])
 
 
 def test_plugins_module_reexports_the_public_contract():

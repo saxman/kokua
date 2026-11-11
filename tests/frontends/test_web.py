@@ -227,7 +227,7 @@ async def test_web_channel_send_pairs_a_nested_card_with_no_top_level_call():
 async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
     """The base channel maps the CONTINUING chunk, and what this pins is that Kokua's ``send`` override
     delegates to that base loop, so the base's mapping reaches the page unchanged. The override wraps
-    the chunk iterator for image progress and adds no per-chunk branches of its own; one that did would
+    the chunk iterator for image progress and tool calls only; one that took over more chunk types would
     have to carry this arm forward, which is the drift this test catches. The wrap-up's wording is the
     case that matters: a marker showing the nudge's text here would say the model was told to keep
     working when it was told to stop."""
@@ -375,6 +375,16 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
+async def test_web_channel_send_models_emits_frame():
+    """The record reaches the page as fields, which is what lets the header label be the entry agent's
+    model while the tooltip carries every agent that declares its own."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    record = {"agent": "assistant", "model": "ollama:qwen3:8b", "overrides": {"researcher": "ollama:qwen3:32b"}}
+    await channel.send_models(record)
+    assert ws.frames == [{"type": "models", **record}]
+
+
 async def test_web_channel_send_ready_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -500,6 +510,39 @@ async def test_web_channel_stream_activity_tool_frame_carries_the_response():
     assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"}]
 
 
+@pytest.mark.parametrize("path", ["send", "stream_activity"])
+async def test_web_channel_tool_frame_carries_the_toolset(path):
+    """AIMU's own ``tool`` frame has no ``toolset``, so both of Kokua's paths have to map the call
+    themselves, and ``send`` must not also pass the chunk on, or the call would be drawn twice."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(
+            StreamingContentType.TOOL_CALLING,
+            {"name": "calculate", "arguments": {"x": 2}, "response": "4", "toolset": "compute"},
+        )
+
+    await getattr(channel, path)(gen())
+    tools = [frame for frame in ws.frames if frame["type"] == "tool"]
+    assert tools == [
+        {"type": "tool", "name": "calculate", "arguments": {"x": 2}, "response": "4", "toolset": "compute"}
+    ]
+
+
+async def test_web_channel_send_withholds_tool_frames_when_tools_are_not_streamed():
+    """The base loop's ``stream_tools`` switch still governs a call this subclass now maps itself."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.stream_tools = False
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {}, "toolset": "compute"})
+
+    await channel.send(gen())
+    assert ws.frames == [{"type": "done"}]
+
+
 async def test_web_channel_send_phase_and_done():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -580,7 +623,7 @@ def test_replay_items_replays_verbose_trace_not_committed_answer():
     }
     items = replay_items(messages, trace=trace)
     assert items == [
-        {"type": "user", "text": "do X", "message_index": 0},
+        {"type": "user", "text": "do X", "message_index": 0, "turn": 1},
         {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
         {"type": "reasoning", "text": "THE PLAN"},
         {"type": "phase", "label": "Plan reviewer", "detail": "round 1"},
@@ -995,7 +1038,15 @@ async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
     await channel.send_approval_request("add_skill_script", {"skill_name": "x"})
-    assert ws.frames == [{"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}}]
+    assert ws.frames == [
+        {"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}, "agent": None}
+    ]
+
+
+async def test_web_approval_frame_carries_the_agent():
+    ws = _FakeWS()
+    await WebChannel(ws).send_approval_request("run_command", {}, agent="coder")
+    assert ws.frames == [{"type": "approval", "name": "run_command", "arguments": {}, "agent": "coder"}]
 
 
 async def test_web_channel_sends_an_auto_approval_frame():
@@ -1015,8 +1066,17 @@ async def test_web_channel_sends_an_auto_approval_frame():
             "reason": "lists files",
             "model": "ollama:b",
             "conversation_id": "c1",
+            "agent": None,
         }
     ]
+
+
+async def test_web_auto_approval_frame_carries_the_agent():
+    ws = _FakeWS()
+    await WebChannel(ws).send_auto_approval(
+        "run_command", {}, approved=True, reason="", model="ollama:b", agent="coder"
+    )
+    assert ws.frames[0]["agent"] == "coder"
 
 
 async def test_an_auto_approval_frame_is_never_muted_by_a_switch():
@@ -1081,7 +1141,7 @@ def test_replay_items_full_replay():
     # message_index is 1, not 0: _CONVERSATION's leading system message shifts the user message
     # one position later, which is exactly the off-by-one the stamping has to get right.
     assert items == [
-        {"type": "user", "text": "what's 2+2?", "message_index": 1},
+        {"type": "user", "text": "what's 2+2?", "message_index": 1, "turn": 1},
         {"type": "thinking", "text": "adding the numbers"},
         {"type": "message", "text": "4", "proactive": False},
         {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"},
@@ -1416,6 +1476,7 @@ def test_ws_connect_ends_with_ready_after_the_sidebar(tmp_path):
     assert seen.index("conversations") < seen.index("ready")
     assert seen.index("history") < seen.index("ready")
     assert seen.index("settings") < seen.index("ready")
+    assert seen.index("models") < seen.index("ready")
     assert seen.index("tasks") < seen.index("ready")
 
 
@@ -1425,7 +1486,7 @@ def test_ws_reports_a_start_failure_to_the_browser_and_closes(tmp_path):
     from starlette.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
 
-    app = build_app(_config(tmp_path, confirm_tools=["execute_pythn"]), client=MockAsyncModelClient([]))
+    app = build_app(_config(tmp_path, default_confirm=["execute_pythn"]), client=MockAsyncModelClient([]))
     frames = []
     with TestClient(app).websocket_connect("/ws") as ws:
         try:
@@ -2031,7 +2092,7 @@ def test_ws_conversations_carry_their_task_id(tmp_path):
     assert all("task_id" in item for item in frame["items"])
 
 
-def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
+def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch, capsys):
     import kokua.core.assistant as assistant_mod
     from starlette.testclient import TestClient
 
@@ -2051,6 +2112,9 @@ def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
     with TestClient(app).websocket_connect("/ws") as ws:
         text = first_message(ws)
     assert "no default could be resolved" in text
+    # On the terminal too: the file log is the `kokua` logger's only handler, so without this the
+    # person who launched the server is told nothing until a page is open.
+    assert "[error] No model specified and no default could be resolved." in capsys.readouterr().err
 
     # The busy guard was released on the failed build, so a second connection is not refused; it
     # reaches the build path again rather than being told the assistant is busy in another tab.
@@ -2060,7 +2124,7 @@ def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
     assert "no default could be resolved" in text
 
 
-def test_ws_reports_config_error_and_releases_busy(tmp_path, monkeypatch):
+def test_ws_reports_config_error_and_releases_busy(tmp_path, monkeypatch, capsys):
     """A config.toml that stopped resolving (a toolset renamed out from under an [agents.*] table)
     reaches the browser as its own message.
 
@@ -2088,6 +2152,7 @@ def test_ws_reports_config_error_and_releases_busy(tmp_path, monkeypatch):
     with TestClient(app).websocket_connect("/ws") as ws:
         text = first_message(ws)
     assert "unknown toolset 'pdf'" in text
+    assert "[error] agent 'report-writer' declares unknown toolset 'pdf'." in capsys.readouterr().err
 
     with TestClient(app).websocket_connect("/ws") as ws:
         text = first_message(ws)
@@ -2127,7 +2192,7 @@ def test_build_app_rejects_agents_that_cannot_resolve(tmp_path):
     from kokua.config import ConfigError
 
     agents = example_agents()
-    agents["assistant"].tools = ["memory", "pdf"]
+    agents["assistant"].available = ["memory", "pdf"]
     with pytest.raises(ConfigError, match="pdf"):
         build_app(_config(tmp_path, agents=agents))
 
@@ -2876,6 +2941,116 @@ async def test_a_blocked_control_still_releases_the_connection_on_disconnect(tmp
         await asyncio.gather(serving, return_exceptions=True)
 
 
+async def _until(predicate, timeout: float = 5) -> None:
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+
+def _ready(sock: _AsgiSocket) -> bool:
+    return any(frame["type"] == "ready" for frame in sock.frames())
+
+
+def _refusals(sock: _AsgiSocket) -> list[dict]:
+    return [f for f in sock.frames() if f["type"] == "message" and not f.get("proactive")]
+
+
+def _slow_teardown(monkeypatch) -> asyncio.Event:
+    """Hold every connection's teardown open until the returned event is set.
+
+    Stands in for the slow part of a real one: closing each remote MCP session is a network round trip,
+    so a reloaded page reconnects while the connection it replaced is still shutting down.
+    """
+    import kokua.frontends.web as web_mod
+
+    finished = asyncio.Event()
+
+    class SlowTeardown(web_mod.Assistant):
+        async def run(self) -> None:
+            try:
+                await super().run()
+            finally:
+                await finished.wait()
+
+    monkeypatch.setattr(web_mod, "Assistant", SlowTeardown)
+    return finished
+
+
+async def test_a_reload_waits_out_the_previous_connections_teardown(tmp_path, monkeypatch):
+    """Reloading the page reconnects on the first try, not the second.
+
+    The reloaded page connects while the connection it replaced is still closing its MCP sessions. That
+    connection's socket is already gone, so no other tab is involved, and refusing as "busy in another
+    tab" was a wrong diagnosis that a second reload, landing after the teardown, appeared to fix.
+    """
+    finished = _slow_teardown(monkeypatch)
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+
+    first = _AsgiSocket([{"type": "websocket.connect"}])
+    serving = asyncio.create_task(app(_ws_scope(), first.receive, first.send))
+    second = _AsgiSocket([{"type": "websocket.connect"}])
+    reloading = None
+    try:
+        await _until(lambda: _ready(first))
+        first.feed({"type": "websocket.disconnect", "code": 1001})  # the page navigating away
+        await asyncio.sleep(0.05)  # the disconnect is read; the teardown is now holding the guard
+        assert not serving.done()
+
+        reloading = asyncio.create_task(app(_ws_scope(), second.receive, second.send))
+        await asyncio.sleep(0.05)
+        assert not _refusals(second), "the reload was refused while the previous connection closed"
+        assert not _ready(second), "the reload started before the previous connection finished closing"
+
+        finished.set()
+        await _until(lambda: _ready(second))
+        assert not _refusals(second)
+    finally:
+        finished.set()
+        second.feed({"type": "websocket.disconnect", "code": 1000})
+        tasks = [task for task in (serving, reloading) if task is not None]
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=5)
+
+
+async def test_a_second_tab_is_still_refused_while_the_first_is_open(tmp_path):
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+
+    first = _AsgiSocket([{"type": "websocket.connect"}])
+    serving = asyncio.create_task(app(_ws_scope(), first.receive, first.send))
+    try:
+        await _until(lambda: _ready(first))
+        second = _AsgiSocket([{"type": "websocket.connect"}])
+        await asyncio.wait_for(app(_ws_scope(), second.receive, second.send), timeout=1)
+        assert [f["text"] for f in _refusals(second)] == ["Assistant is busy in another tab."]
+    finally:
+        first.feed({"type": "websocket.disconnect", "code": 1000})
+        await asyncio.wait_for(asyncio.gather(serving, return_exceptions=True), timeout=5)
+
+
+async def test_a_reload_behind_a_teardown_that_never_ends_is_told_so(tmp_path, monkeypatch):
+    """The wait is bounded, and its refusal names the real cause rather than another tab."""
+    import kokua.frontends.web as web_mod
+
+    monkeypatch.setattr(web_mod, "TEARDOWN_WAIT_SECONDS", 0.1)
+    finished = _slow_teardown(monkeypatch)
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+
+    first = _AsgiSocket([{"type": "websocket.connect"}])
+    serving = asyncio.create_task(app(_ws_scope(), first.receive, first.send))
+    try:
+        await _until(lambda: _ready(first))
+        first.feed({"type": "websocket.disconnect", "code": 1001})
+        await asyncio.sleep(0.05)
+
+        second = _AsgiSocket([{"type": "websocket.connect"}])
+        await asyncio.wait_for(app(_ws_scope(), second.receive, second.send), timeout=1)
+        (refusal,) = _refusals(second)
+        assert "busy in another tab" not in refusal["text"]
+        assert "still closing" in refusal["text"]
+    finally:
+        finished.set()
+        await asyncio.wait_for(asyncio.gather(serving, return_exceptions=True), timeout=5)
+
+
 async def test_ws_truncate_while_a_turn_runs_says_so_and_changes_nothing(tmp_path):
     """The refusal has to reach the page, and nothing may repaint behind it.
 
@@ -3191,3 +3366,194 @@ async def test_an_accepted_mid_turn_message_is_caught_up_once_rather_than_twice(
     await channel.send_history([], {})
 
     assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "inbox"] == ["inbox"]
+
+
+async def test_web_channel_sends_entry_requests_and_endings_and_drops_sub_agent_ones():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_request({"run_id": "lead-1", "parent_run_id": None, "round": 0, "payload_ref": "/payloads/ab"})
+    await channel.send_request({"run_id": "kid-1", "parent_run_id": "lead-1", "round": 0})
+    await channel.send_ending({"run_id": "lead-1", "parent_run_id": None, "ended_by": "answered"})
+    await channel.send_ending({"run_id": "kid-1", "parent_run_id": "lead-1", "ended_by": "answered"})
+
+    assert [f["type"] for f in ws.frames] == ["request", "ending"]
+    assert ws.frames[0]["payload_ref"] == "/payloads/ab"
+
+
+async def test_a_background_turns_request_frame_is_muted_and_caught_up():
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("other", "ping")
+
+    token = streaming_conversation.set("other")
+    try:
+        await channel.send_request({"run_id": "lead-1", "parent_run_id": None, "round": 0})
+        await channel.send_ending({"run_id": "lead-1", "parent_run_id": None, "ended_by": "answered"})
+        assert ws.frames == []
+        channel.active_conversation_id = "other"
+        await channel.send_history([], {})
+    finally:
+        streaming_conversation.reset(token)
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "request", "ending"]
+
+
+def _entry_call(round_, **extra):
+    return {"run_id": "e", "parent_run_id": None, "round": round_, "endpoint": "m", **extra}
+
+
+def _two_round_messages():
+    return [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "function": {"name": "f", "arguments": {}}}]},
+        {"role": "tool", "tool_call_id": "1", "content": "out"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+
+def _types(items):
+    return [item["type"] for item in items]
+
+
+def test_replay_items_user_item_carries_its_turn_number():
+    messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "a"},
+        {"role": "user", "content": "mid"},
+        {"role": "user", "content": "two"},
+    ]
+    items = replay_items(messages, mid_turn={"0": [2]})
+    assert [(i["text"], i["turn"]) for i in items if i["type"] == "user"] == [("one", 1), ("two", 2)]
+
+
+def test_replay_items_places_each_entry_round_after_its_assistant_message_and_the_ending_last():
+    requests = {
+        "0": {
+            "entry_run_id": "e",
+            "calls": [_entry_call(0), _entry_call(1), {**_entry_call(0), "run_id": "w", "parent_run_id": "e"}],
+            "endings": [
+                {"run_id": "e", "parent_run_id": None, "agent": "assistant", "ended_by": "answered", "round": 1},
+                {"run_id": "w", "parent_run_id": "e", "agent": "worker", "ended_by": "answered", "round": 0},
+            ],
+        }
+    }
+    items = replay_items(_two_round_messages(), requests=requests, failure={"0": "boom"})
+    assert _types(items) == ["user", "tool", "request", "message", "request", "ending", "notice"]
+    assert [i["round"] for i in items if i["type"] == "request"] == [0, 1]
+    assert items[-2]["agent"] == "assistant"
+
+
+def test_replay_items_puts_a_leftover_round_at_the_turn_end():
+    messages = _two_round_messages()[:3]  # the second round failed before any assistant message
+    requests = {"0": {"entry_run_id": "e", "calls": [_entry_call(0), _entry_call(1)], "endings": []}}
+    items = replay_items(messages, requests=requests)
+    assert _types(items) == ["user", "tool", "request", "request"]
+
+
+def test_replay_items_gives_a_workflow_turn_no_top_level_requests_or_endings():
+    requests = {
+        "0": {
+            "entry_run_id": None,
+            "calls": [_entry_call(0)],
+            "endings": [{"run_id": "e", "parent_run_id": None, "agent": "a", "ended_by": "answered", "round": 0}],
+        }
+    }
+    items = replay_items(_two_round_messages(), requests=requests)
+    assert "request" not in _types(items) and "ending" not in _types(items)
+
+
+def test_replay_items_requests_are_per_turn():
+    messages = [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "a"},
+        {"role": "user", "content": "two"},
+        {"role": "assistant", "content": "b"},
+    ]
+    requests = {"2": {"entry_run_id": "e", "calls": [_entry_call(0)], "endings": []}}
+    assert _types(replay_items(messages, requests=requests)) == ["user", "message", "user", "message", "request"]
+
+
+async def test_web_channel_show_turn_sends_nothing_and_turn_saved_carries_the_number():
+    from kokua.channels.ui import ChannelUI
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await ChannelUI(channel).show_turn(3)
+    assert ws.frames == []
+    await channel.send_turn_saved("c1", 4, turn=2)
+    assert ws.frames == [{"type": "turn_saved", "conversation_id": "c1", "message_index": 4, "turn": 2}]
+
+
+def _payload_client(tmp_path):
+    from starlette.testclient import TestClient
+
+    from kokua import payloads
+
+    config = _config(tmp_path)
+    reference = payloads.save_text(config.payloads_path, '{"a": 1}')
+    return TestClient(build_app(config, client=MockAsyncModelClient([]))), reference
+
+
+def test_a_payload_downloads_as_an_attachment_when_asked(tmp_path):
+    client, reference = _payload_client(tmp_path)
+    response = client.get(reference + "?download=turn-1-round-1.json")
+    assert response.headers["content-disposition"] == 'attachment; filename="turn-1-round-1.json"'
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.text == '{"a": 1}'
+
+
+def test_a_payload_without_a_download_name_stays_inline(tmp_path):
+    client, reference = _payload_client(tmp_path)
+    response = client.get(reference)
+    assert "content-disposition" not in response.headers
+    assert response.headers["content-type"].startswith("text/plain")
+
+
+@pytest.mark.parametrize("name", ["../../etc/passwd", 'a"b.json', "a/b.json", "", "x" * 101 + ".json", "a.json\n"])
+def test_an_unsafe_download_name_is_ignored(tmp_path, name):
+    from urllib.parse import quote
+
+    client, reference = _payload_client(tmp_path)
+    response = client.get(reference + "?download=" + quote(name, safe=""))
+    assert response.status_code == 200
+    assert "content-disposition" not in response.headers
+    assert response.headers["content-type"].startswith("text/plain")
+
+
+def test_the_web_export_includes_each_agents_system_prompt(tmp_path):
+    """The download renders the same document `kokua export` does, system prompts included."""
+    import json
+
+    from aimu.sessions import TinyDBSessionStore
+    from starlette.testclient import TestClient
+
+    from kokua import payloads
+
+    config = _config(tmp_path)
+    app = build_app(config, client_factory=lambda cid: MockAsyncModelClient(["the reply"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("a question")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        store = TinyDBSessionStore(str(config.sessions_path))
+        session = store.get(active_id)
+        reference = payloads.save_text(config.payloads_path, json.dumps({"system": "be exact", "messages": []}))
+        session.metadata["requests"] = {
+            "0": {
+                "entry_run_id": "e",
+                "calls": [{"run_id": "e", "agent": "assistant", "round": 0, "payload_ref": reference}],
+                "endings": [],
+            }
+        }
+        store.save(session)
+        ws.send_text(json.dumps({"type": "export", "id": active_id}))
+        frame = _drain_until(ws, "download")
+    written = (config.downloads_path / frame["name"]).read_text(encoding="utf-8")
+    assert "**System prompt (assistant):**" in written
+    assert "be exact" in written

@@ -19,12 +19,12 @@ MINIMAL = """
 agent = "assistant"
 
 [agents.assistant]
-tools = ["memory", "time"]
+tools = { available = ["memory", "time"] }
 delegates_to = ["researcher"]
 
 [agents.researcher]
 description = "Research specialist."
-tools = ["web"]
+tools = { available = ["web"] }
 """
 
 # The [assistant].memory case cannot be expressed by appending a second [assistant] table (TOML
@@ -36,7 +36,7 @@ _MEMORY_STILL_SET = MINIMAL.replace('agent = "assistant"\n', 'agent = "assistant
 def test_agents_load_with_their_tools_and_delegates(tmp_path):
     config = _load(tmp_path, MINIMAL)
     assert config.entry_agent == "assistant"
-    assert config.agents["assistant"].tools == ["memory", "time"]
+    assert config.agents["assistant"].available == ["memory", "time"]
     assert config.agents["assistant"].delegates_to == ["researcher"]
     assert config.agents["researcher"].description == "Research specialist."
     assert config.agents["researcher"].delegates_to == []
@@ -61,7 +61,7 @@ def test_an_unknown_key_in_an_agent_table_is_named(tmp_path):
         # assertion is satisfied for free by the first and proves nothing about the replacement
         # guidance specifically. "tools" is a substring of "[tools]" itself, so the replacement here
         # is the concrete path the message actually points at instead.
-        (MINIMAL + '\n[tools]\ngroups = ["web"]\n', "[tools]", "[agents.<name>].tools"),
+        (MINIMAL + '\n[tools]\ngroups = ["web"]\n', "[tools]", "[agents.<name>.tools].available"),
         (MINIMAL + "\n[subagents]\nconcurrent = true\n", "[subagents]", "concurrent_tools"),
         (MINIMAL + '\n[subagents.roles.x]\ndescription = "x"\n', "[subagents.roles", "[agents."),
     ],
@@ -103,7 +103,7 @@ async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_s
     from kokua.toolsets.config import make_config_tools
 
     path = tmp_path / "config.toml"
-    path.write_text('[agents.assistant]\ntools = ["time"]\n', encoding="utf-8")
+    path.write_text('[agents.assistant.tools]\navailable = ["time"]\n', encoding="utf-8")
 
     async def apply_hot(section, key, value):
         return None
@@ -113,7 +113,7 @@ async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_s
 
     refusal = await update(section="agents.assistant", key="tools", value="fs, compute")
     assert "locked_config_keys" in refusal
-    assert 'tools = ["time"]' in path.read_text(encoding="utf-8")
+    assert 'available = ["time"]' in path.read_text(encoding="utf-8")
 
     assert "9100" in await update(section="web", key="port", value="9100")
     assert "9100" in path.read_text(encoding="utf-8")
@@ -143,21 +143,25 @@ def test_a_removed_per_agent_key_fails(tmp_path):
 
 
 def test_an_agent_declares_its_own_model(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = "ollama:qwen3:32b"')
+    body = MINIMAL.replace(
+        'tools = { available = ["web"] }', 'tools = { available = ["web"] }\nmodel = "ollama:qwen3:32b"'
+    )
     config = _load(tmp_path, body)
     assert config.agents["researcher"].model == "ollama:qwen3:32b"
     assert config.agents["assistant"].model is None
 
 
 def test_an_agents_model_must_be_a_string(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = 3')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nmodel = 3')
     with pytest.raises(ConfigError) as excinfo:
         _load(tmp_path, body)
     assert "[agents.researcher].model must be a str" in str(excinfo.value)
 
 
 def test_model_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = "ollama:qwen3:32b"')
+    body = MINIMAL.replace(
+        'tools = { available = ["web"] }', 'tools = { available = ["web"] }\nmodel = "ollama:qwen3:32b"'
+    )
     config = _load(tmp_path, body)
     config.model = "ollama:qwen3:8b"
     assert config.model_for("researcher") == "ollama:qwen3:32b"
@@ -165,20 +169,20 @@ def test_model_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_pat
 
 
 def test_an_agent_declares_its_own_thinking_level(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "high"')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = "high"')
     config = _load(tmp_path, body)
     assert config.agents["researcher"].thinking == "high"
     assert config.agents["assistant"].thinking is None
 
 
 def test_an_agent_can_declare_thinking_off(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = false')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = false')
     config = _load(tmp_path, body)
     assert config.agents["researcher"].thinking is False
 
 
 def test_an_agents_thinking_must_be_a_known_level(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "xhigh"')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = "xhigh"')
     with pytest.raises(ConfigError) as excinfo:
         _load(tmp_path, body)
     assert "[agents.researcher].thinking" in str(excinfo.value)
@@ -186,14 +190,14 @@ def test_an_agents_thinking_must_be_a_known_level(tmp_path):
 
 
 def test_an_agents_thinking_rejects_a_number(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = 3')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = 3')
     with pytest.raises(ConfigError) as excinfo:
         _load(tmp_path, body)
     assert "[agents.researcher].thinking" in str(excinfo.value)
 
 
 def test_thinking_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "low"')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = "low"')
     config = _load(tmp_path, body)
     config.thinking = "high"
     assert config.thinking_for("researcher") == "low"
@@ -202,7 +206,7 @@ def test_thinking_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_
 
 def test_thinking_for_lets_an_agent_override_a_default_back_to_off(tmp_path):
     """``False`` is a real declaration, so resolution cannot be an ``or``-style truthiness test."""
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = false')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nthinking = false')
     config = _load(tmp_path, body)
     config.thinking = "high"
     assert config.thinking_for("researcher") is False
@@ -224,11 +228,11 @@ temperature = 0.7
 context_length = 32768
 
 [agents.assistant]
-tools = ["memory"]
+tools = { available = ["memory"] }
 delegates_to = ["researcher"]
 
 [agents.researcher]
-tools = ["web"]
+tools = { available = ["web"] }
 
 [agents.researcher.generation]
 temperature = 0.2
@@ -289,7 +293,7 @@ def test_generation_for_returns_a_fresh_dict(tmp_path):
 
 
 def test_an_agent_declares_its_own_max_iterations(tmp_path):
-    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmax_iterations = 25')
+    body = MINIMAL.replace('tools = { available = ["web"] }', 'tools = { available = ["web"] }\nmax_iterations = 25')
     config = _load(tmp_path, body)
     assert config.agents["researcher"].max_iterations == 25
     assert config.max_iterations_for("researcher") == 25
@@ -326,7 +330,9 @@ def test_the_cap_for_an_agent_that_does_not_exist_is_the_default(tmp_path):
 @pytest.mark.parametrize("bad", ["true", "0", "-1", '"25"', "2.5"])
 def test_an_agents_cap_must_be_a_positive_integer(tmp_path, bad):
     """`true` is the one that needs the guard: bool is an int subclass, so it would pass as a cap of 1."""
-    body = MINIMAL.replace('tools = ["web"]', f'tools = ["web"]\nmax_iterations = {bad}')
+    body = MINIMAL.replace(
+        'tools = { available = ["web"] }', f'tools = {{ available = ["web"] }}\nmax_iterations = {bad}'
+    )
     with pytest.raises(ConfigError) as excinfo:
         _load(tmp_path, body)
     assert "max_iterations" in str(excinfo.value)

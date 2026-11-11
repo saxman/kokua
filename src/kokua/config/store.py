@@ -165,8 +165,10 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
 
     A runtime-added server (OAuth or unauthenticated) is recorded with just its URL and a name derived
     from it, so it reconnects on the next restart; ``token_env`` is written only for a bearer-token
-    server declared explicitly. The derived name reaches no agent until a human names it in
-    ``[agents.*]``, which is locked by default and so this write cannot grant capability on its own.
+    server declared explicitly. The derived name reaches no agent in this session. After a restart it
+    reaches an agent declaring ``available = "all"``, and any other agent only once a human names it in
+    ``[agents.*]``, which is locked by default, so this write cannot grant capability within the session
+    that made it.
 
     Replacing an existing entry for the same URL keeps that entry's ``name`` rather than re-deriving
     one, since a human may have hand-edited it to match an ``[agents.*]`` reference that this write
@@ -188,6 +190,28 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
         table["token_env"] = token_env
     servers.append(table)
     _write(path, doc)
+
+
+def mcp_server_names(path: Path) -> list[str]:
+    """The ``name`` of every ``[[mcp.server]]`` entry on file, or none when there is no file yet.
+
+    Read from the file rather than the live config because ``add_mcp_server`` persists a server the running
+    session's registry never learns, and the next start registers it. Entries without a string name are
+    skipped: the startup parse refuses them, so they claim nothing. Raises ``ConfigError`` for a file that
+    is not valid TOML.
+    """
+    text = read_text(path)
+    if text is None:
+        return []
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise settings.ConfigError(f"{path} is not valid TOML: {error}") from error
+    mcp = document.get("mcp")
+    entries = mcp.get("server") if isinstance(mcp, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [entry["name"] for entry in entries if isinstance(entry, dict) and isinstance(entry.get("name"), str)]
 
 
 def remove_mcp_server(path: Path, url: str) -> bool:
@@ -505,7 +529,7 @@ def rename_task(path: Path, old: str, new: str) -> None:
 #: The one key no lock list can unlock. Without it, an assistant holding ``update_config`` needs a single
 #: call to disable every other lock, and a policy the app can rewrite for itself is not a policy. Note the
 #: narrowness: only this key is axiomatic, not the ``[security]`` section around it. A list of
-#: ``["email.to"]`` leaves ``confirm_tools`` writable, because the shipped ``security.*`` pattern was the
+#: ``["email.to"]`` leaves ``[assistant.tools]`` writable, because the shipped ``assistant.tools.*`` pattern was the
 #: only thing locking it.
 LOCK_AXIOM: tuple[str, str] = ("security", "locked_config_keys")
 

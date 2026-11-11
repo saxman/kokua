@@ -7,21 +7,24 @@ from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.core.agents import build_agent_specs, build_registry
 from kokua.core.messaging import WORKER_SOURCE
 from kokua.registry.context import LiveState
+from tests.helpers import allow_all_gates
 
 SPAWN = "spawn_subagent"
+#: What the `web` toolset builds beyond AIMU's `builtin.web` group.
+PAGE_TOOLS = {"fetch_page", "read_page", "find_in_page"}
 
 
 def _state(tmp_path, agents, entry="assistant") -> tuple[AssistantConfig, LiveState]:
     config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent=entry)
-    state = LiveState(config=config, registry=build_registry(config))
+    state = LiveState(gate_for=allow_all_gates, config=config, registry=build_registry(config))
     return config, state
 
 
 def test_a_spec_is_produced_for_each_target(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher", "coder"]),
-        "researcher": AgentConfig(tools=["web"]),
-        "coder": AgentConfig(tools=["fs"]),
+        "researcher": AgentConfig(available=["web"]),
+        "coder": AgentConfig(available=["fs"]),
     }
     config, state = _state(tmp_path, agents)
     specs = build_agent_specs(config, state, "assistant")
@@ -31,18 +34,18 @@ def test_a_spec_is_produced_for_each_target(tmp_path):
 def test_a_spec_carries_only_its_own_declared_tools(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["researcher"]["tools"]}
-    assert names == {fn.__name__ for fn in builtin.web}
+    assert names == {fn.__name__ for fn in builtin.web} | PAGE_TOOLS
     assert SPAWN not in names
 
 
 def test_a_spec_description_opens_its_system_message(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(description="Research specialist.", tools=["web"]),
+        "researcher": AgentConfig(description="Research specialist.", available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     spec = build_agent_specs(config, state, "assistant")["researcher"]
@@ -52,8 +55,8 @@ def test_a_spec_description_opens_its_system_message(tmp_path):
 def test_a_target_that_delegates_gets_its_own_delegate(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["lead"]),
-        "lead": AgentConfig(tools=["time"], delegates_to=["helper"]),
-        "helper": AgentConfig(tools=["fs"]),
+        "lead": AgentConfig(available=["time"], delegates_to=["helper"]),
+        "helper": AgentConfig(available=["fs"]),
     }
     config, state = _state(tmp_path, agents)
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["lead"]["tools"]}
@@ -63,7 +66,7 @@ def test_a_target_that_delegates_gets_its_own_delegate(tmp_path):
 def test_a_leaf_target_gets_no_delegate(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["helper"]),
-        "helper": AgentConfig(tools=["fs"]),
+        "helper": AgentConfig(available=["fs"]),
     }
     config, state = _state(tmp_path, agents)
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["helper"]["tools"]}
@@ -71,7 +74,7 @@ def test_a_leaf_target_gets_no_delegate(tmp_path):
 
 
 def test_an_agent_with_no_targets_produces_no_specs(tmp_path):
-    config, state = _state(tmp_path, {"assistant": AgentConfig(tools=["time"])})
+    config, state = _state(tmp_path, {"assistant": AgentConfig(available=["time"])})
     assert build_agent_specs(config, state, "assistant") == {}
 
 
@@ -80,9 +83,9 @@ def test_a_nested_spawn_tool_offers_only_the_childs_own_targets(tmp_path):
     delegates_to, never the parent's menu it was built under."""
     agents = {
         "assistant": AgentConfig(delegates_to=["lead"]),
-        "lead": AgentConfig(tools=["time"], delegates_to=["helper", "other"]),
-        "helper": AgentConfig(tools=["fs"]),
-        "other": AgentConfig(tools=["fs"]),
+        "lead": AgentConfig(available=["time"], delegates_to=["helper", "other"]),
+        "helper": AgentConfig(available=["fs"]),
+        "other": AgentConfig(available=["fs"]),
     }
     config, state = _state(tmp_path, agents)
     lead_tools = build_agent_specs(config, state, "assistant")["lead"]["tools"]
@@ -95,7 +98,7 @@ def test_a_nested_spawn_tool_offers_only_the_childs_own_targets(tmp_path):
 def test_a_spec_carries_the_model_its_agent_declares(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], model="ollama:qwen3:32b"),
+        "researcher": AgentConfig(available=["web"], model="ollama:qwen3:32b"),
     }
     config, state = _state(tmp_path, agents)
     assert build_agent_specs(config, state, "assistant")["researcher"]["model"] == "ollama:qwen3:32b"
@@ -106,7 +109,7 @@ def test_a_spec_declaring_no_model_carries_none_so_the_spawn_default_applies(tmp
     delegate was built with. A worker therefore inherits the default rather than its delegator's pin."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"], model="ollama:qwen3:32b"),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     assert "model" not in build_agent_specs(config, state, "assistant")["researcher"]
@@ -183,7 +186,7 @@ def _captured_spawn_kwargs(monkeypatch, config, state, agent) -> dict:
 def test_the_delegate_is_built_with_the_default_model_not_the_delegators_pin(tmp_path, monkeypatch):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"], model="ollama:qwen3:32b"),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.model = "ollama:qwen3:8b"
@@ -205,7 +208,7 @@ def test_an_unset_default_is_the_resolved_string_not_the_delegators_client(tmp_p
 
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     agent = _FakeAgent("assistant", _EnumLikeModel("qwen3.8:27b"))
@@ -215,7 +218,7 @@ def test_an_unset_default_is_the_resolved_string_not_the_delegators_client(tmp_p
 def test_a_spec_carries_the_thinking_level_its_agent_declares(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], thinking="high"),
+        "researcher": AgentConfig(available=["web"], thinking="high"),
     }
     config, state = _state(tmp_path, agents)
     config.thinking = "low"
@@ -227,7 +230,7 @@ def test_a_spec_carries_the_resolved_default_when_its_agent_declares_nothing(tmp
     has no thinking tier, so a worker inheriting the default requires the resolved value written in."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.thinking = "medium"
@@ -239,7 +242,7 @@ def test_a_spec_carries_thinking_off_rather_than_dropping_it(tmp_path):
     inherit the default instead."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], thinking=False),
+        "researcher": AgentConfig(available=["web"], thinking=False),
     }
     config, state = _state(tmp_path, agents)
     config.thinking = "high"
@@ -249,7 +252,7 @@ def test_a_spec_carries_thinking_off_rather_than_dropping_it(tmp_path):
 def test_a_spec_omits_thinking_when_nothing_is_declared_anywhere(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     assert "thinking" not in build_agent_specs(config, state, "assistant")["researcher"]
@@ -258,7 +261,7 @@ def test_a_spec_omits_thinking_when_nothing_is_declared_anywhere(tmp_path):
 def test_a_spec_carries_the_generation_parameters_its_agent_resolves(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], generation={"temperature": 0.2}),
+        "researcher": AgentConfig(available=["web"], generation={"temperature": 0.2}),
     }
     config, state = _state(tmp_path, agents)
     config.generation = {"temperature": 0.7, "context_length": 32768}
@@ -273,7 +276,7 @@ def test_a_spec_carries_the_resolved_generation_default_when_its_agent_declares_
     be written in or an undeclared worker would skip the default instead of inheriting it."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.generation = {"context_length": 32768}
@@ -284,7 +287,7 @@ def test_a_spec_omits_generate_kwargs_when_nothing_is_declared_anywhere(tmp_path
     """An empty dict is still a written tier, and this tier sits above the model card's own profile."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     assert "generate_kwargs" not in build_agent_specs(config, state, "assistant")["researcher"]
@@ -311,7 +314,7 @@ def test_a_spec_carries_a_trimmer_sized_to_the_window_its_agent_resolves(tmp_pat
     one it is talking to. So it does two jobs, and the second is bounding a worker's own growth."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], generation={"context_length": 8000}),
+        "researcher": AgentConfig(available=["web"], generation={"context_length": 8000}),
     }
     config, state = _state(tmp_path, agents)
     config.generation = {"context_length": 200_000}
@@ -333,7 +336,7 @@ def test_a_spec_omits_compaction_when_no_window_is_declared_anywhere(tmp_path):
     compaction for this specialist whatever the spawn tool was built with", a decision nobody made."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     assert "compaction" not in build_agent_specs(config, state, "assistant")["researcher"]
@@ -356,7 +359,7 @@ def test_a_worker_inherits_the_global_window_when_it_declares_none(tmp_path):
     delegator's, which is the trap ``model`` and ``max_iterations`` each document one field over."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"], generation={"context_length": 999}),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.generation = {"context_length": 32768}
@@ -383,13 +386,13 @@ async def test_the_conversation_the_user_reads_is_never_trimmed(tmp_path):
         tmp_path,
         {
             "assistant": AgentConfig(delegates_to=["researcher"]),
-            "researcher": AgentConfig(tools=["web"]),
+            "researcher": AgentConfig(available=["web"]),
         },
     )
     config.generation = {"context_length": 32768}
     # Emptied because these two agents provide none of the tools the shipped gate list names, which
     # `validate_confirm_tools` refuses at startup rather than let a dead gate sit there.
-    config.confirm_tools = []
+    config.default_confirm = []
     # The window is declared, so a worker built from this config would get a trimmer...
     assert compaction_for_window(config.generation) is not None
 
@@ -431,8 +434,8 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
 
     agents = {
         "assistant": AgentConfig(delegates_to=["lead"]),
-        "lead": AgentConfig(tools=["web"], delegates_to=["helper"], max_iterations=25),
-        "helper": AgentConfig(tools=["web"]),
+        "lead": AgentConfig(available=["web"], delegates_to=["helper"], max_iterations=25),
+        "helper": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
@@ -519,7 +522,7 @@ def test_the_forwarder_attributes_a_delegates_cost_to_the_delegate():
 def test_a_spec_carries_the_cap_its_agent_declares(tmp_path):
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"], max_iterations=25),
+        "researcher": AgentConfig(available=["web"], max_iterations=25),
     }
     config, state = _state(tmp_path, agents)
     assert build_agent_specs(config, state, "assistant")["researcher"]["max_iterations"] == 25
@@ -530,7 +533,7 @@ def test_a_spec_omits_the_cap_when_its_agent_declares_none(tmp_path):
     missing max_iterations as "the cap the spawn tool was built with", which is the [assistant] default."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.max_iterations = 15
@@ -543,7 +546,7 @@ def test_the_spawn_tool_is_built_with_the_global_cap_not_the_delegators(tmp_path
     pin, which is the one thing max_iterations_for promises not to do."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"], max_iterations=40),
-        "researcher": AgentConfig(tools=["web"]),
+        "researcher": AgentConfig(available=["web"]),
     }
     config, state = _state(tmp_path, agents)
     config.max_iterations = 10
@@ -575,11 +578,58 @@ def test_every_worker_spec_carries_the_worker_source(tmp_path):
     no tier a missing key could fall back to."""
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher", "coder"]),
-        "researcher": AgentConfig(tools=["web"]),
-        "coder": AgentConfig(tools=["fs"]),
+        "researcher": AgentConfig(available=["web"]),
+        "coder": AgentConfig(available=["fs"]),
     }
     config, state = _state(tmp_path, agents)
     specs = build_agent_specs(config, state, config.entry_agent)
 
     assert sorted(specs) == ["coder", "researcher"]
     assert all(spec["inbox"] is WORKER_SOURCE for spec in specs.values())
+
+
+def test_a_worker_spec_carries_its_deferred_toolsets_as_groups(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(available=["web", "time"], resident=["time"]),
+    }
+    config, state = _state(tmp_path, agents)
+    spec = build_agent_specs(config, state, "assistant")["researcher"]
+    assert [fn.__name__ for fn in spec["tools"]] == ["get_current_date_and_time", "convert_time"]
+    assert [g.name for g in spec["tool_groups"]] == ["time", "web"]
+    assert spec["tool_groups"][0].resident and not spec["tool_groups"][1].resident
+
+
+def test_a_worker_spec_names_its_deferred_toolsets_in_its_prompt(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(available=["web", "time"], resident=["time"]),
+    }
+    config, state = _state(tmp_path, agents)
+    message = build_agent_specs(config, state, "assistant")["researcher"]["system_message"]
+    assert "Also available, load before use: web." in message
+    assert "training cutoff" not in message
+
+
+async def test_a_worker_loads_a_deferred_group_and_its_guidance_comes_with_it(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(available=["web", "time"], resident=["time"]),
+    }
+    config, state = _state(tmp_path, agents)
+    web_group = build_agent_specs(config, state, "assistant")["researcher"]["tool_groups"][1]
+    assert {fn.__name__ for fn in web_group.build()} == {fn.__name__ for fn in builtin.web} | PAGE_TOOLS
+    assert "training cutoff" in web_group.guidance
+
+
+def test_a_group_carries_the_approval_note_of_its_holder(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["coder"]),
+        "coder": AgentConfig(
+            available=["compute", "time"], resident=["time"], confirm=["compute.run_command"], review=[]
+        ),
+    }
+    config, state = _state(tmp_path, agents)
+    groups = {g.name: g for g in build_agent_specs(config, state, "assistant")["coder"]["tool_groups"]}
+    assert groups["compute"].note == "Asks first: run_command."
+    assert groups["time"].note == ""

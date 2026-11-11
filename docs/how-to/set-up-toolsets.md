@@ -2,7 +2,7 @@
 
 A *toolset* is one **named capability** an agent can ask for: a `Toolset` object carrying a name, a
 description, and a `build(ctx)` that returns tool callables. Every toolset an install offers, wherever it
-came from, lives in one namespace. An agent's `tools` list names toolsets from that namespace, and the
+came from, lives in one namespace. An agent's `available` list names toolsets from that namespace, and the
 tools the agent can actually call are whatever those toolsets built.
 
 A toolset can also carry a `Workflow` instead of, or alongside, its tools: a turn strategy the user
@@ -18,8 +18,8 @@ and writing a toolset of your own to put something new in the namespace.
 
 ## The rule that decides everything
 
-> **A capability is declared, never defaulted. Nothing reaches an agent until an `[agents.<name>]` table
-> names it in `tools`.**
+> **A capability is declared, never defaulted. Nothing reaches an agent until its
+> `[agents.<name>.tools]` table names it in `available`, or declares `available = "all"`.**
 
 There is no code path that adds a tool an agent did not name, and no flag that can disagree with a
 declaration. An installed plugin toolset does nothing on its own. A connected MCP server does nothing.
@@ -44,7 +44,7 @@ uv run kokua --list-frontends     # the other plugin group
 
 `--list-toolsets` reads your config file, since the registry depends on it (which servers are configured,
 whether plugins are loaded), so run `kokua config init` first if you have no config yet. The output groups
-names by provider, because a `tools` list deliberately does not say where a name comes
+names by provider, because an `available` list deliberately does not say where a name comes
 from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenance is visible:
 
 | Provider | What is in it |
@@ -64,7 +64,7 @@ What the AIMU-provided toolsets hold:
 
 | Toolset | Tools | Notes |
 | --- | --- | --- |
-| `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather` | `get_web_content` returns Markdown, converting a PDF as well as a page; `get_webpage_html` is the raw-HTML escape hatch. |
+| `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather`, `fetch_page`, `read_page`, `find_in_page` | `get_web_content` returns a page whole as Markdown, converting a PDF as well; `fetch_page` stores the page under `data/pages` and returns only the passages that match a question, with `read_page` and `find_in_page` reaching the rest. They trade off differently: see [Reading pages](#reading-pages-fetch_page-or-get_web_content) below. `get_webpage_html` is the raw-HTML escape hatch. |
 | `fs` | `list_directory`, `read_file` | **Read-only**, and read-only by construction: AIMU's `fs` group holds the two writers below as well, and this toolset is that group with `builtin.unscoped` excluded. `read_file` returns 2,000 lines per call and names the offset that continues the read. |
 | `fs_write` | `write_file`, `edit_file` | both approval-gated by default. Neither confines a write to any root, so this reaches any path Kokua's own account can write. A separate name from `fs` so an agent can be given the read and not the write. |
 | `compute` | `calculate`, `execute_python`, `run_command` | both execution tools are approval-gated by default; `[compute] command_env_passthrough` decides what a command's environment holds |
@@ -81,6 +81,39 @@ The three generative groups have no default model, so they raise at call time ra
 weights you did not ask for; see AIMU's
 [environment variables](https://saxman.info/aimu/reference/env-vars/) for the accepted values.
 
+### Reading pages: `fetch_page` or `get_web_content`
+
+An agent holding `web` has two ways to read a page, and the toolset's guidance tells the model to prefer
+`fetch_page`. Both stay because neither is right for every read.
+
+- **`get_web_content(url)`** returns the page itself, up to 20,000 characters a call, with an offset to
+  continue. Nothing is left out of what it returns, but all of it stays in the conversation and is resent
+  with every later request, so an agent that reads several pages fills its context window with them.
+- **`fetch_page(url, question)`** stores the page and returns its outline plus the few passages that best
+  match the question (five at most, about 6,000 characters), verbatim and with their offsets.
+  `read_page(handle, offset)` and `find_in_page(handle, text)` reach the rest of the stored page without
+  fetching it again. The handle names this copy of the page: a page that changed since gets a new one.
+
+What `fetch_page` costs you:
+
+- **It can miss an answer worded differently from the question.** Passages are ranked by the words they
+  share with the question (BM25, from AIMU), ignoring common English words. A question about a "refund
+  policy" will not find a section titled "Returns" that never says "refund". The guidance tells the model
+  to search with `find_in_page` or read on before concluding a page does not say something; a capable
+  model does that, and smaller local models often do not. If an answer drawn from the web looks
+  incomplete, check the trace for a `fetch_page` result whose passages did not contain it.
+- **Every agent holding `web` sends three more tool schemas**, plus the longer guidance: roughly 2,500
+  characters, or about 600 tokens, on every request, whether or not it reads a page that turn.
+- **There is no switch to leave the page tools out.** An agent's `available` list names toolsets, not
+  tools, so an agent that holds `web` holds all eight.
+- **Every page it reads stays on disk.** `data/pages/` holds one `<handle>.md` (the page's text) and one
+  `<handle>.json` (its URL and fetch time) per page, as plain text files only your account can read, and nothing
+  prunes it. They are a record of what your agents have read. A page whose content changes on every load (a timestamp, a rotating token) adds a
+  copy on every fetch. Delete the directory or any file in it whenever you like: a handle in an older
+  conversation then reads as unknown, and the model fetches the page again.
+- **It is not backed up.** The [GitHub backup](back-up-to-github.md) leaves `data/pages/` out, since it is
+  a cache of pages that are still on the web.
+
 ## Declare an agent
 
 Every agent is one `[agents.<name>]` table, and `[assistant].agent` says which of them you talk to. Four
@@ -93,23 +126,34 @@ agent = "assistant"          # the entry agent, and the root of the delegation g
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time"]
 delegates_to = ["researcher", "report-writer"]
+
+[agents.assistant.tools]
+available = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
-tools = ["web", "misc", "time"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
 against sources rather than memory, and return a concise findings summary that names its sources."""
 
+[agents.researcher.tools]
+available = ["web", "misc", "time", "messaging"]
+
 [agents.report-writer]
 description = "Builds and emails PDF reports."
-tools = ["markdown-to-pdf", "email-report", "fs", "time"]
+
+[agents.report-writer.tools]
+available = ["markdown-to-pdf", "email-report", "fs", "time"]
 ```
 
-- **`tools`** is the whole capability declaration, in one flat list over the one namespace. A built-in
-  group, a core capability, a plugin toolset, and an MCP server are all named the same way.
+- **`[agents.<name>.tools].available`** is the whole capability declaration, in one flat list over the one
+  namespace. (The same subtable can also carry a `resident` subset, the toolsets in the agent's context
+  from its first turn with the rest loaded on demand, and the agent's own `confirm` and `review`; see
+  [Tool access](../explanation/tool-access.md).) A built-in
+  group, a core capability, a plugin toolset, and an MCP server are all named the same way. Instead of a
+  list, an agent can declare `available = "all"`, every installed toolset, which then requires a
+  `resident` list; see [the reference](../reference/configuration.md#available-all).
 - **`delegates_to`** is itself the switch: a non-empty list gives that agent a
   `spawn_subagent(agent_type, task)` tool offering **exactly** the agents it names, each built from its
   own table. There is no separate "enable sub-agents" setting to disagree with it. The nesting is
@@ -123,8 +167,13 @@ tools = ["markdown-to-pdf", "email-report", "fs", "time"]
   declared opener.
 
 Two agents declaring the same toolset share the state behind it: one memory store, one set of live MCP
-connections, one skill directory. If two toolsets an agent declares contribute the same tool name, the
-one declared **first** wins, so declared order is meaningful.
+connections, one skill directory. If two resident toolsets an agent declares contribute the same tool
+name, the one declared **first** wins, so declared order is meaningful, and for an agent startup builds
+(the entry agent and every worker it reaches by `delegates_to`) startup raises an alert naming the tool
+and both toolsets. An agent declaring `available = "all"` has no written order, so it uses trust
+order instead (Kokua's own toolsets, then plugins, then skills, then MCP servers), which keeps a remote
+server's tool from shadowing one Kokua ships. See [Tool
+access](../explanation/tool-access.md#which-of-two-same-named-tools-wins).
 
 Restart Kokua after editing. Agents are read at startup and the new declaration takes effect there.
 
@@ -135,11 +184,15 @@ declares that toolset. Declaring `memory` therefore brings the paragraph that te
 `store_memory` for durable facts; undeclaring it takes that paragraph away. There is no prompt constant
 listing capabilities that has to be kept in step by hand.
 
-Among AIMU's built-in groups, `web` is the only one carrying guidance: it tells whoever declares it to
-look an answer up rather than recall it whenever that answer could have moved since training or you
-could check it against a source. `fs` and `compute` carry none, because a model reaches for a file or a
-calculation when the task plainly needs one, where a model that believes it already knows a fact never
-reaches for the web at all.
+Three of the toolsets wrapping AIMU's built-in groups carry guidance, and all three exist for one
+failure: a model answering from itself when it holds a tool that would answer better. `web` tells whoever
+declares it to look an answer up rather than recall it whenever that answer could have moved since
+training or you could check it against a source. `compute` tells it to work out every figure that
+matters with a tool rather than in prose, since a conversion written into a reply reads exactly like a
+computed one. `time` tells it that its sense of today's date comes from training, so it should read the
+clock before anything depending on the present and convert timezones with `convert_time` rather than by
+adding an offset. `fs` carries none, because a model asked about a file has nothing to answer from but
+the file.
 
 An agent's full system message is: its own opener, then its toolsets' guidance in declared order, then
 the delegation instructions if `delegates_to` is non-empty, and finally a "you are a lean supervisor,
@@ -149,7 +202,7 @@ conversations, `planning`, `capabilities`, the clock). Give that agent one domai
 would then contradict the tools the model can see.
 
 Note what `cross_cutting` is **not**: it is not a permission boundary. An agent whose table says
-`tools = ["config"]` really does get `update_config`. See
+`available = ["config"]` really does get `update_config`. See
 [design principles](../explanation/design-principles.md#corollary-a-capability-is-declared-never-defaulted)
 for why that is the intended shape, and what the actual security boundary is.
 
@@ -168,21 +221,20 @@ session store or connects to anything, so a bad config fails with nothing writte
 
 | Mistake | What happens |
 | --- | --- |
-| Unknown name in an agent's `tools` | **Startup fails**, naming the agent, the name, and every available toolset. |
+| Unknown name in an agent's `available` list | **Startup fails**, naming the agent, the name, and every available toolset. |
 | `skills` on any agent but the entry agent | **Startup fails.** Spawned workers are plain AIMU agents and cannot host it. |
 | Unknown key in an `[agents.*]` table | **Startup fails**, naming the key. Only `description`, `system_message`, `tools`, `delegates_to`, `model`, `thinking`, `generation`, and `max_iterations` are accepted. |
-| An old per-role key (`groups`, `tool_packs`, `mcp_servers`) | **Startup fails**, telling you to list it in `tools` instead. |
+| An old per-role key (`groups`, `tool_packs`, `mcp_servers`) | **Startup fails**, telling you to list it in `[agents.<name>.tools].available` instead. |
 | `[assistant].agent` naming no table | **Startup fails**, listing the agents you did configure. |
 | `delegates_to` naming an unknown agent | **Startup fails**, listing the agents you did configure. |
 | A delegation cycle | **Startup fails**, printing the cycle as a path. |
 | No `[agents.*]` tables at all | **Startup fails**, pointing at `config.example.toml` to copy from, or `kokua config init --force` to overwrite this file with it. |
 | Two providers claiming one toolset name | **Startup fails**, naming both providers and their descriptions. |
-| A third-party plugin toolset or MCP server no agent names | Starts fine. One warning line in the log: it reaches no agent. Kokua's own built-in toolsets and your installed skills are exempt: they ship, or sit on disk, regardless of what any agent declares. |
+| A third-party plugin toolset or MCP server no agent names | Starts fine, silently. `kokua --list-toolsets` lists it, and `kokua agents` shows no agent holding it. |
 | A toolset that fails to import, or whose `build` raises | **Startup fails**, naming the module. No source is exempt: a build failure is a bug in whoever wrote the toolset, and a log line nobody reads is not how you should find out an agent lost a capability. |
-| Two declared toolsets sharing a tool name | The one declared first wins. |
-
-One of those is quiet by design, and it lands in `$KOKUA_HOME/data/logs/kokua.log`. There is no
-console log handler, so it does not appear in your terminal.
+| Two resident toolsets sharing a tool name | The one declared first (for `"all"`, first in trust order) wins, and for an agent startup builds, startup raises an alert naming both. A deferred toolset loaded later keeps the tool the agent already holds, and the load result says so. |
+| `available = "all"` without `resident`, or written as `["all"]` or `"All"` | **Startup fails**, saying how to write it. |
+| An `"all"` agent's `resident` naming a toolset outside the expansion | **Startup fails**, saying whether nothing installs it or it is `skills` on a worker. |
 
 The most direct check that an agent got what you meant is to ask the assistant to delegate to it and
 report its tools.
@@ -229,7 +281,7 @@ TOOLSET = Toolset(
 weather = "my_weather_toolset:TOOLSET"
 ```
 
-`pip install` it, confirm with `kokua --list-toolsets`, then give an agent `tools = ["weather", ...]`.
+`pip install` it, confirm with `kokua --list-toolsets`, then name it in an agent's `[agents.<name>.tools].available`.
 Installing it is not enough, for the reason at the top of this guide.
 
 **Every toolset Kokua ships is written exactly this way**, which is the point: the shape above is not a

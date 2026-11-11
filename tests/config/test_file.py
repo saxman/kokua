@@ -10,7 +10,7 @@ import pytest
 from kokua.config import paths
 from kokua.config import file as settings
 from kokua.config import schema
-from kokua.config.schema import AssistantConfig
+from kokua.config.schema import ALL_TOOLSETS, AssistantConfig
 from kokua.config.settings_sources import build_settings_table, startup_schema
 from kokua.cli import _init_config, build_arg_parser, resolve_config
 from tests.helpers import core_table
@@ -126,9 +126,9 @@ def test_core_sections_includes_the_removed_key_sections():
     assert "subagents" in settings.core_sections()
 
 
-def test_security_confirm_tools_from_file():
-    _write_config('[security]\nconfirm_tools = ["add_skill_script"]\n')
-    assert _resolve().confirm_tools == ["add_skill_script"]
+def test_assistant_tools_confirm_from_file():
+    _write_config('[assistant.tools]\nconfirm = ["skills.add_skill_script"]\n')
+    assert _resolve().default_confirm == ["skills.add_skill_script"]
 
 
 @pytest.mark.parametrize(
@@ -300,8 +300,8 @@ def test_config_init_custom_path(tmp_path):
 
 def test_agent_tools_must_be_a_string_list(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text("[agents.bad]\ntools = [1, 2]\n", encoding="utf-8")
-    with pytest.raises(settings.ConfigError, match="tools"):
+    path.write_text("[agents.bad.tools]\navailable = [1, 2]\n", encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="available"):
         settings.load(str(path), table=core_table())
 
 
@@ -402,7 +402,7 @@ def test_coerce_config_string_scalars():
 
 def test_coerce_config_string_list():
     assert settings.coerce_config_string(
-        "security", "confirm_tools", "execute_python, update_config", table=core_table()
+        "assistant.tools", "confirm", "execute_python, update_config", table=core_table()
     ) == [
         "execute_python",
         "update_config",
@@ -457,18 +457,18 @@ def test_the_shipped_example_declares_the_approval_reviewer_with_the_gate_off():
 def test_the_shipped_gate_would_resolve_if_it_were_switched_on():
     """Turning `enabled = true` on the shipped file must not then fail startup.
 
-    Every rule `resolve_auto_approval` enforces is a relationship between three lists in this one file,
+    Every rule `resolve_auto_approval` enforces is a relationship between lists in this one file,
     so the example can express a gate that cannot start: a reviewer nothing declares, a tool nothing
     gates, or a tool the floor holds back. Checked at the entry level, which is what the file says; the
     resolution from entries to tool names needs a built registry and lives in tests/core/.
     """
     _init()
     cfg = _resolve()
-    assert cfg.auto_approval_tools
+    assert cfg.default_review
     for name in cfg.auto_approval_reviewers:
         assert name in cfg.reviewers
-    for entry in cfg.auto_approval_tools:
-        assert entry in cfg.confirm_tools
+    for entry in cfg.default_review:
+        assert entry not in cfg.default_confirm
         assert entry not in cfg.never_auto_approve
 
 
@@ -514,7 +514,7 @@ def test_a_contributed_section_parses_into_the_toolset_bucket(tmp_path):
 
     path = tmp_path / "config.toml"
     path.write_text(
-        "[agents.assistant]\ntools = []\n\n[widgets]\nverbose = true\nrounds = 4\n",
+        "[agents.assistant.tools]\navailable = []\n\n[widgets]\nverbose = true\nrounds = 4\n",
         encoding="utf-8",
     )
     table = SettingsTable(
@@ -535,7 +535,7 @@ def test_an_unknown_key_in_a_contributed_section_is_rejected(tmp_path):
     from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
 
     path = tmp_path / "config.toml"
-    path.write_text("[agents.assistant]\ntools = []\n\n[widgets]\nnonsense = 1\n", encoding="utf-8")
+    path.write_text("[agents.assistant.tools]\navailable = []\n\n[widgets]\nnonsense = 1\n", encoding="utf-8")
 
     with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].nonsense"):
         settings.load(str(path), table=SettingsTable(CORE_RUNTIME_SETTINGS))
@@ -546,7 +546,7 @@ def test_a_wrong_typed_contributed_value_is_rejected(tmp_path):
     from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
 
     path = tmp_path / "config.toml"
-    path.write_text('[agents.assistant]\ntools = []\n\n[widgets]\nrounds = "two"\n', encoding="utf-8")
+    path.write_text('[agents.assistant.tools]\navailable = []\n\n[widgets]\nrounds = "two"\n', encoding="utf-8")
     table = SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("rounds", "widgets", int, toolset="widgets")])
 
     with pytest.raises(settings.ConfigError, match="must be an integer"):
@@ -695,10 +695,12 @@ def test_the_agent_write_schema_covers_exactly_the_agent_keys_load_accepts():
     """Two hand-kept lists, one for what `update_config` may write into an agent table and one for what
     `load` parses back out of it, and drift between them is silent in the worst direction: a key only
     `AGENT_SCHEMA` knows is written to the file and then rejected on the next read, which leaves every
-    later agent write refused with "does not currently parse". `generation` is the one deliberate
-    difference, being a sub-table `AGENT_SCHEMA` spells out one parameter at a time."""
+    later agent write refused with "does not currently parse". `generation` and `tools` are the deliberate
+    differences, being sub-tables `AGENT_SCHEMA` spells out one key at a time."""
     flat_agent_keys = {key for section, key in settings.AGENT_SCHEMA if section == "agents.*"}
-    assert flat_agent_keys == set(settings._AGENT_KEYS) - {"generation"}
+    assert flat_agent_keys == set(settings._AGENT_KEYS) - {"generation", "tools"}
+    tools_keys = {key for section, key in settings.AGENT_SCHEMA if section == "agents.*.tools"}
+    assert tools_keys == set(settings._AGENT_TOOLS_KEYS)
 
 
 @pytest.mark.parametrize(
@@ -716,7 +718,7 @@ def test_schema_section_wildcards_only_the_agent_name(section, expected):
 
 
 def test_coerce_reads_an_agent_tools_list():
-    value = settings.coerce_config_string("agents.researcher", "tools", "time, memory", table=core_table())
+    value = settings.coerce_config_string("agents.researcher.tools", "available", "time, memory", table=core_table())
     assert value == ["time", "memory"]
 
 
@@ -819,15 +821,14 @@ def test_unknown_agent_key_lists_what_an_agent_table_accepts():
 def test_agent_hint_names_a_placeholder_rather_than_the_wildcard():
     """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`.
 
-    `tools` is now also a `[security.auto_approval]` key, so the hint offers both sections (sorted, like
-    `test_unknown_key_offers_every_section_that_has_it`); what this test still pins is that the agents
-    half reads `[agents.<name>].tools`, the placeholder, and not the wildcard `[agents.*].tools`.
+    What this test pins is that the hint reads `[agents.<name>].delegates_to`, the placeholder, and not the
+    wildcard `[agents.*].delegates_to`.
     """
     with pytest.raises(
         settings.ConfigError,
-        match=r"did you mean \[agents.<name>\].tools or \[security.auto_approval\].tools\?",
+        match=r"did you mean \[agents.<name>\].delegates_to\?",
     ):
-        settings.coerce_config_string("display", "tools", "x", table=core_table())
+        settings.coerce_config_string("display", "delegates_to", "x", table=core_table())
 
 
 @pytest.mark.parametrize(
@@ -858,7 +859,7 @@ def test_a_section_whose_agent_name_could_not_be_written_as_given_is_refused(sec
 def test_an_agent_name_a_section_header_can_carry_is_still_accepted(name):
     """The rule is TOML's bare-key character set, not a blocklist of one character, and the shipped
     example's own `report-writer` is the case that has to keep working."""
-    assert settings.coerce_config_string(f"agents.{name}", "tools", "time", table=core_table()) == ["time"]
+    assert settings.coerce_config_string(f"agents.{name}.tools", "available", "time", table=core_table()) == ["time"]
 
 
 def _write_task_config(tmp_path, body: str):
@@ -933,7 +934,7 @@ def test_load_collects_task_tables_by_name(tmp_path):
         tmp_path,
         """
 [agents.assistant]
-tools = []
+tools = { available = [] }
 
 [scheduling.task.morning-brief]
 prompt = "Summarize my calendar"
@@ -954,7 +955,7 @@ def test_a_task_table_and_the_toolsets_own_key_share_the_scheduling_section(tmp_
         tmp_path,
         """
 [agents.assistant]
-tools = []
+tools = { available = [] }
 
 [scheduling]
 max_task_conversations = 5
@@ -978,7 +979,7 @@ def test_load_names_the_task_in_a_bad_table(tmp_path):
         tmp_path,
         """
 [agents.assistant]
-tools = []
+tools = { available = [] }
 
 [scheduling.task.broken]
 prompt = "p"
@@ -1112,7 +1113,6 @@ def test_auto_approval_section_parses(tmp_path):
         [security.auto_approval]
         enabled = true
         reviewers = ["approval"]
-        tools = ["compute.run_command"]
         timeout_seconds = 4.5
         max_per_turn = 2
         """,
@@ -1120,7 +1120,6 @@ def test_auto_approval_section_parses(tmp_path):
     assert config.never_auto_approve == ["config.update_config"]
     assert config.auto_approval_enabled is True
     assert config.auto_approval_reviewers == ["approval"]
-    assert config.auto_approval_tools == ["compute.run_command"]
     assert config.auto_approval_timeout_seconds == 4.5
     assert config.auto_approval_max_per_turn == 2
 
@@ -1131,7 +1130,7 @@ def test_auto_approval_defaults_are_off_and_floored():
     config = AssistantConfig()
     assert config.auto_approval_enabled is False
     assert config.auto_approval_reviewers == []
-    assert config.auto_approval_tools == []
+    assert config.default_review == []
     # The three that grant a capability rather than acting once.
     assert config.never_auto_approve == [
         "config.update_config",
@@ -1152,3 +1151,134 @@ def test_auto_approval_is_locked_by_the_shipped_security_pattern():
 
     assert locked_by("security.auto_approval", "enabled", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"
     assert locked_by("security", "never_auto_approve", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"
+
+
+# --- [agents.<name>.tools] and [assistant.tools] ------------------------------------------------------
+
+
+def _load_text(text: str) -> dict:
+    return settings.load(str(_write_config(text)), table=core_table())
+
+
+def test_agent_tools_subtable_parses_available_and_a_declared_pair():
+    agent = _load_text('[agents.coder.tools]\navailable = ["fs", "compute"]\nconfirm = ["compute.run_command"]\n')[
+        "agents"
+    ]["coder"]
+    assert agent.available == ["fs", "compute"]
+    assert agent.confirm == ["compute.run_command"]
+    assert agent.review == []  # declaring one key declares the pair
+
+
+def test_agent_without_a_pair_inherits():
+    agent = _load_text('[agents.coder.tools]\navailable = ["fs"]\n')["agents"]["coder"]
+    assert agent.confirm is None and agent.review is None
+
+
+def test_the_inline_table_form_is_the_same_table():
+    agent = _load_text('[agents.coder]\ntools = { available = ["fs"] }\n')["agents"]["coder"]
+    assert agent.available == ["fs"]
+
+
+def test_old_tools_list_names_the_new_form():
+    with pytest.raises(settings.ConfigError, match=r"\[agents\.coder\.tools\] with available = \["):
+        _load_text('[agents.coder]\ntools = ["fs"]\n')
+
+
+def test_agent_tools_table_requires_available():
+    with pytest.raises(settings.ConfigError, match=r"\[agents\.coder\.tools\] needs available"):
+        _load_text('[agents.coder.tools]\nconfirm = ["fs_write"]\n')
+
+
+def test_assistant_tools_pair_rule():
+    overrides = _load_text('[assistant.tools]\nreview = ["fs_write"]\n')
+    assert overrides["default_review"] == ["fs_write"] and overrides["default_confirm"] == []
+
+
+def test_assistant_tools_absent_keeps_todays_six():
+    config = AssistantConfig()
+    assert config.default_confirm == [
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+        "compute.execute_python",
+        "compute.run_command",
+        "fs_write",
+        "config.update_config",
+    ]
+    assert config.default_review == []
+    assert "default_confirm" not in _load_text("[assistant]\n")
+
+
+@pytest.mark.parametrize("key", ["available", "resident"])
+def test_assistant_tools_refuses_availability(key):
+    with pytest.raises(settings.ConfigError, match=r"each agent declares its own in \[agents\.<name>\.tools\]"):
+        _load_text(f'[assistant.tools]\n{key} = ["fs"]\n')
+
+
+def test_security_confirm_tools_is_gone():
+    with pytest.raises(
+        settings.ConfigError, match=r"\[security\]\.confirm_tools is gone.*\[assistant\.tools\]\.confirm"
+    ):
+        _load_text('[security]\nconfirm_tools = ["fs_write"]\n')
+
+
+def test_security_confirm_tools_message_says_to_lock_the_new_table():
+    """An existing config writes locked_config_keys out in full, so it lacks the new table's lock."""
+    with pytest.raises(settings.ConfigError, match=r"assistant\.tools\.\*"):
+        _load_text('[security]\nconfirm_tools = ["fs_write"]\n')
+
+
+def test_auto_approval_tools_is_gone():
+    with pytest.raises(
+        settings.ConfigError,
+        match=r"\[security\.auto_approval\]\.tools is gone.*\[assistant\.tools\]\.review",
+    ):
+        _load_text('[security.auto_approval]\ntools = ["fs_write"]\n')
+
+
+def test_assistant_tools_lock_pattern_is_valid_without_the_table():
+    overrides = _load_text('[security]\nlocked_config_keys = ["security.*", "agents.*", "assistant.tools.*"]\n')
+    assert "assistant.tools.*" in overrides["locked_config_keys"]
+
+
+def test_resident_parses_and_must_be_within_available():
+    agent = _load_text('[agents.assistant.tools]\navailable = ["memory", "web"]\nresident = ["memory"]\n')["agents"][
+        "assistant"
+    ]
+    assert agent.resident == ["memory"]
+    with pytest.raises(
+        settings.ConfigError,
+        match=r"\[agents\.assistant\.tools\]\.resident names 'compute', which is not in available",
+    ):
+        _load_text('[agents.assistant.tools]\navailable = ["memory"]\nresident = ["memory", "compute"]\n')
+
+
+def test_available_all_parses_to_the_sentinel():
+    agent = settings._parse_agent("explorer", {"tools": {"available": "all", "resident": ["time"]}})
+    assert agent.available is ALL_TOOLSETS and agent.resident == ["time"]
+
+
+def test_available_all_accepts_an_empty_resident_list():
+    agent = settings._parse_agent("explorer", {"tools": {"available": "all", "resident": []}})
+    assert agent.available is ALL_TOOLSETS and agent.resident == []
+
+
+def test_available_all_without_resident_is_refused():
+    with pytest.raises(settings.ConfigError, match=r'available = "all" needs a resident list'):
+        settings._parse_agent("explorer", {"tools": {"available": "all"}})
+
+
+@pytest.mark.parametrize("value", [["all"], "All", "everything", ["web", "all"], ["All"], ["web", "ALL"]])
+def test_available_near_misses_name_the_fix(value):
+    with pytest.raises(settings.ConfigError, match=r'or the string "all" \(lowercase'):
+        settings._parse_agent("explorer", {"tools": {"available": value, "resident": []}})
+
+
+def test_mcp_server_description_parses_and_must_be_a_string(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[[mcp.server]]\nurl = "https://b/mcp"\nname = "stocks"\ndescription = "Quotes."\n', encoding="utf-8"
+    )
+    assert settings.load(str(path), table=core_table())["mcp_servers"][0].description == "Quotes."
+    path.write_text('[[mcp.server]]\nurl = "https://b/mcp"\nname = "stocks"\ndescription = 3\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="description"):
+        settings.load(str(path), table=core_table())

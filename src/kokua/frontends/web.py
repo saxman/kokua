@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import re
+import sys
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
@@ -175,6 +176,8 @@ async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
 # is what actually guarantees uniqueness.
 _EXPORT_SLUG_WORDS = 6
 
+_DOWNLOAD_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}\Z")
+
 
 def _export_filename(session_key: str, title: str) -> str:
     """A bare filename (no directory component) for one conversation's Markdown export.
@@ -208,7 +211,11 @@ async def _export_conversation(
     session = assistant.resolve_conversation(conversation_id)
     if session is None:
         raise ValueError(f"no conversation found matching {conversation_id!r} to export")
-    markdown = render_markdown(session, max_payload_chars=DEFAULT_MAX_PAYLOAD_CHARS)
+    # Off the event loop: rendering reads and parses every recorded payload file, which would otherwise
+    # stall every connection's socket for as long as a large conversation takes.
+    markdown = await asyncio.to_thread(
+        render_markdown, session, max_payload_chars=DEFAULT_MAX_PAYLOAD_CHARS, payloads_path=config.payloads_path
+    )
     title = session.metadata.get("title") or derive_title(session.messages) or ""
     name = _export_filename(session.key, title)
     # The download route serves out of this directory and expects it to already exist (it 404s
@@ -216,6 +223,12 @@ async def _export_conversation(
     config.downloads_path.mkdir(parents=True, exist_ok=True)
     (config.downloads_path / name).write_text(markdown, encoding="utf-8")
     await channel.send_download(name, f"/download/{name}")
+
+
+# How long a new connection waits for the one it replaced to finish closing. Bounded because a teardown
+# that never ends (an MCP server that stops answering mid-close) would otherwise leave the page showing
+# itself as starting forever, with nothing to say why.
+TEARDOWN_WAIT_SECONDS = 10.0
 
 
 def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> Starlette:
@@ -234,7 +247,32 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
     """
     validated_registry(config)
 
-    busy = {"active": False}  # one-active-connection guard (single user, single process)
+    # The one-active-connection guard (single user, single process). `closing` is set once the holder's
+    # socket is gone and only its teardown remains; `released` fires when the guard is let go.
+    guard = {"held": False, "closing": False}
+    released = asyncio.Event()
+
+    async def claim_guard() -> Optional[str]:
+        """Take the one-connection guard, or return the refusal to send instead.
+
+        A live holder is another tab, refused at once. A closing one is what a reload always connects
+        into: the page navigating away closes its socket at once, but the server still has to close
+        every remote MCP session, which is a network round trip, and the reloaded page connects inside
+        that window. Refusing it then told the user about a tab that did not exist, and a second reload
+        appeared to fix it only by landing later. So that case waits for the teardown instead of
+        overlapping it, since two assistants would share one session store. A loop rather than one wait
+        because two connections can be waiting on the same release, and only the first takes it.
+        """
+        while guard["held"]:
+            if not guard["closing"]:
+                return "Assistant is busy in another tab."
+            try:
+                await asyncio.wait_for(released.wait(), TEARDOWN_WAIT_SECONDS)
+            except TimeoutError:
+                return "The previous connection is still closing. Reload to try again."
+        guard.update(held=True, closing=False)
+        released.clear()
+        return None
 
     async def index(request):
         return HTMLResponse(_index_html().replace(PAGE_VERSION_PLACEHOLDER, _page_version()))
@@ -291,17 +329,21 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         path = payloads.reference_to_path(config.payloads_path, payloads.ROUTE_PREFIX + name)
         if path is None or not path.is_file():
             return Response(status_code=404)
-        return FileResponse(path, media_type="text/plain; charset=utf-8")
+        download = request.query_params.get("download", "")
+        if not _DOWNLOAD_NAME.match(download):
+            return FileResponse(path, media_type="text/plain; charset=utf-8")
+        # The name is echoed into a header, so only the allowlist above reaches it: no separator,
+        # quote, or newline can get through. Anything else is served inline rather than refused.
+        media_type = "application/json" if download.endswith(".json") else "text/plain; charset=utf-8"
+        return FileResponse(path, media_type=media_type, filename=download, content_disposition_type="attachment")
 
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
-        if busy["active"]:
-            await websocket.send_json(
-                {"type": "message", "text": "Assistant is busy in another tab.", "proactive": False}
-            )
+        refusal = await claim_guard()
+        if refusal is not None:
+            await websocket.send_json({"type": "message", "text": refusal, "proactive": False})
             await websocket.close()
             return
-        busy["active"] = True
         channel = WebChannel(websocket)
         try:
             # First, before anything slow, so a tab running an older page reloads at once rather than
@@ -312,8 +354,21 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             # Released on every exit, not only the serve loop's. The guard is taken before the assistant
             # exists, so a failure in between leaks it and refuses every later connection as "busy in
             # another tab" -- a confident wrong diagnosis of a fault no other tab had anything to do with.
-            busy["active"] = False
+            guard.update(held=False, closing=False)
+            released.set()
             await channel.aclose()
+
+    async def refuse_connection(websocket: WebSocket, channel: WebChannel, error: Exception) -> None:
+        """Report a user mistake that stops the assistant being built, and close the socket.
+
+        Both readers are told. The browser gets it because closing the socket on its own leaves the page
+        able to say only "Disconnected." The terminal gets it in the CLI front end's own form because the
+        `kokua` logger writes only to the file log, so without this the person who launched the server
+        learns nothing until a page is open, and then only in that page.
+        """
+        print(f"[error] {error}", file=sys.stderr)
+        await channel.send(str(error))
+        await websocket.close()
 
     async def serve_connection(websocket: WebSocket, channel: WebChannel) -> None:
         try:
@@ -321,10 +376,8 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         except (ModelClientError, ConfigError) as e:
             # Either the model client could not be built (no model resolved, or a bad model string) or
             # config.toml no longer resolves (an [agents.*] table naming a toolset since renamed, or moved
-            # out to a skill). Both are user mistakes whose message states the fix, so it goes to the
-            # browser: closing the socket on its own leaves the page able to say only "Disconnected."
-            await channel.send(str(e))
-            await websocket.close()
+            # out to a skill). Both are user mistakes whose message states the fix.
+            await refuse_connection(websocket, channel, e)
             return
         # Sent BEFORE `start()`, which is the point of the split: the conversation list, the active
         # conversation's history and the current settings all read the store and the config, so they are
@@ -339,9 +392,13 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             # The same two user mistakes as above, in the half of boot that resolves a model and builds
             # the tools an approval gate is checked against, so they surface here now. Reported the same
             # way for the same reason, and the page has already been told nothing about being ready.
-            await channel.send(str(e))
-            await websocket.close()
+            await refuse_connection(websocket, channel, e)
             return
+        # After `start()` too, and for a sharper reason than the tasks below: resolving the entry
+        # agent's model asks AIMU what is locally available when no table names one, which raises when
+        # the answer is nothing. `start()` has just built a client on that same answer, so by here it is
+        # cached and the failure has already been reported above as the message it is.
+        await channel.send_models(assistant.current_models())
         # After `start()`, and one frame rather than two: `arm_all` retires a past-due one-shot as it
         # arms, so a list sent before it can be wrong with nothing to correct it. Unguarded, because
         # `arm_all` just read the same file successfully.
@@ -588,6 +645,9 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                 for task in done:
                     task.result()
             finally:
+                # First, before anything here can wait: from this point the connection is only tearing
+                # down, and a reload connecting now should queue behind it rather than be refused.
+                guard["closing"] = True
                 applying.cancel()
                 reading.cancel()
                 await asyncio.gather(applying, reading, return_exceptions=True)
@@ -630,10 +690,12 @@ def main() -> None:
     # Resolve config (defaults < file < flags), then serve. The `kokua-web` console script reaches
     # this through `cli.main_web`, which runs the AIMU preflight first: importing *this* module
     # already pulls in the AIMU surface that preflight exists to check, so the check cannot live here.
-    from ..cli import build_arg_parser, resolve_config
+    from ..cli import build_arg_parser, print_access_summary, resolve_config
 
     args = build_arg_parser("kokua-web").parse_args()
-    serve(resolve_config(args))
+    config = resolve_config(args)
+    print_access_summary(config)
+    serve(config)
 
 
 FRONTEND = FrontEnd(

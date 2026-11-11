@@ -31,6 +31,7 @@ and ``Assistant.schedule_rename`` is what turns that deadlock into a write queue
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Union
 
@@ -155,9 +156,11 @@ def make_conversation_tools(
     rather than reading it off the config keeps the one thing this factory writes outside the store
     visible in its signature, and the name coming from the store rather than from the model is what
     makes a path the model chose unreachable: there is no argument here that reaches the filesystem.
-    ``payloads_path`` is the same kind of argument for a read rather than a write: with ``full=True``
-    it is where ``render_markdown`` reads a spilled sub-agent tool response back from, so the export
-    can show the whole thing instead of the preview ``core/subagents.py`` capped it to.
+    ``payloads_path`` is the same kind of argument for a read rather than a write. On every export it is
+    where ``render_markdown`` reads the recorded requests back from, so the file carries each agent's
+    system prompt (capped like any payload unless ``full``); with ``full=True`` it is also where a
+    spilled sub-agent tool response is read back from, so the export can show the whole thing instead
+    of the preview ``core/subagents.py`` capped it to.
 
     ``is_entry_agent`` decides which sentence the active conversation is described with, and it is the
     only thing in here that differs between two agents holding the same capability. The entry agent is
@@ -355,7 +358,10 @@ def make_conversation_tools(
         session = book.resolve(conversation_id)
         if session is None:
             return _unknown(conversation_id)
-        markdown = render_markdown(
+        # Off the event loop: rendering reads and parses every recorded payload file, which would stall
+        # every other conversation's turn for as long as a large conversation takes.
+        markdown = await asyncio.to_thread(
+            render_markdown,
             session,
             max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS,
             payloads_path=payloads_path,

@@ -364,6 +364,80 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    note instead of a second button, since retrying would hit the same file. */
 .tool-output .output-more.output-error { color: var(--danger); border-color: transparent; padding-left: 0;
   cursor: default; }
+/* A round's details live in the right panel (see renderRoundDetails), in the dimmed machine-event style: a
+   fixed-width column with its own scroll. While it is open the conversation column narrows to make room
+   (the panel is a flex sibling of #main), and below 900px it overlays instead, so a narrow window keeps its
+   full-width log. The request tree is built a level at a time (see renderJsonNode), so the panel stays cheap
+   however large the request; strings wrap rather than scroll sideways, and long ones are clamped. */
+#round-panel { flex: none; width: 420px; overflow-y: auto; padding: 0 14px 14px; color: var(--fg-dim);
+  background: var(--bg); border-left: 1px solid var(--border); font-size: 0.85em; }
+#round-panel[hidden] { display: none; }
+@media (max-width: 900px) {
+  #round-panel { position: fixed; top: 0; right: 0; bottom: 0; max-width: 100vw; z-index: 20;
+    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.25); }
+}
+.round-panel-header { position: sticky; top: 0; display: flex; align-items: baseline; gap: 8px; padding: 10px 0 6px;
+  background: var(--bg); }
+.round-panel-title { color: var(--fg); font-weight: 600; }
+.round-panel-agent { flex: 1; color: var(--fg-faint); }
+.round-panel-close { background: none; border: none; color: var(--fg-dim); font-size: 1.3em; line-height: 1;
+  cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.round-panel-close:hover { color: var(--fg); background: var(--surface); }
+.round-summary, .round-ending { margin: 2px 0; }
+.round-ending { color: var(--fg-faint); font-style: italic; }
+#round-panel .request-note, #round-panel .request-empty { margin: 2px 0; }
+#round-panel .request-download, #round-panel .response-download { display: inline-block; margin: 2px 0 4px;
+  color: inherit; text-decoration: underline; }
+/* The button on a round's output: hidden until its card is hovered (a plain bubble, a foldable card, or
+   the orphan row), the button is focused, or its round is the one the panel shows. Tinted when the loop
+   ended on a forced wrap-up or an error. The output it opened is outlined while its details are shown.
+   Hidden with `opacity`, like the captions, so it still counts as visible to a test and keeps its box. */
+.round-button { background: none; border: 1px solid transparent; border-radius: 4px; color: var(--fg-faint);
+  font: 0.75em ui-monospace, monospace; padding: 0 5px; cursor: pointer; opacity: 0; transition: opacity 120ms ease; }
+.bubble:hover > .bubble-meta > .round-button, .foldable:hover > .round-slot > .round-button,
+.round-orphan:hover .round-button,
+.round-button:hover, .round-button:focus-visible, .round-button[aria-expanded="true"] { opacity: 1; }
+.round-button:hover, .round-button:focus-visible, .round-button[aria-expanded="true"] { color: var(--fg);
+  border-color: var(--border); }
+/* The one exception to hover-reveal: an ending (forced wrap-up or error) is told only in the panel now,
+   so this tint is the single signal on the page that a loop ended badly, and it must not wait for a hover. */
+.round-button.warn { color: var(--danger); opacity: 1; }
+.round-selected { outline: 1px solid var(--border); outline-offset: 2px; border-radius: 4px; }
+.round-orphan { margin: 1px 0 1px 14px; }
+/* On a foldable card (thinking, tool, sub-agent) the button cannot live in the header, which is itself
+   the button that folds the card, so it is pinned over the header line's right end. The card's caption
+   moves into the slot after the buttons (see addRound), so the right edge reads info (the header's
+   label, metric included), buttons, then the timestamp, which keeps the right edge the header's caption
+   had and so stays in the page's one caption column. The header gives up room for the buttons and a
+   caption's worth of text, a fixed reserve rather than a measurement because a collapsed parent has
+   no layout to measure. */
+.foldable:has(> .round-slot) { position: relative; }
+.foldable > .round-slot { position: absolute; top: 0; right: 0; display: flex; align-items: baseline; gap: 2px;
+  line-height: 1.5; }
+.foldable > .round-slot > .fold-ts { margin-left: 6px; }
+.foldable:has(> .round-slot) > .fold-header { padding-right: calc(var(--round-buttons, 1) * 2.4em + 8em); }
+.foldable > .bubble-meta { margin: 0 0 0 14px; }
+.round-section { margin: 4px 0 6px; }
+.round-section-title { color: var(--fg); font-weight: 600; }
+.request-tree, .round-response { font-family: ui-monospace, monospace; font-size: 0.95em; }
+.round-section-title { font-family: inherit; }
+.response-thinking { font-style: italic; }
+.response-tool-name { color: var(--fg); }
+.response-tool-name::after { content: "(...)"; color: var(--fg-faint); }
+.json-node > summary { cursor: pointer; }
+.json-children { margin-left: 14px; }
+.json-key { color: var(--fg); }
+.json-size { color: var(--fg-faint); }
+.json-leaf > .json-key::after { content: ": "; }
+.json-string, .json-image { display: block; margin: 0 0 2px 14px; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: inherit; max-height: 24em; overflow: auto; }
+.json-image:not(.json-full) { font-style: italic; }
+.json-scalar { color: var(--fg-dim); }
+.json-more { display: block; margin: 0 0 2px 14px; padding: 1px 6px; font: inherit; color: inherit;
+  background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.json-more:hover { text-decoration: underline; }
+/* The inline fallback for an ending with no round to ride: one short dimmed line. */
+.ending { color: var(--fg-faint); margin: 1px 0 6px 14px; font-size: 0.8em; font-style: italic; }
 .subagent[data-status="running"] .fold-metric { font-style: italic; }
 /* A spawn card stands in for the `spawn_subagent` tool block the server suppresses (see
    WebChannel.send_frame), so its header line and argument line carry the tool block's monospace
@@ -409,6 +483,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
   font-family: -apple-system, system-ui, sans-serif; text-transform: none; }
 .fold-kind { font-size: 0.82em; }
 .fold-metric { font-size: 0.78em; }
+/* A tool card's character count is detail you look for, so it waits for the card to be hovered, like
+   its caption. Other metrics (a sub-agent's running status) are state and stay put. */
+.bubble.tool > .fold-header .fold-metric { opacity: 0; transition: opacity 120ms ease; }
+.bubble.tool:hover > .fold-header .fold-metric, .bubble.tool > .fold-header:focus-visible .fold-metric { opacity: 1; }
 /* No payload (thinking, continuation, plan): the kind word IS the line, so it takes the row's primary
    content colour and its full size. As the secondary label it wears next to a call, it reads as an
    empty row and the reasoning looks like it never happened. */
@@ -526,8 +604,9 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
 .bubble.image:hover .image-download, .bubble.image .image-download:focus-visible { opacity: 1; }
 /* Append-time datetime caption, revealed on hover rather than printed under every block. Every kind of
    block carries it on its first line at the row's right edge: a foldable's rides the always-visible
-   header (so it shows whether the block is collapsed or expanded), and a regular bubble's rides the
-   meta cluster below.
+   header (so it shows whether the block is collapsed or expanded) or, once the card has a round button,
+   the end of the slot pinned over the header's right end, and a regular bubble's rides the meta cluster
+   below.
 
    This must stay `opacity`, never `display: none` or `visibility: hidden`: the e2e suite asserts the
    caption is visible, and Playwright's visibility check ignores opacity but not those two. Tidying
@@ -555,11 +634,19 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
    turn ends), so DOM order cannot express this and `order` is what does. Nothing is lost by the
    mismatch: the caption is not focusable, and the two controls keep their relative order, so tab order
    still reaches them constructive before destructive. */
-.bubble-meta > .bubble-ts { order: 1; }
+.bubble-meta > .bubble-ts { order: 3; }
+/* The cluster reads, left to right: info (the turn's number), the round button, the branch and delete
+   controls, then the caption. Like the caption, the round button is appended after the others, so `order`
+   places it. The badge is quiet until its bubble is hovered, like the caption. */
+.bubble-meta > .round-button { order: 1; }
+.bubble-meta > .bubble-branch, .bubble-meta > .bubble-truncate { order: 2; }
+.turn-badge { order: 0; color: var(--fg-faint); font-size: 0.7em; font-family: -apple-system, system-ui, sans-serif;
+  opacity: 0; transition: opacity 120ms ease; }
+.bubble:hover > .bubble-meta > .turn-badge { opacity: 1; }
 /* A notice is not a flex row, so its meta lands below the text as ordinary flow content and wants the
    gap back. */
 .notice > .bubble-meta { margin-top: 2px; }
-.bubble:hover .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
+.bubble:hover .bubble-ts, .fold-header:hover > .fold-ts, .foldable:hover > .round-slot > .fold-ts { opacity: 1; }
 /* A turn's two controls are the sidebar row control the page already has, chip and all, declared with
    the chat rows' controls up in the conversation-list section: one kind of row control, one rule. Two
    things differ here and are all this adds.
@@ -580,6 +667,14 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
 .attach-previews .remove { position: absolute; top: -7px; right: -7px; width: 24px; height: 24px; padding: 0;
   border-radius: 50%; font-size: 0.85em; line-height: 24px; background: var(--fg-dim); color: var(--accent-fg); }
 .header-actions { display: flex; align-items: center; gap: 10px; }
+/* Which model is answering. Reference rather than a control, so it reads as chrome: dim, small, and
+   monospace like the tool rows, since what it shows is a string out of config.toml and not prose. It
+   truncates rather than pushing on the conversation title, and the full record is in its tooltip. On a
+   narrow window it goes entirely: the title is what you need there, and the model has not changed. */
+#model-label { font-family: ui-monospace, monospace; font-size: 0.78em; color: var(--fg-faint);
+  max-width: 24ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+#model-label:empty { display: none; }
+@media (max-width: 600px) { #model-label { display: none; } }
 /* Theme cycle button: a quiet header affordance, the page's only settings control. */
 #theme-btn { background: none; border: none; color: var(--fg-faint); font-size: 1.15em; line-height: 1;
   padding: 7px; cursor: pointer; border-radius: 6px; }

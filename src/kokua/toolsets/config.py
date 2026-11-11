@@ -26,7 +26,7 @@ from aimu.tools import tool
 
 from kokua.config import file as settings
 from kokua.config import store as config_store
-from kokua.config.schema import AgentConfig
+from kokua.config.schema import ALL_TOOLSETS, AgentConfig
 from kokua.config.settings_sources import startup_schema
 from kokua.registry.registry import Toolset
 
@@ -181,7 +181,16 @@ def _validated_agent_write(config, registry, table) -> Callable[[str, str, Any],
             entry_agent = persisted.get("entry_agent", config.entry_agent)
             candidate.mcp_servers = persisted.get("mcp_servers", config.mcp_servers)
         agent = baseline.get(name, AgentConfig())
-        candidate.agents = {**baseline, name: replace(agent, **{key: value})}
+        # The file gets the string; the candidate gets what the parser would read it back as.
+        changes = {key: ALL_TOOLSETS if key == "available" and value == "all" else value}
+        # The approval pair is declared whole (see _parse_agent_tools): writing one list of it leaves the
+        # other `[]` on the next load, so the dry run must see the same agent, not a half-declared one.
+        for pair_key in ("confirm", "review"):
+            if key in ("confirm", "review") and getattr(agent, pair_key) is None:
+                changes.setdefault(pair_key, [])
+        written = replace(agent, **changes)
+        settings.check_resident_within_available(name, written.resident, written.available)
+        candidate.agents = {**baseline, name: written}
         candidate.entry_agent = entry_agent
         try:
             if persisted is None:
@@ -262,7 +271,7 @@ def make_config_tools(
     cold_schema = {
         **startup_schema(),
         ("assistant", "model"): ("model", (str,), "a string", _resolvable_model),
-        # The flat agent keys only. An ``[agents.<name>.generation]`` key is deliberately left on its
+        # The flat agent keys and the `tools` subtable's lists. An ``[agents.<name>.generation]`` key is deliberately left on its
         # own converter, undried-run, because `agent_write` rebuilds the candidate agent with
         # `replace(agent, **{key: value})` and `generation` is a sub-table rather than a field: a write
         # to `temperature` would raise TypeError out of the tool call instead of being validated.
@@ -277,7 +286,7 @@ def make_config_tools(
         **{
             location: (target, types, label, _also_dry_run(inner, agent_write))
             for location, (target, types, label, inner) in settings.AGENT_SCHEMA.items()
-            if location[0] == "agents.*"
+            if location[0] in ("agents.*", "agents.*.tools")
         },
     }
 
@@ -300,11 +309,11 @@ def make_config_tools(
         """Change one setting in config.toml, e.g. section="email", key="host", value="smtp.gmail.com".
 
         Pass the value as a string; it is coerced to the setting's real type (numbers, true/false, and
-        comma-separated lists are understood). A hot setting -- [assistant].generate_titles, a planning
-        flag, or any other setting flagged to apply live -- takes effect immediately in this session. Every other
-        setting, the model and the reasoning effort among them, is saved and takes effect only the next
-        time Kokua restarts. The result says which of the two happened; pass that on, because a saved
-        setting is not yet in force and only the user can restart. A model string is checked against the
+        comma-separated lists are understood). A hot setting -- [assistant].generate_titles,
+        [assistant].capture_requests, a planning flag, or any other setting flagged to apply live -- takes effect
+        immediately in this session. Every other setting, the model and the reasoning effort among them, is saved and
+        takes effect only the next time Kokua restarts. The result says which of the two happened; pass that on,
+        because a saved setting is not yet in force and only the user can restart. A model string is checked against the
         providers actually installed before it is saved, so a name that does not resolve is refused here
         rather than breaking the next startup. Which keys are refused is the user's own
         [security].locked_config_keys list, not a fixed set; read_config opens with the list in force.

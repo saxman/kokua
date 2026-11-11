@@ -14,7 +14,9 @@ unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
+import threading
 import time
 from dataclasses import replace
 from typing import Callable, Optional
@@ -33,7 +35,7 @@ from kokua.core.build import (
     build_model_client,
     entry_agent_system_message,
     make_agent_builder,
-    model_label,
+    model_record,
 )
 from kokua.config import AssistantConfig
 from kokua.core import conversation_commands
@@ -89,7 +91,9 @@ class Assistant:
         store: TinyDBSessionStore,
         config: AssistantConfig,
     ):
-        self._ui = ChannelUI(channel)
+        # The entry agent's own streams are the only ones reaching the channel as chunks, so the label
+        # the channel puts on a tool call is resolved for that agent.
+        self._ui = ChannelUI(channel, toolset_of=lambda tool: self._toolset_of(config.entry_agent, tool))
         # The live settings table: Kokua's own entries plus whatever the installed toolsets declared.
         # Built here because the applier below needs it, and shared with the config toolset through
         # LiveState so a hot `update_config` resolves against the same table `apply_settings` does.
@@ -102,12 +106,13 @@ class Assistant:
             model_for=config.model_for,
             thinking_for=config.thinking_for,
             payloads_path=config.payloads_path,
+            toolset_of=self._toolset_of,
         )
         self._scheduler = scheduler
         self._store = store
         self._config = config
         # A per-conversation agent cache. Assigned by create() once the registry's builder can bind
-        # self._approve; agents are built lazily, by which point it exists.
+        # self._gate_for; agents are built lazily, by which point it exists.
         self._registry: Optional[AgentRegistry] = None
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
@@ -141,11 +146,13 @@ class Assistant:
         # Tool approval and a workflow's own decision: each a single-slot request the serve loop
         # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
         # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
+        self._policies_lock = threading.Lock()
         self._human = HumanGate(
             self._ui,
             active_id=lambda: self._book.active_id,
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
+            toolset_of=self._toolset_of,
         )
         # Reads, applies, and persists the runtime-mutable settings. Reaches the live state through a
         # callback rather than holding it, since it does not exist yet (see create()).
@@ -167,11 +174,18 @@ class Assistant:
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
             spawn_title=self._spawn_title,
+            reporter=self._subagent_reporter,
+            toolset_of=self._toolset_of,
         )
         # The background title writers still in flight (see `core/titles.py`). Held so shutdown can
         # end them: a task that outlives `self._store.close()` writes to a closed file, out of a task
         # nobody is watching -- the same failure invariant 7 in `core/turns.py` describes for turns.
         self._title_tasks: set[asyncio.Task] = set()
+        # The event loop `start()` ran on, and the alerts scheduled onto it from worker threads (see
+        # `_alert_soon`). Held so an unreferenced task is not collected before it runs, and so shutdown
+        # can cancel them (see `_cancel_alerts`).
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._alert_tasks: set[asyncio.Task] = set()
         # Whether `start()` has run. Set before its body rather than after, so a failed start is
         # terminal for this assistant instead of leaving a retry that would connect every MCP server
         # a second time. Both front ends abort on that failure, which is what makes terminal the
@@ -223,7 +237,7 @@ class Assistant:
 
         scheduler = Scheduler()
         # Construct the assistant first so the registry's builder can bind its approval gate: agents are
-        # built lazily (on first get), by which point assistant._approve exists.
+        # built lazily (on first get), by which point assistant._gate_for exists.
         assistant = cls(channel, scheduler, store, config)
         assistant._workflows = commands
         assistant._undeclared_workflow_commands = undeclared_commands
@@ -268,7 +282,7 @@ class Assistant:
             turn_running=assistant.turn_running,
             schedule_rename=assistant.schedule_rename,
             stop_task_runs=assistant.stop_task_runs,
-            tool_approval=assistant._approve,
+            gate_for=assistant._gate_for,
             reapply_config=assistant._settings.apply_one,
             observer=assistant._subagent_reporter,
             registry=registry,
@@ -276,6 +290,8 @@ class Assistant:
         )
         # Assigned after construction because it closes over assistant._registry, which is built below it.
         state.for_each_agent = for_each_agent
+        state.toolset_built = assistant._on_toolset_built
+        state.alert_soon = assistant._alert_soon
         assistant._state = state
         assistant._tasks = state.tasks
         # The workflow context needs the shared toolset state, which does not exist until here.
@@ -315,8 +331,10 @@ class Assistant:
         if self._started:
             return
         self._started = True
+        self._loop = asyncio.get_running_loop()
         # Imported here, not at module level, for the cycle `create` documents above.
-        from kokua.core.agents import configured_but_undeclared, resolve_confirm_tools
+        from kokua.core.agents import configured_but_undeclared, shadowed_tools
+        from kokua.core.approval import resolve_approval_policies
 
         config, state = self._config, self._state
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
@@ -326,11 +344,11 @@ class Assistant:
         await reconnect_mcp_servers(
             state.for_each_agent, state.connections, config, notify=state.notify, oauth=state.oauth
         )
-        for name in configured_but_undeclared(config):
+        for name in configured_but_undeclared(config, state.registry):
             logger.warning(
                 "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "
                 "read only if a composed worker builds it, and any command it offers does not exist. "
-                "Add %r to [agents.%s].tools.",
+                "Add %r to [agents.%s.tools].available.",
                 name,
                 name,
                 name,
@@ -341,13 +359,28 @@ class Assistant:
         entry_agent = self._registry.get(self._active_id)
         # Last of the startup checks, because it is the first point where every tool this config builds
         # exists: the entry agent's own, and each worker's, built when the delegation tool above was.
-        # It both validates and resolves: a `[security].confirm_tools` entry names a toolset, and the
-        # gate matches a tool name, so the gate cannot answer at all until this has run (see
-        # `HumanGate.gated_tools`).
-        self._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
-        # Resolved from that same vocabulary and against that same answer, because an auto-approval set
-        # that is not a subset of the gated set describes a prompt that never existed.
-        self._human.auto_approval = resolve_auto_approval(config, state, entry_agent, self._human.gated_tools)
+        # It both validates and resolves: a policy entry names a toolset, and the gate matches a tool
+        # name, so no gate can answer at all until this has run (see `HumanGate.policies`).
+        with self._policies_lock:
+            policies = resolve_approval_policies(config, state, entry_agent)
+            # Resolved from the same policies, because a review entry is itself a gate: the reviewer can
+            # only be asked about tools a policy already stops. In the same lock so a deferred build
+            # never sees one assigned without the other.
+            self._human.auto_approval = resolve_auto_approval(config, state, entry_agent, policies)
+            self._human.policies = policies
+
+        # After every startup build, since only then does `tools_by_toolset` hold what each resident
+        # toolset offered. Once, here, because a shadow is a fact about the declaration, not about a turn.
+        # Guarded per notice, because `_started` is already set: a channel that raises here must not leave
+        # scheduled tasks unarmed with a retry of `start` a no-op. A notice is never worth that.
+        for shadow in shadowed_tools(config, state.registry, state.tools_by_toolset):
+            try:
+                await self._ui.alert(
+                    f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} is shadowed by {shadow.kept!r} "
+                    "(the earlier resident toolset keeps the name)."
+                )
+            except Exception:
+                logger.warning("Could not raise the shadowed-tool notice for %s.", shadow, exc_info=True)
 
         state.tasks.arm_all()
 
@@ -620,6 +653,16 @@ class Assistant:
         """The effective runtime settings, in the wire shape a settings client reads."""
         return self._settings.current()
 
+    def current_models(self) -> dict:
+        """Which models this session runs on, as fields for a front end that renders its own words.
+
+        Startup-only, unlike ``current_settings`` above: ``[assistant].model`` and each
+        ``[agents.<name>].model`` are read as the agents are built, so this answer holds for the life of
+        the process and a front end can paint it once. Safe to call only once ``start()`` has returned
+        (see ``build.model_record``).
+        """
+        return model_record(self._config)
+
     async def apply_settings(self, incoming: dict) -> None:
         """Apply an incoming settings payload at runtime and persist it to config.toml."""
         await self._settings.apply_and_persist(incoming)
@@ -757,6 +800,7 @@ class Assistant:
                 task.cancel()
             if self._title_tasks:
                 await asyncio.gather(*list(self._title_tasks), return_exceptions=True)
+            await self._cancel_alerts()
             for conn in self._mcp_servers:
                 try:
                     await conn.client.aclose()
@@ -809,7 +853,7 @@ class Assistant:
                         workflow = candidate
                     elif word in self._undeclared_workflow_commands:
                         # An installed toolset offers /word, just not to this entry agent -- e.g. a
-                        # config that predates naming "planning" in [agents.<entry>].tools. Answered
+                        # config that predates naming "planning" in [agents.<entry>.tools].available. Answered
                         # here instead of falling through to a plain turn, which would otherwise run
                         # the model on the literal "/word <task>" string and persist that into history.
                         # Deliberately narrow to a word some installed workflow actually offers: a
@@ -819,7 +863,7 @@ class Assistant:
                         toolset_name = self._undeclared_workflow_commands[word]
                         await self._ui.send(
                             f"The {toolset_name!r} toolset offers /{word}, but no agent declares it. "
-                            f"Add {toolset_name!r} to [agents.{self._config.entry_agent}].tools in "
+                            f"Add {toolset_name!r} to [agents.{self._config.entry_agent}.tools].available in "
                             "your config.toml."
                         )
                         continue
@@ -962,8 +1006,76 @@ class Assistant:
         """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""
         self._cancel_turn(self._active_id)
 
-    async def _approve(self, name: str, arguments: dict) -> bool:
-        return await self._human.approve(name, arguments)
+    def _gate_for(self, agent_name: str) -> Callable:
+        """The approval hook for one agent: the shared gate with that agent's name bound in.
+
+        A partial rather than a closure so the binding is visible on the object (``.args``), and so
+        every agent, delegated or composed, reaches the same ``HumanGate.approve`` and differs only in
+        whose policy it is judged by.
+        """
+        return functools.partial(self._human.approve, agent_name)
+
+    def _toolset_of(self, agent_name: Optional[str], tool: str) -> Optional[str]:
+        """Which toolset gave ``agent_name`` the tool called ``tool``; see ``core.agents.toolset_of``.
+
+        ``None`` before ``create`` has built the live state, which no tool call can precede.
+        """
+        # Imported here, not at module level: see the comment on the import in `create`.
+        from kokua.core.agents import toolset_of
+
+        return toolset_of(self._state, agent_name, tool) if self._state is not None else None
+
+    def _alert_soon(self, text: str) -> None:
+        """Raise ``text`` as an alert from any thread, doing nothing until ``start`` has captured the loop.
+
+        A deferred toolset builds in a worker thread, where ``ChannelUI.alert`` (a coroutine) cannot be
+        awaited, so the call is handed to the loop that owns the channel. Dropping the alert before
+        ``start`` is deliberate: nothing can load a toolset before an agent exists, so only a caller
+        outside the serve path reaches that state, and it has no one to alert.
+        """
+        loop = self._loop
+        if loop is None:
+            return
+
+        def schedule() -> None:
+            task = loop.create_task(self._ui.alert(text))
+            self._alert_tasks.add(task)
+            task.add_done_callback(self._alert_tasks.discard)
+
+        try:
+            loop.call_soon_threadsafe(schedule)
+        except RuntimeError:
+            # The loop has closed (shutdown). This runs inside a group build's error path, so raising
+            # here would replace the real build error in the text the model reads.
+            logger.debug("Dropping alert, the event loop is closed: %s", text)
+
+    async def _cancel_alerts(self) -> None:
+        """Cancel alerts still waiting to be raised: one must not outlive the channel it would write to."""
+        for task in list(self._alert_tasks):
+            task.cancel()
+        if self._alert_tasks:
+            await asyncio.gather(*list(self._alert_tasks), return_exceptions=True)
+
+    def _on_toolset_built(self, toolset: str, tool_names: frozenset[str]) -> None:
+        """Resolve the approval entries waiting on ``toolset``, now that it has built its tools.
+
+        Called from ``build_tools`` before the tools reach any agent, so a gate holds from the first
+        moment a tool can be called, whoever built it. A no-op until ``start`` has resolved the policies:
+        every build before that is a startup build, and the startup resolution covers it. A deferred
+        build runs in a worker thread, so the swap is under a lock that also covers the read: two
+        builds finishing together each resolve against the other's result instead of overwriting it.
+        """
+        with self._policies_lock:
+            current = self._human.policies
+            if current is None:
+                return
+            updated = current.with_built(toolset, tool_names)
+            # Both are computed before either is assigned, so a build the floor refuses leaves the old
+            # policies and the old auto-approval state exactly as they were.
+            auto = self._human.auto_approval
+            updated_auto = auto.with_built(updated, toolset, tool_names) if auto is not None else None
+            self._human.policies = updated
+            self._human.auto_approval = updated_auto
 
     async def _handle(
         self, msg: ChannelMessage, *, conversation_id: str, workflow=None, tid: Optional[int] = None
@@ -975,7 +1087,7 @@ class Assistant:
             self._tracker,
             self._gate,
             config=self._config,
-            entry_model=model_label(self._config, self._config.entry_agent),
+            models=self.current_models(),
             pending_approval=self._human.approval.pending,
             pending_decision=self._human.decision.pending,
         )

@@ -9,6 +9,9 @@ in memory (re-auth every process). For a chat assistant we want two changes:
 - **Persist tokens to disk** so authorizing once survives restarts and reconnects are silent.
 - **Let the callback be placed** (:class:`OAuthSettings`), since FastMCP's default assumes the
   browser runs on the same machine as the client and Kokua is often reached over a network.
+- **Refuse a callback address Kokua cannot listen on** (:class:`CallbackUnavailable`), before the
+  link is posted. FastMCP binds the callback server only after the browser has been sent off, and
+  a failed bind exits through uvicorn's ``sys.exit``, which took the whole process down with it.
 
 ``ChatOAuth`` is a thin ``fastmcp`` ``OAuth`` subclass wired with a persistent ``FileTreeStore``
 and a ``notify`` callback; ``build_chat_oauth`` constructs one for a URL from an
@@ -18,9 +21,13 @@ and a ``notify`` callback; ``build_chat_oauth`` constructs one for a URL from an
 
 from __future__ import annotations
 
+import asyncio
+import errno
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol
+from urllib.parse import urlsplit
 
 from fastmcp.client.auth.oauth import OAuth
 from key_value.aio.stores.filetree import (
@@ -63,6 +70,63 @@ class OAuthSettings:
     callback_port: Optional[int] = None
 
 
+class CallbackUnavailable(Exception):
+    """Kokua cannot listen at the address the provider will send the approved browser to.
+
+    Its message is user-facing and actionable. ``cause`` is the bind failure, or ``None`` when the
+    callback server failed to start without saying why (uvicorn logs the error and exits instead).
+    The common case is a pinned ``oauth_callback_port`` that another program on the machine already
+    holds, and it is worse than a failed connection: the approved browser lands on *that* program,
+    which receives the authorization code.
+    """
+
+    def __init__(self, host: str, port: int, cause: Optional[OSError]):
+        if cause is not None and cause.errno != errno.EADDRINUSE:
+            message = (
+                f"Kokua cannot listen for the OAuth approval on {host}:{port} ({cause.strerror or cause}). "
+                "Check [mcp].oauth_callback_host and oauth_callback_port in config.toml, then connect again."
+            )
+        else:
+            reason = (
+                "another program is already listening there"
+                if cause is not None
+                else "its callback server failed to start"
+            )
+            message = (
+                f"Kokua cannot receive the OAuth approval on {host}:{port}: {reason}. Set "
+                "[mcp].oauth_callback_port in config.toml to a free port (and forward that port instead, if "
+                "you reach Kokua over SSH), then connect again."
+            )
+        super().__init__(message)
+        self.host = host
+        self.port = port
+        self.cause = cause
+
+
+def _bind_error(host: str, port: int) -> Optional[OSError]:
+    """Bind ``host:port`` the way the callback server will, and return why it cannot, or ``None``.
+
+    Every address the host resolves to is tried, because asyncio's ``create_server`` binds them all
+    and a conflict on any one (``::1`` as well as ``127.0.0.1`` for ``localhost``) fails the whole
+    server. ``SO_REUSEADDR`` matches what asyncio sets, so a socket lingering in ``TIME_WAIT`` from a
+    previous flow does not read as taken; a live listener still does.
+    """
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
+    except OSError as exc:
+        return exc
+    for family, kind, protocol, _, address in addresses:
+        with socket.socket(family, kind, protocol) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                probe.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            try:
+                probe.bind(address)
+            except OSError as exc:
+                return exc
+    return None
+
+
 class ChatOAuth(OAuth):
     """OAuth provider that also posts the authorization link into the chat channel."""
 
@@ -81,8 +145,29 @@ class ChatOAuth(OAuth):
         """
         return str(self.context.client_metadata.redirect_uris[0])
 
+    @property
+    def _callback_address(self) -> tuple[str, int]:
+        """The host and port the callback server binds, taken from :attr:`_callback_url` so the check
+        and the redirect cannot disagree. ``hostname`` drops an IPv6 host's brackets, as a bind needs."""
+        callback = urlsplit(self._callback_url)
+        return callback.hostname or "", callback.port
+
+    async def _callback_unavailable(self, cause: Optional[OSError]) -> CallbackUnavailable:
+        """Tell the user why authorization cannot finish, and return the error to raise."""
+        error = CallbackUnavailable(*self._callback_address, cause)
+        await self._notify(str(error))
+        return error
+
     async def redirect_handler(self, authorization_url: str) -> None:
-        """Post the auth URL to the chat, then run the default browser-open + pre-flight."""
+        """Check the callback can be received, post the auth URL to the chat, then run the default
+        browser-open + pre-flight.
+
+        The check comes first because FastMCP binds the callback server only after this returns, by
+        which point the user has been sent to approve a flow whose code nothing here can receive.
+        """
+        cause = await asyncio.to_thread(_bind_error, *self._callback_address)
+        if cause is not None:
+            raise await self._callback_unavailable(cause)
         await self._notify(
             f"To connect, authorize access here: {authorization_url}\n"
             f"After you approve, your browser is sent to {self._callback_url}, where Kokua is "
@@ -93,6 +178,22 @@ class ChatOAuth(OAuth):
         # super() performs the stale-client pre-flight check and webbrowser.open(). Run it after
         # posting the link so the user always has the URL even if the browser does not open.
         await super().redirect_handler(authorization_url)
+
+    async def callback_handler(self) -> tuple[str, Optional[str]]:
+        """Run FastMCP's callback server, turning a failure to start it into :class:`CallbackUnavailable`.
+
+        The check in :meth:`redirect_handler` makes this rare (something has to take the port in the
+        moment between the two), but its cost is the whole process: uvicorn reports a failed bind by
+        calling ``sys.exit(1)``, and the ``SystemExit`` passes every ``except Exception`` between here
+        and the event loop. Within this call the callback server is the only thing that can raise one.
+        """
+        try:
+            return await super().callback_handler()
+        except BaseExceptionGroup as group:
+            if group.subgroup(SystemExit) is None:
+                raise
+            cause = await asyncio.to_thread(_bind_error, *self._callback_address)
+            raise await self._callback_unavailable(cause) from group
 
 
 def build_chat_oauth(url: str, *, notify: Notify, oauth: OAuthSettings) -> ChatOAuth:

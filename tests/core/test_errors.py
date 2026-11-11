@@ -67,8 +67,8 @@ async def test_proactive_surfaces_connection_error_without_raising(tmp_path):
 
     await assistant._proactive("remind")  # must not raise; a scheduler crash is the failure mode
 
-    assert len(channel.sent) == 1
-    assert "Connection refused" in channel.sent[0]
+    assert len(channel.sent) == 2  # the loop's ending line, then the explanation
+    assert "Connection refused" in channel.sent[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +125,6 @@ async def test_proactive_surfaces_a_refusal_without_raising(tmp_path):
 
     await assistant._proactive("remind")
 
-    assert len(channel.sent) == 1
-    assert "declined" in channel.sent[0]
-    assert "task failed" not in channel.sent[0], "a refusal read as a generic task failure"
+    assert len(channel.sent) == 2  # the loop's ending line, then the explanation
+    assert "declined" in channel.sent[-1]
+    assert "task failed" not in channel.sent[-1], "a refusal read as a generic task failure"

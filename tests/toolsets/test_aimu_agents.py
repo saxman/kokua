@@ -20,6 +20,7 @@ from kokua.config import AssistantConfig
 from kokua.plugins import Toolset
 from kokua.registry import LiveState, ToolsetContext
 from kokua.toolsets import aimu_agents
+from tests.helpers import allow_all_gates
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -77,11 +78,11 @@ def test_toolset_tools_reach_an_agent_that_names_the_toolset(tmp_path):
     cfg = _assistant_config(
         tmp_path,
         agents={
-            "assistant": AgentConfig(tools=["time"], delegates_to=["reviewer"]),
-            "reviewer": AgentConfig(description="Reviews.", tools=["aimu_agents"]),
+            "assistant": AgentConfig(available=["time"], delegates_to=["reviewer"]),
+            "reviewer": AgentConfig(description="Reviews.", available=["aimu_agents"]),
         },
     )
-    state = LiveState(config=cfg, registry=build_registry(cfg))
+    state = LiveState(gate_for=allow_all_gates, config=cfg, registry=build_registry(cfg))
     names = {fn.__name__ for fn in build_agent_specs(cfg, state, "assistant")["reviewer"]["tools"]}
     assert {"code_review", "research_report", "create_content"} <= names
 
