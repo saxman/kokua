@@ -1623,7 +1623,7 @@ reasoning is more text it generated.</p>
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a>, is one
 tool and the declaration that offers it, trimmed here to those two things:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>    <span class="nd">@tool</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">generate_image</span><span class="p">(</span><span class="n">prompt</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">generate_image</span><span class="p">(</span><span class="n">prompt</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">        </span><span class="sd">"""Generate an image from a text prompt; the image is shown to the user and saved.</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="sd">        This tool is offered only when AIMU_IMAGE_MODEL is configured, so seeing it means one is set.</span>
@@ -1634,23 +1634,26 @@ tool and the declaration that offers it, trimmed here to those two things:</p>
 </span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="sd">            prompt: A description of the desired image.</span>
 </span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="sd">        """</span>
 </span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="o">...</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">"Generated image, shown to the user inline (/images/</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">)."</span>
-</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">generate_image</span><span class="p">]</span>
-</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="k">await</span> <span class="n">publish</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>  <span class="c1"># the file reaches the user here (core/artifacts.py)</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="k">yield</span> <span class="n">_final</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Generated image, shown to the user (</span><span class="si">{</span><span class="n">reference</span><span class="si">}</span><span class="s2">)."</span><span class="p">)</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">generate_image</span><span class="p">]</span>
 </span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
-</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="n">TOOLSET</span> <span class="o">=</span> <span class="n">Toolset</span><span class="p">(</span>
-</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"image"</span><span class="p">,</span>
-</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">"Generate images from a text prompt (needs the AIMU_IMAGE_MODEL environment variable set)."</span><span class="p">,</span>
-</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="n">build</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">build</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="p">),</span>
-</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="p">)</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">TOOLSET</span> <span class="o">=</span> <span class="n">Toolset</span><span class="p">(</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"image"</span><span class="p">,</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">"Generate images from a text prompt (needs the AIMU_IMAGE_MODEL environment variable set)."</span><span class="p">,</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="n">build</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">build</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">config</span><span class="p">),</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>Read it as three separate contracts. The signature, <code>prompt: str</code>, becomes the parameter schema. The
 docstring's first paragraph becomes the tool's description, and its <code>Args:</code> section becomes the
 description of <code>prompt</code>; both are what the model reads when deciding whether this tool answers the
-question in front of it. The <code>return</code> is a string because the result is going into the conversation as a
-message, so it is written to be read: it tells the model the image was already shown, which stops it
-from trying to show it again.</p>
+question in front of it. The final text the tool yields is a string because the result is going into the
+conversation as a message, so it is written to be read: it tells the model the image was already shown,
+which stops it from trying to show it again. That sentence is only for the model. The image reaches the
+person another way: the tool <em>publishes</em> the file to the running turn (<code>core/artifacts.py</code>), and the
+turn shows it, so nothing depends on the model or the channel noticing a reference in the text.</p>
 <p>The second paragraph is worth reading twice on a page arguing that a docstring is a promise, because an
 earlier version of it broke one. That version told the model that without <code>AIMU_IMAGE_MODEL</code> the tool
 "reports that generation is unavailable". It never did: <code>build()</code> returns an empty list when that

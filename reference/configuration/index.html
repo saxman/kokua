@@ -3508,7 +3508,7 @@ policy's <code>review</code> list. Off by default, and the whole sub-table is st
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">reviewers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"approval"</span><span class="p">]</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">max_per_turn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">max_per_turn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
 </span></code></pre></div>
 <p><strong>This is a convenience layer, not a security boundary.</strong> It reduces prompts; it contains nothing. The
 one property it does guarantee is narrow and structural: a review can only turn a prompt into an
@@ -3549,7 +3549,7 @@ reviewer whose token cost is not counted).</p>
 <tr>
 <td><code>max_per_turn</code></td>
 <td>integer &gt;= 1</td>
-<td><code>5</code></td>
+<td><code>10</code></td>
 <td>most auto-approvals one turn may collect</td>
 </tr>
 </tbody>
@@ -3573,8 +3573,11 @@ under a timeout, with an import allowlist and restricted builtins that put <code
 narrow that list, <code>run_command</code> is the entry to drop.</p>
 <p><code>max_per_turn</code> is per <em>turn</em>, counted across every agent in it, and the budget is spent when a review
 is <strong>attempted</strong>, not when one approves. A model retrying the same rejected call cannot collect one approval per attempt, and a loop
-that keeps being escalated stops costing reviews after the fifth. Each reactive turn gets its own
-budget, so one conversation's loop cannot spend another's.</p>
+that keeps being escalated stops costing reviews after the tenth. Each reactive turn gets its own
+budget, so one conversation's loop cannot spend another's. The default is sized for a turn that
+delegates: a sub-agent spends from its turn's budget rather than opening its own, so one shell-heavy
+worker can use up a small allowance by itself, and every later gated call in that turn then asks you
+as if auto-approval were off.</p>
 <p>An unattended turn (a scheduled task, anything the assistant starts unprompted) is never auto-approved.
 Its gated calls are denied before a reviewer is consulted at all, which is the behavior
 the gate already had and is unchanged by this table.</p>
@@ -3981,10 +3984,13 @@ asked about while it is reviewing one. (The <code>/plan</code> critics are the o
 produced by a tool-using agent, over a curated read-only toolset the workflow fixes in code; this table
 gives it the persona, never the tools. See <a href="../../explanation/architecture/">Architecture</a>.)</p>
 <p><code>[reviewers.approval]</code> additionally refuses a declared <code>thinking</code>, and the error says why: its answer
-comes back through a structured call, which returns JSON and no reasoning on every provider, so a
-reasoning request there could never take effect. An effort inherited from <code>[assistant].thinking</code> is
-inert rather than refused, since that key makes no claim about this reviewer and refusing it would turn
-one global setting into an install-wide bar on enabling the gate.</p>
+comes back through a structured call, which drops a reasoning request on almost every model, because
+structured output there is a forced tool and reasoning cannot ride along. A few recent Anthropic models
+(Fable 5.x, Opus 5.5, Sonnet 5.5) answer through native JSON output instead and keep the request, but
+nothing tells Kokua which kind a model is, so a declared effort would work on those and be dropped
+silently everywhere else. An effort inherited from <code>[assistant].thinking</code> is not refused, since that key
+makes no claim about this reviewer and refusing it would turn one global setting into an install-wide
+bar on enabling the gate: it is dropped on most models and spent on those few.</p>
 <p><strong>This whole section is locked by default</strong>, like <code>[agents.*]</code> and for the same reason: <code>update_config</code>
 is a tool the assistant holds, and a reviewer's prompt decides how the assistant's own work is judged.
 See <a href="#who-may-change-which-key">who may change which key</a>.</p>

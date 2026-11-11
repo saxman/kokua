@@ -2402,6 +2402,23 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 <strong>not</strong> cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
 persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 <code>delete_conversation</code> cancels, and only the deleted conversation's own turn.</p>
+<p>Anything that stops to ask the user something therefore has one question to keep asking first: is the
+turn it belongs to still the conversation on screen? A gated tool call asks it most often, and a
+workflow's own question (a plan review) asks it too, since a <code>plan_review</code> frame is no more muted than
+an <code>approval</code> one and would otherwise put one turn's question to another turn's reader; a workflow
+that cannot ask takes the safe answer it named for an abandoned request, and says so on a card in the
+words the workflow supplied, since only the asker knows what it was asking.</p>
+<p>For a gated call, <code>HumanGate.approve</code> asks at each of the three points the answer can have gone
+stale, and each window is wider than the last: when the call arrives, after the reviewer's model
+call, and once the single approval slot is finally held. The third is the one that is easy to miss.
+Tool calls in a round are dispatched concurrently (<code>[assistant].concurrent_tools</code>) while the approval
+slot is single and lock-guarded, so a round's second gated call waits inside <code>PendingRequest.ask</code> for
+as long as the user takes to answer the first. A switch during that wait abandons only the request
+holding the slot, and without the third check the call queued behind it would go on to ask: an
+<code>approval</code> frame is never muted, so the page would draw that question into whatever transcript is now
+on screen, and an Allow there would run the tool on a turn nobody is watching. The frame carries its
+conversation for the reason an <code>auto_approval</code> card does, so a prompt that raced even that last check
+is dropped by the page rather than shown to the wrong reader.</p>
 <p>The approval gate has one optional layer above it, off by default:
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py"><code>core/auto_approval.py</code></a>.
 A declared reviewer answers three questions and writes one sentence about a gated call, and
@@ -3554,12 +3571,23 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.38.0</code></strong>, for two capabilities. <code>calculate</code> evaluates an allowlisted syntax
+<p>The floor is now <strong><code>aimu&gt;=0.39.0</code></strong>, and the probe is a name lookup on <code>aimu.tools.builtin.make_page_tools</code>,
+the factory the <code>web</code> toolset builds <code>fetch_page</code>, <code>read_page</code>, and <code>find_in_page</code> from. The probe moved
+there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
+<code>aimu_compat._PROBE_UNRELEASED</code> kept the refusal from recommending the PyPI install that had just failed.
+The same release makes <code>trim_messages</code> keep the first message after the system prompt (<code>keep_first</code>,
+default 1), which is a spawned worker's task, so a worker compacted by <code>compaction_for_window</code> no longer
+loses its assignment first. That change is silent when missing and has a signature handle, but the probe
+stays on <code>make_page_tools</code>: every AIMU commit between the two features reports 0.38.0, so the floor
+already refuses them, and <code>tests/test_aimu_compat.py</code> pins the behavior. 0.39.0 is also the release in
+which an Ollama client stopped downloading a missing model when built, so a missing model now reaches a
+turn as <code>ModelNotInstalledError</code>, which <code>core/turns.py</code> reports beside an unreachable server.</p>
+<p>Before it, the floor was <code>aimu&gt;=0.38.0</code>, for two capabilities. <code>calculate</code> evaluates an allowlisted syntax
 tree instead of <code>eval</code> with an empty builtins dict, which any expression could climb out of to reach
 <code>os</code>, and the shipped approval policy leaves <code>compute.calculate</code> ungated on the premise that it runs no
 code of the model's. And a spawn leads a worker's result with a note when its round cap ended it, which
 is how the delegating agent learns the answer is partial. Neither has a symbol, parameter, or set member
-to probe, so the probe stays on <code>RunEvent.run_id</code> and the floor covers both, pinned by behavior in
+to probe, so the probe stayed on <code>RunEvent.run_id</code> and the floor covered both, pinned by behavior in
 <code>tests/test_aimu_compat.py</code>.</p>
 <p>Before it, the floor was <code>aimu&gt;=0.37.0</code>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is
 what lets each agent's tool calls be judged by its own approval policy. The probe did not move: that key
@@ -3730,6 +3758,16 @@ CLI <code>/attach</code>) and generated images live under <code>images_path</cod
 persisted session must stay small and a localhost URL is not fetchable by the provider, so
 <code>core/messages.py</code> rewrites data URLs to references on persist and re-inlines them before each
 <code>agent.restore</code>.</p>
+<p>A generated image reaches the user by being <em>published</em>, not returned. A tool result has two
+audiences: the model reads the text the tool returns, and the person wants the file. <code>core/artifacts.py</code>
+is the second half: the running turn's <code>ArtifactSink</code>, bound through a ContextVar like
+<code>subagent_events</code>, records the file and shows it through <code>ChannelUI.show_artifact</code> (an <code>artifact</code> frame
+on the web, an "Image saved: <path>" line in the terminal). Because a spawned worker inherits the turn's context, a
+worker's image reaches the page with no plumbing through the spawn, which is what its own stream could
+not do: that stream ends at its card. The turn persists the records under
+<code>metadata["artifacts"][&lt;user index&gt;]</code>, each with the message it was published after, and replay places
+it there. The image toolset moves AIMU's timestamp-named output to its content address
+(<code>images.adopt_file</code>) before publishing, so generated images are stored by content like uploads.</p>
 <h2 id="payloads">Payloads<a class="headerlink" href="#payloads" title="Permanent link">&para;</a></h2>
 <p><code>payloads.py</code> solves the same problem <code>images.py</code> does, for oversized text instead of image bytes:
 content-addressed filenames under <code>payloads_path</code> (the sha256 of the UTF-8 text, so identical content
@@ -3852,9 +3890,9 @@ than a shared one.</p>
 <code>channels/web.py</code>'s <code>WebChannel</code> subclasses
 <a href="https://saxman.info/aimu/how-to/build-personal-assistant/">AIMU's base <code>WebChannel</code></a>. The streaming transport
 (<code>token</code>/<code>thinking</code>/<code>tool</code>/<code>done</code> frames and <code>send()</code>) lives in AIMU's base; Kokua's subclass adds the
-frames its richer page needs, among them <code>conversations</code>, <code>history</code>, <code>approval</code>, <code>turn_saved</code>,
-<code>models</code>, and <code>inbox</code>. The UI is a single self-contained <code>web_static/index.html</code> served as package data, plus
-vendored <code>marked</code> + <code>DOMPurify</code>
+frames its richer page needs, among them <code>conversations</code>, <code>history</code>, <code>approval</code>, <code>prompt_retired</code>,
+<code>turn_saved</code>, <code>models</code>, and <code>inbox</code>. The UI is a single self-contained <code>web_static/index.html</code> served as
+package data, plus vendored <code>marked</code> + <code>DOMPurify</code>
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with <code>trust:false</code> once the turn completes. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under <code>/fonts/</code>.</p>
@@ -3892,6 +3930,14 @@ on a plain string, and the commonest message of all is the one that most needs n
 <code>frontends/web.py</code>'s <code>_parse_input</code> decodes it and <code>WebChannel.feed_input</code> queues it; both shapes
 converge on one <code>ChannelMessage</code> in <code>receive</code>, so nothing downstream knows which path a message took,
 and a frame's text is read exactly as a bare one's, commands and all.</p>
+<p>A reply that matches no outstanding request is not an error, it is an ordinary message, so a control
+that outlives its question is a real hazard rather than a dead button: clicking Allow on a closed prompt
+turns <code>y</code> into a turn saying "y". The <code>prompt_retired</code> frame is what closes one. It is sent from
+<code>PendingRequest.ask</code>'s <code>finally</code>, so it covers all four ways a question stops waiting (answered by a
+click, answered by a typed reply, abandoned by a switch, cancelled with its turn by <code>/stop</code>) rather than
+the one the page can see for itself, and the page disables the card's controls without removing the card,
+which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
+so <code>ChannelUI.retire_prompt</code> is silence there.</p>
 <h3 id="reading-the-socket-and-applying-what-arrives">Reading the socket, and applying what arrives<a class="headerlink" href="#reading-the-socket-and-applying-what-arrives" title="Permanent link">&para;</a></h3>
 <p><code>pump</code> is two tasks over one queue: one reads the WebSocket, one applies frames in arrival order. They are
 split because they fail differently. Applying a frame can take arbitrarily long, since a control that
@@ -4255,7 +4301,8 @@ through <code>core/__init__</code> -&gt; <code>assistant.py</code> -&gt; this mo
 export renders the same items as prose instead.</p>
 <p>Muting a background turn happens per frame, in <code>WebChannel.send_frame</code>, which every live frame passes
 through. The rule is a property of the frame's <em>type</em>: the <code>_TURN_FRAMES</code> set is turn output (tokens,
-thinking, tool calls, the message, <code>done</code>, loop markers, images, plan bubbles, phases, sub-agent cards)
+thinking, tool calls, the message, <code>done</code>, loop markers, mid-turn <code>inbox</code> messages, artifacts, plan
+bubbles, phases, sub-agent cards, and the <code>request</code> and <code>ending</code> markers behind the round buttons)
 and is dropped when <code>streaming_conversation</code> names a conversation other than the one being viewed;
 everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out

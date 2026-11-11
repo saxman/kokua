@@ -1840,9 +1840,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.38.0 or newer, plus the page tools the
-<code>web</code> toolset builds, which are on AIMU's main branch and in no release until 0.39.0. Until it is published,
-Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.39.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -2636,10 +2634,16 @@ Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.</p>
   so a channel still implementing the older form raises <code>TypeError</code> the first time a gated call asks. A
   channel that does not show who is asking can accept and ignore it, which is what adding <code>agent=None</code>
   to the signature does. It is keyword-only for the reason <code>send_turn_saved</code>'s <code>token</code>
-  is.
-- <strong>The AIMU floor is 0.38.0</strong>, for a <code>calculate</code> that evaluates arithmetic and nothing else (it was an
+  is. <strong><code>send_approval_request</code> and <code>send_plan_review_request</code> also take <code>conversation_id</code></strong>, passed
+  the same way, so the page can drop a prompt that raced a conversation switch; a channel that files
+  nothing against a transcript accepts it as <code>conversation_id=None</code> and ignores it. <code>send_prompt_retired()</code>
+  is new and optional, like every rich frame: a channel without it gets no retirement, which is right
+  for one whose prompt is a printed line.
+- <strong>The AIMU floor is 0.39.0</strong>, for the page tools the <code>web</code> toolset builds (<code>make_page_tools</code>) and for a
+  compaction that keeps a worker's task (see <code>context_length</code> under Configuration). Before it the floor
+  was 0.38.0, for a <code>calculate</code> that evaluates arithmetic and nothing else (it was an
   escapable <code>eval</code>, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
-  of a worker cut off at its round cap. Before it the floor was 0.37.0, for the spawn spec's
+  of a worker cut off at its round cap. Before that it was 0.37.0, for the spawn spec's
   <code>"tool_approval"</code> key and for <code>ToolGroup</code>, which residency rides. See the floor history under
   "Diagnostics and error reporting" below.
 - <strong>A delegating agent hears when its worker ran out of rounds.</strong> A worker's forced wrap-up answer
@@ -3360,7 +3364,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   explicit plan -- which tools, skills, and MCP services to use, what to search for, where to author a
   skill or connect a server -- and then executes it. Planning is scratch work kept out of the saved
   conversation, which stores your actual request and the answer.</li>
-<li><strong><code>plan_review</code></strong> pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.</li>
+<li><strong><code>plan_review</code></strong> pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.
+  A question is only put to someone who is there to answer it, the rule the tool-approval gate follows:
+  a planned turn the user has switched away from takes the workflow's own safe answer (reject, for this
+  one) and raises an alert card naming the conversation, rather than drawing its Approve / Edit / Reject
+  into whatever transcript is on screen, and an unattended turn is never asked at all. The frame carries
+  its conversation, so the page can drop a question that raced that check.</li>
 <li><strong>Adversarial plan and result review</strong> (both off by default): an independent, context-free reviewer
   agent -- a fresh client seeing only the request plus the plan or answer -- critiques the plan and/or
   the final result. <code>plan_review_agent</code> re-plans on rejection up to <code>review_rounds</code>, surfacing leftover
@@ -3641,7 +3650,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
   <code>tests/core/test_delegation.py</code> pins the asymmetry. Needs <code>aimu&gt;=0.31.0</code>, which added the <code>compaction</code>
   factory argument and the matching <code>"compaction"</code> entry in <code>SUBAGENT_SPEC_KEYS</code>; it is also the surface
-  the startup preflight's capability probe now grips. A stored conversation,
+  the startup preflight's capability probe then gripped. <strong>The trim keeps the worker's task.</strong> AIMU
+  0.39.0's <code>trim_messages</code> protects the first message after the system prompt by default, which in a
+  spawned worker is the task its delegator handed it. Before that a trim dropped oldest-first, so the
+  task was the first thing to go, and a compacted worker carried on with its system message and recent
+  tool traffic, answering a question it could no longer see. A task too long to fit beside the recent
+  messages is still kept, so a worker handed a very large task can still fill its window. A stored conversation,
   a scheduled task's included, is never compacted: the user can still open and read it.
   Two things worth knowing about the parameters themselves: <code>max_tokens</code> caps <em>generated</em> tokens while
   <code>context_length</code> sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
@@ -3806,12 +3820,17 @@ alone. The case that does cost something is a configured MCP server, which conne
 <h3 id="images">Images<a class="headerlink" href="#images" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Attach images and the assistant reads them (needs a vision-capable model); it can generate them when
-  <code>AIMU_IMAGE_MODEL</code> is set. In the web UI, attach via the composer's paperclip or by pasting, with
-  thumbnails previewed before send and images rendered inline live and on reload; in the CLI, <code>/attach</code>.</li>
+  <code>AIMU_IMAGE_MODEL</code> is set, and a generated image shows in the transcript live and on reload whichever
+  agent made it, a delegated worker included. In the web UI, attach via the composer's paperclip or by
+  pasting, with thumbnails previewed before send and images rendered inline live and on reload; in the
+  CLI, <code>/attach</code>.</li>
 <li>Uploaded and generated images are stored content-addressed under <code>data/images/</code> and served at
   <code>GET /images/&lt;name&gt;</code>. A conversation keeps only a short <code>/images/&lt;name&gt;</code> reference, so the session
   store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
   localhost URL is not fetchable by the provider.</li>
+<li>Generated images are stored content-addressed like uploads (the image client's own timestamp name is
+  replaced), and each is recorded on the turn that made it, with a readable download name taken from the
+  prompt.</li>
 </ul>
 <h3 id="payloads">Payloads<a class="headerlink" href="#payloads" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3863,7 +3882,13 @@ notice on startup.</p>
   <code>config.update_config</code>; adjust with <code>[security] confirm_tools</code> or <code>--confirm-tools</code> (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
+  are currently viewing. <strong>That question is asked again at every point the answer can have gone stale</strong>,
+  and the widest window is the one easiest to miss: a round's tool calls are dispatched concurrently
+  while the approval slot is single, so its second gated call waits inside the slot for as long as you
+  take to answer the first, and a switch during that wait leaves the question behind it pointed at a
+  reader who is now looking somewhere else. It is denied and raises the card below instead. The prompt
+  frame carries its conversation for the same reason an auto-approval card does, so a page can drop one
+  that raced the last check rather than draw it into the wrong transcript. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
@@ -3872,7 +3897,14 @@ notice on startup.</p>
   <a href="https://github.com/saxman/kokua/issues/7">#7</a>.
   The reply is routed through the single channel reader, so it is safe alongside
   <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
-  cannot overwrite each other.</li>
+  cannot overwrite each other. <strong>A prompt's controls are retired when its question closes</strong>, which is
+  not always something the page can see: a typed <code>y</code> answers without touching the buttons, and a
+  <code>/stop</code> cancels the turn the question belonged to. A reply matching no outstanding request is an
+  ordinary message, so a button outliving its question turns a <code>y</code> into a turn saying "y". The
+  <code>prompt_retired</code> frame is sent from the one place that knows all four endings (<code>PendingRequest.ask</code>'s
+  <code>finally</code>: answered here, answered by a typed reply, abandoned by a switch, cancelled with the turn),
+  and the page disables the card's controls while keeping the card, which is the record of what was
+  asked. A terminal prompt is a printed line with nothing to take back, so it degrades to silence.</li>
 <li><strong>A gate names its toolset, and one that would gate nothing fails startup.</strong> A <code>[security]
   confirm_tools</code> entry is <code>&lt;toolset&gt;</code> for every tool a capability provides, <code>&lt;toolset&gt;.*</code> for the same
   thing said with a wildcard, or <code>&lt;toolset&gt;.&lt;tool&gt;</code> for one; <code>*</code> anywhere else is refused. A reserved
@@ -3914,7 +3946,9 @@ notice on startup.</p>
   gated call a reviewer waved through from one the user approved. An unattended turn is excluded twice
   over: it auto-denies before a reviewer is consulted, and it opens no per-turn budget, so a call
   reaching the reviewer anyway would fail closed. <code>timeout_seconds</code> (default 10) and <code>max_per_turn</code>
-  (default 5, spent when a review is <em>attempted</em>) bound what it can cost. What it does
+  (default 10, spent when a review is <em>attempted</em>) bound what it can cost. The budget is the turn's,
+  sub-agents included, so the default is sized for a delegating turn: at 5, one shell-heavy worker could
+  spend it all, and the rest of the turn asked the user as if the feature were off. What it does
   not do is written down as plainly as what it does, in
   <a href="https://saxman.info/kokua/explanation/auto-approval/">docs/explanation/auto-approval.md</a>: no
   sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most
@@ -4055,15 +4089,16 @@ notice on startup.</p>
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. <code>Inbox</code> joins the probe's job.
-  The check now probes <code>aimu.tools.builtin.make_page_tools</code>, which the <code>web</code> toolset builds and which no
-  AIMU release contains yet. The floor stays at <strong>0.38.0</strong>, because a sibling on AIMU main still reports
-  that version and a 0.39.0 floor would refuse it, so an AIMU installed from PyPI passes the floor and is
-  then refused by the probe. The message says no release has the page tools yet, rather than offering
-  <code>--no-sources</code> and PyPI, the install that just failed. When 0.39.0 ships, the floor moves to it.
+  Today the floor is <strong>0.39.0</strong>, and the check probes <code>aimu.tools.builtin.make_page_tools</code>, which the
+  <code>web</code> toolset builds. The probe moved there before 0.39.0 was published, while the floor still read
+  0.38.0 so a sibling on AIMU main could start, and for that stretch the message said no release had the
+  page tools yet rather than offering <code>--no-sources</code> and PyPI, the install that had just failed. The same
+  release's <code>trim_messages(keep_first=1)</code> default is silent when missing and does not get the probe,
+  because every AIMU commit between the two features reports 0.38.0 and the floor already refuses it.
   Before that the probe was a signature check on <code>RunEvent</code> for <code>run_id</code>, which the floor covers now.
-  Today the floor is <strong>0.38.0</strong>: <code>calculate</code> evaluates an allowlisted syntax tree rather than an escapable
+  Before it the floor was <strong>0.38.0</strong>: <code>calculate</code> evaluates an allowlisted syntax tree rather than an escapable
   <code>eval</code>, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
-  symbol for the startup check to look for, so the check stays where it was and the floor alone covers
+  symbol for the startup check to look for, so the check stayed where it was and the floor alone covered
   both. Before it the floor was <strong>0.37.0</strong>: a spawned worker's spec carries a <code>"tool_approval"</code> key, which is what lets
   each agent's tool calls be judged by its own approval policy; its absence raises loudly, so the startup
   check stays where it was. Residency rides the same release's <code>ToolGroup</code>, and the check skips it for the
@@ -4103,6 +4138,14 @@ notice on startup.</p>
   exception's <code>__cause__</code> chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
   (caused by ... Connection refused)"). Reactive and proactive turns both surface the detail.</li>
+<li><strong>A model the server does not have says which model, where, and how to install it.</strong> Since AIMU 0.39.0
+  an Ollama client no longer downloads a missing model when it is built (which could start a
+  multi-gigabyte download of a newer build, unlogged, once per sub-agent spawn), so naming an uninstalled
+  model now fails at the first request with <code>ModelNotInstalledError</code>. It shares the unreachable-server
+  branch at all three sites, in the web UI and the CLI alike, and the reply is built from the error's
+  <code>model</code> and <code>endpoint</code> ("couldn't use 'qwen3:8b': it is not installed on the model server at
+  http://gpu-box:11434. Install it there (<code>ollama pull qwen3:8b</code> on an Ollama server) and try again"),
+  because AIMU's own message names <code>aimu.pull()</code> and <code>pull=True</code>, which no Kokua user can call.</li>
 <li><strong>A refused request reads as refused, not as a failure.</strong> A model's safety classifiers declining a
   request is not a broken thing to go looking for, so it does not share the generic failure wording.
   Anthropic returns a refusal as HTTP 200 with <code>stop_reason: "refusal"</code> and no content, which AIMU
