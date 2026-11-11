@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.34.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.39.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -354,28 +354,37 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 38, 0)
+MINIMUM_AIMU = (0, 39, 0)
 
 # The surface is `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds beside AIMU's
-# `builtin.web` group, and which no AIMU release contains yet: it is on AIMU's main branch, and 0.39.0
-# will be its first release. That is the first time the probe has gripped something newer than every
-# published AIMU, and it is a deliberate choice rather than a slip: the floor stays at 0.38.0 because an
-# editable sibling on main still reports 0.38.0, and a 0.39.0 floor would refuse it. The cost is that an
-# AIMU installed from PyPI passes the floor and fails here, so Kokua does not start from PyPI alone
-# until 0.39.0 is published. `_PROBE_UNRELEASED` is what keeps the message honest about that: the usual
-# remedy, installing the floor from PyPI, is exactly the install that just failed. When 0.39.0 ships,
-# raise the floor to it and set `_PROBE_UNRELEASED` back to None.
+# `builtin.web` group. It was the first probe to grip something newer than every published AIMU: until
+# 0.39.0 shipped it was only on AIMU's main branch, the floor sat at 0.38.0 so a sibling on main (which
+# still reported 0.38.0) could start, and `_PROBE_UNRELEASED` kept the message from recommending the
+# PyPI install that had just failed. 0.39.0 is published now, so the floor is that release and
+# `_PROBE_UNRELEASED` is back to None. The mechanism stays for the next probe that runs ahead of a release.
 #
 # The shape is a plain name lookup, the seventh time: the factory is a new export, so its presence
-# alone dates a checkout. It also subsumes the probe it replaces, which is why moving the one slot costs
-# nothing here: it landed after every 0.38.0 capability and after 0.36.0's `RunEvent.run_id`, so a
-# sibling that has it has those too. Without the probe, an older AIMU fails at the first `web` build with
-# an `AttributeError`, which is loud but names a symbol rather than the fix.
+# alone dates a checkout. It also subsumed the probe it replaced: it landed after every 0.38.0 capability
+# and after 0.36.0's `RunEvent.run_id`, so a sibling that has it has those too. Without the probe, an older
+# AIMU fails at the first `web` build with an `AttributeError`, which is loud but names a symbol rather than
+# the fix.
+#
+# 0.39.0 also carries a capability Kokua depends on silently, and it does not get the probe. `trim_messages`
+# keeps the first message after the system messages (`keep_first`, default 1), which in a spawned worker is
+# the task it was handed; `compaction_for_window` in `core/agents.py` calls it with no keyword, so before
+# 0.39.0 a worker that compacted dropped its task first and kept answering a question it could no longer
+# see. `keep_first` is a signature handle and landed after `make_page_tools`, which by the usual rule would
+# move the probe. It stays because the window it would close does not exist for anyone the probe serves:
+# AIMU's version string changes only in its release commit, so every sibling between the two features
+# reports 0.38.0 and the floor refuses it. `tests/test_aimu_compat.py` pins the behavior. So does
+# `ModelNotInstalledError`, which `core/turns.py` imports at module scope: an AIMU without it fails at
+# import, which is loud, and 0.39.0 is also the release in which Ollama clients stopped downloading a
+# missing model on construction, so the error is the only way a missing model reaches the user now.
 #
 # `RunEvent.run_id` (a signature check) is the floor's job now, in its turn; `tests/test_aimu_compat.py`
 # pins it, since its failure is the silent kind.
 
-# 0.38.0 raised the floor for two capabilities, neither with a handle, so the probe stays where it is.
+# 0.38.0 raised the floor for two capabilities, neither with a handle, so the probe stayed where it was.
 # `calculate` evaluates an allowlisted syntax tree instead of `eval()` with an empty builtins dict, which
 # any expression could climb out of to reach `os`; the shipped `[assistant.tools]` policy leaves
 # `compute.calculate` ungated on the premise that it runs no code of the model's, and only 0.38.0 makes
@@ -451,7 +460,7 @@ _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None
 #: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
-_PROBE_UNRELEASED: Optional[str] = "0.39.0"
+_PROBE_UNRELEASED: Optional[str] = None
 
 
 class AimuVersionError(RuntimeError):

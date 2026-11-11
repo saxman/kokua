@@ -1313,12 +1313,24 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.38.0`**, for two capabilities. `calculate` evaluates an allowlisted syntax
+The floor is now **`aimu>=0.39.0`**, and the probe is a name lookup on `aimu.tools.builtin.make_page_tools`,
+the factory the `web` toolset builds `fetch_page`, `read_page`, and `find_in_page` from. The probe moved
+there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
+`aimu_compat._PROBE_UNRELEASED` kept the refusal from recommending the PyPI install that had just failed.
+The same release makes `trim_messages` keep the first message after the system prompt (`keep_first`,
+default 1), which is a spawned worker's task, so a worker compacted by `compaction_for_window` no longer
+loses its assignment first. That change is silent when missing and has a signature handle, but the probe
+stays on `make_page_tools`: every AIMU commit between the two features reports 0.38.0, so the floor
+already refuses them, and `tests/test_aimu_compat.py` pins the behavior. 0.39.0 is also the release in
+which an Ollama client stopped downloading a missing model when built, so a missing model now reaches a
+turn as `ModelNotInstalledError`, which `core/turns.py` reports beside an unreachable server.
+
+Before it, the floor was `aimu>=0.38.0`, for two capabilities. `calculate` evaluates an allowlisted syntax
 tree instead of `eval` with an empty builtins dict, which any expression could climb out of to reach
 `os`, and the shipped approval policy leaves `compute.calculate` ungated on the premise that it runs no
 code of the model's. And a spawn leads a worker's result with a note when its round cap ended it, which
 is how the delegating agent learns the answer is partial. Neither has a symbol, parameter, or set member
-to probe, so the probe stays on `RunEvent.run_id` and the floor covers both, pinned by behavior in
+to probe, so the probe stayed on `RunEvent.run_id` and the floor covered both, pinned by behavior in
 `tests/test_aimu_compat.py`.
 
 Before it, the floor was `aimu>=0.37.0`: a spawned worker's spec carries a `"tool_approval"` key, which is
