@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1840,7 +1840,9 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.38.0 or newer. Apache-2.0.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.38.0 or newer, plus the page tools the
+<code>web</code> toolset builds, which are on AIMU's main branch and in no release until 0.39.0. Until it is published,
+Kokua runs only against a sibling AIMU checkout on main. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -2326,6 +2328,16 @@ The pre-release development history is in the git log.</p>
     that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
     card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
     <code>tool_call_id</code>, since concurrent dispatch appends results in completion order.</li>
+<li><strong>A tool call names the toolset it came from</strong>, as <code>toolset.tool</code> (<code>web.get_web_content</code>,
+    <code>core.spawn_subagent</code>, <code>github.create_issue</code> for an MCP server named <code>github</code>): the name an
+    <code>available</code> list or a <code>confirm</code> / <code>review</code> entry would use, so what you watch matches what you
+    configure. It shows on live cards, in the terminal's <code>[tool]</code> lines, inside sub-agent cards, on
+    approval and auto-approval prompts, on reload, and in a Markdown export. The toolset is resolved
+    for the agent that made the call (<code>core.agents.toolset_of</code>), since two toolsets can offer one tool
+    name, and recorded when the turn ends (<code>metadata["toolsets"]</code>, per call id; a worker's rides its card
+    entry), so a reload names the toolset that served the call rather than whatever is installed later.
+    A call stored before this, or one no toolset recorded, shows its bare name rather than a guess. The
+    request panel's tool calls stay bare: they show what the model returned, verbatim.</li>
 <li><strong>Sub-agent work is visible.</strong> A <code>spawn_subagent</code> call renders as
     <code>subagent  spawn_subagent(&lt;role&gt;)  &lt;status&gt;</code> over an argument line, then the nested thinking, tool calls,
     and answer the child produced, each individually foldable and built by the same builders and CSS as
@@ -3198,6 +3210,20 @@ the shortest worked examples of the shape: one file, one <code>TOOLSET</code>, o
 warns you about a name no agent named: a toolset that ships and is never declared costs nothing to leave
 alone. The case that does cost something is a configured MCP server, which connects regardless; see
 <a href="https://saxman.info/kokua/how-to/add-mcp-services/">Add MCP services</a>.</p>
+<ul>
+<li><strong>The <code>web</code> toolset reads a page two ways.</strong> Beside AIMU's <code>builtin.web</code> group it builds AIMU's
+  <code>make_page_tools</code>: <code>fetch_page(url, question)</code> stores the page under <code>data/pages</code> and returns its outline
+  plus the passages that best match the question, verbatim with their offsets, and <code>read_page</code> /
+  <code>find_in_page</code> reach the rest of a stored page by its handle. <code>get_web_content</code> stays, for reading a page
+  whole. The guidance prefers <code>fetch_page</code>, because a research run that reads several pages otherwise
+  fills its context with them, and says what it costs: the passages are ranked by shared words and can
+  miss an answer worded differently, so the model is told to search or read on before concluding a page
+  does not say something. The store is one directory for every agent, since a handle a worker returns has
+  to be readable by the agent it reports to, and nothing prunes it. The GitHub backup leaves it out. Every
+  agent holding <code>web</code> now sends three more tool schemas, about 600 tokens per request.
+  <a href="https://saxman.info/kokua/how-to/set-up-toolsets/#reading-pages-fetch_page-or-get_web_content">Set up toolsets</a> lists the
+  tradeoffs.</li>
+</ul>
 <h3 id="proactive-work-scheduled-tasks">Proactive work: scheduled tasks<a class="headerlink" href="#proactive-work-scheduled-tasks" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Durable, agent-managed tasks that fire an unprompted turn when due, declared as
@@ -4029,6 +4055,12 @@ notice on startup.</p>
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. <code>Inbox</code> joins the probe's job.
+  The check now probes <code>aimu.tools.builtin.make_page_tools</code>, which the <code>web</code> toolset builds and which no
+  AIMU release contains yet. The floor stays at <strong>0.38.0</strong>, because a sibling on AIMU main still reports
+  that version and a 0.39.0 floor would refuse it, so an AIMU installed from PyPI passes the floor and is
+  then refused by the probe. The message says no release has the page tools yet, rather than offering
+  <code>--no-sources</code> and PyPI, the install that just failed. When 0.39.0 ships, the floor moves to it.
+  Before that the probe was a signature check on <code>RunEvent</code> for <code>run_id</code>, which the floor covers now.
   Today the floor is <strong>0.38.0</strong>: <code>calculate</code> evaluates an allowlisted syntax tree rather than an escapable
   <code>eval</code>, and a spawn leads a worker's result with a note when its round cap ended it. Neither offers a
   symbol for the startup check to look for, so the check stays where it was and the floor alone covers
@@ -4086,7 +4118,9 @@ notice on startup.</p>
   <code>AIMU_LANGUAGE_MODEL</code>, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
   invalid, <code>Assistant.start()</code> raises a <code>ModelClientError</code> carrying AIMU's actionable message: the CLI
-  prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
+  prints it and exits non-zero, the web UI shows it in the chat and prints it to the launch terminal in
+  the CLI's <code>[error]</code> form (the <code>kokua</code> logger writes only to the file log, so the terminal otherwise
+  said nothing about a server that could not build an assistant). Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
   tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
   finishing with it releases that guard, so a later connection is not wrongly refused as "busy in another
@@ -4098,8 +4132,8 @@ notice on startup.</p>
   "Disconnected." <code>build_app</code> now validates the agent tables while building the app, so <code>kokua
   --frontend web</code> and <code>kokua-web</code> both print the offending name and exit 2, which is what the CLI front
   end already did. A <code>ConfigError</code> reaching a connection anyway -- the registry is rebuilt per
-  connection, so a skill deleted from disk under a running server is one -- is shown in the chat, like a
-  model-client failure.</li>
+  connection, so a skill deleted from disk under a running server is one -- is shown in the chat and
+  printed to the terminal, like a model-client failure.</li>
 <li><strong>Hang observability.</strong> <code>/diag</code> reports the in-flight turn, elapsed time, whether the turn gate is
   held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
@@ -4304,7 +4338,7 @@ notice on startup.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

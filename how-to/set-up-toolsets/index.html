@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -892,6 +892,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="One namespace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reading-pages-fetch_page-or-get_web_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading pages: fetch_page or get_web_content
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1548,6 +1565,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="One namespace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reading-pages-fetch_page-or-get_web_content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading pages: fetch_page or get_web_content
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1751,8 +1785,8 @@ let deduplication quietly pick one.</p>
 <tbody>
 <tr>
 <td><code>web</code></td>
-<td><code>web_search</code>, <code>get_web_content</code>, <code>get_webpage_html</code>, <code>wikipedia</code>, <code>get_weather</code></td>
-<td><code>get_web_content</code> returns Markdown, converting a PDF as well as a page; <code>get_webpage_html</code> is the raw-HTML escape hatch.</td>
+<td><code>web_search</code>, <code>get_web_content</code>, <code>get_webpage_html</code>, <code>wikipedia</code>, <code>get_weather</code>, <code>fetch_page</code>, <code>read_page</code>, <code>find_in_page</code></td>
+<td><code>get_web_content</code> returns a page whole as Markdown, converting a PDF as well; <code>fetch_page</code> stores the page under <code>data/pages</code> and returns only the passages that match a question, with <code>read_page</code> and <code>find_in_page</code> reaching the rest. They trade off differently: see <a href="#reading-pages-fetch_page-or-get_web_content">Reading pages</a> below. <code>get_webpage_html</code> is the raw-HTML escape hatch.</td>
 </tr>
 <tr>
 <td><code>fs</code></td>
@@ -1814,6 +1848,38 @@ let deduplication quietly pick one.</p>
 <p>The three generative groups have no default model, so they raise at call time rather than downloading
 weights you did not ask for; see AIMU's
 <a href="https://saxman.info/aimu/reference/env-vars/">environment variables</a> for the accepted values.</p>
+<h3 id="reading-pages-fetch_page-or-get_web_content">Reading pages: <code>fetch_page</code> or <code>get_web_content</code><a class="headerlink" href="#reading-pages-fetch_page-or-get_web_content" title="Permanent link">&para;</a></h3>
+<p>An agent holding <code>web</code> has two ways to read a page, and the toolset's guidance tells the model to prefer
+<code>fetch_page</code>. Both stay because neither is right for every read.</p>
+<ul>
+<li><strong><code>get_web_content(url)</code></strong> returns the page itself, up to 20,000 characters a call, with an offset to
+  continue. Nothing is left out of what it returns, but all of it stays in the conversation and is resent
+  with every later request, so an agent that reads several pages fills its context window with them.</li>
+<li><strong><code>fetch_page(url, question)</code></strong> stores the page and returns its outline plus the few passages that best
+  match the question (five at most, about 6,000 characters), verbatim and with their offsets.
+  <code>read_page(handle, offset)</code> and <code>find_in_page(handle, text)</code> reach the rest of the stored page without
+  fetching it again. The handle names this copy of the page: a page that changed since gets a new one.</li>
+</ul>
+<p>What <code>fetch_page</code> costs you:</p>
+<ul>
+<li><strong>It can miss an answer worded differently from the question.</strong> Passages are ranked by the words they
+  share with the question (BM25, from AIMU), ignoring common English words. A question about a "refund
+  policy" will not find a section titled "Returns" that never says "refund". The guidance tells the model
+  to search with <code>find_in_page</code> or read on before concluding a page does not say something; a capable
+  model does that, and smaller local models often do not. If an answer drawn from the web looks
+  incomplete, check the trace for a <code>fetch_page</code> result whose passages did not contain it.</li>
+<li><strong>Every agent holding <code>web</code> sends three more tool schemas</strong>, plus the longer guidance: roughly 2,500
+  characters, or about 600 tokens, on every request, whether or not it reads a page that turn.</li>
+<li><strong>There is no switch to leave the page tools out.</strong> An agent's <code>available</code> list names toolsets, not
+  tools, so an agent that holds <code>web</code> holds all eight.</li>
+<li><strong>Every page it reads stays on disk.</strong> <code>data/pages/</code> holds one <code>&lt;handle&gt;.md</code> (the page's text) and one
+  <code>&lt;handle&gt;.json</code> (its URL and fetch time) per page, as plain text files only your account can read, and nothing
+  prunes it. They are a record of what your agents have read. A page whose content changes on every load (a timestamp, a rotating token) adds a
+  copy on every fetch. Delete the directory or any file in it whenever you like: a handle in an older
+  conversation then reads as unknown, and the model fetches the page again.</li>
+<li><strong>It is not backed up.</strong> The <a href="../back-up-to-github/">GitHub backup</a> leaves <code>data/pages/</code> out, since it is
+  a cache of pages that are still on the web.</li>
+</ul>
 <h2 id="declare-an-agent">Declare an agent<a class="headerlink" href="#declare-an-agent" title="Permanent link">&para;</a></h2>
 <p>Every agent is one <code>[agents.&lt;name&gt;]</code> table, and <code>[assistant].agent</code> says which of them you talk to. Four
 keys, all optional individually; anything else is a startup error naming the key.</p>
@@ -2206,7 +2272,7 @@ plugin path is the broken one.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

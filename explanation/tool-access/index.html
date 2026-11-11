@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2282,6 +2282,10 @@ it asks first. Kokua has two buckets beyond "just runs":</p>
 <code>&lt;toolset&gt;.*</code>) for a whole capability, <code>&lt;toolset&gt;.&lt;tool&gt;</code> for one tool, <code>core.&lt;tool&gt;</code> for the reserved
 two. The shipped default names <code>fs_write</code> bare so a writer AIMU adds to that group later is gated on
 arrival, and names <code>compute.execute_python</code> explicitly because <code>compute</code> also holds <code>calculate</code>.</p>
+<p>The same name is what you watch. Every tool call Kokua shows (a card, a terminal line, an approval
+prompt, a reload, an export) reads <code>toolset.tool</code>, so the entry you would write to gate a call is printed
+on the call itself. The toolset is the one that gave <em>the calling agent</em> that tool, which matters when
+two toolsets offer one name and two agents hold different ones.</p>
 <p>This is the layer other frameworks call permissions or authorization policy. Managed Agents has three
 policies, <code>always_allow</code>, <code>always_ask</code>, and <code>auto</code>; OpenClaw's approval engine says allow, deny, or ask;
 Claude Code has permission rules plus an auto mode. Kokua says "approval" because the code already did
@@ -2441,7 +2445,7 @@ table is in the <a href="../../reference/configuration/#removed-keys">configurat
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

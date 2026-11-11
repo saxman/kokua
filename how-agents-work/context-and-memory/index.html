@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1708,7 +1708,7 @@ model to call <code>list_documents</code> before assuming the store is empty: as
 copied in, an earlier version reported an empty store while the files sat there.</p>
 <p><strong>On disk.</strong> Everything lives under <code>$KOKUA_HOME</code> (default <code>~/.kokua</code>), and every leaf is a derived
 property on the config rather than a new path function: <code>data/sessions.json</code>, <code>data/memory/</code>,
-<code>data/documents/</code>, <code>data/images/</code>. <a href="../../explanation/design-principles/#4-all-state-under-one-directory-the-user-owns">Principle
+<code>data/documents/</code>, <code>data/images/</code>, <code>data/pages/</code>. <a href="../../explanation/design-principles/#4-all-state-under-one-directory-the-user-owns">Principle
 4</a> is why.</p>
 <p>Kokua's README says that state is "plain files under <code>~/.kokua</code>, so you can read what it remembers while
 it is still running", and the transcript above is the honest reading of that. <code>sessions.json</code> is JSON.
@@ -1849,7 +1849,7 @@ means opening the store yourself, which is the moment the <code>sqlite3</code> l
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -3872,6 +3872,17 @@ unopened subtree is one element); strings are cut at 4,000 characters; image dat
 as an attachment only for a name matching <code>^[A-Za-z0-9._-]{1,100}\Z</code>). Every payload-derived string
 reaches the DOM through <code>textContent</code>, since a request is model and user content. <code>turn_saved</code> carries
 the turn's number, which the user bubble wears as a <code>turn N</code> badge.</p>
+<p>A <code>tool</code> frame carries one key AIMU's does not: <code>toolset</code>, the toolset that gave the calling agent that
+tool, which the page prints as <code>toolset.tool</code>. Naming it takes the live registry, which a channel must
+not reach for, so <code>ChannelUI</code> writes it into the entry agent's TOOL_CALLING chunks (through
+<code>core.agents.toolset_of</code>, bound by the composition root) and each channel only reads it. That is also
+why Kokua's <code>send</code> maps a tool call itself instead of leaving it to AIMU's loop, which would drop the
+key; the terminal renames the call to <code>toolset.tool</code> before AIMU prints it. A sub-agent's entries get
+the key from <code>SubagentReporter</code>, asked with that worker's agent type, and an approval prompt gets the
+label from <code>HumanGate</code>, asked with the calling agent's name. For reload, <code>TurnRunner</code> records the entry
+agent's call ids against their toolsets when the turn ends (<code>metadata["toolsets"]</code>, keyed by user index
+like every other turn record), and <code>replay_items</code> rejoins them by id. The key is absent, never <code>None</code>,
+when nothing recorded the tool, so a call is shown bare rather than under a guess.</p>
 <p>The page sends an <code>input</code> frame (<code>{"type": "input", "text", "token", "images"?, "thinking"?}</code>) for
 <strong>every</strong> message the composer sends, text-only ones included, and the bare string only for its own
 control replies: the Stop button's <code>/stop</code>, an approval's Allow/Deny, and a plan review's verdict. It
@@ -4489,7 +4500,7 @@ not errored, when those are absent, and it does not gate the default suite.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
