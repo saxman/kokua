@@ -2645,7 +2645,7 @@ creation, and reaches <code>close()</code> outside the gate hold, because a foll
 message the user
 handed to a running turn is appended as an ordinary <code>user</code> message, indistinguishable from one that
 started a turn, so <code>resolve_message_indices</code> reads the positions back off the message list after the
-run (a compaction between rounds can move them) and <code>record_turn_provenance</code> stores them under
+run and <code>record_turn_provenance</code> stores them under
 <code>metadata["messages"]</code>. A message one of the turn's <em>agents</em> sent is not indistinguishable: the turn
 writes <code>messages.PROVENANCE_AGENT</code> onto it before <code>_persist</code> snapshots the turn
 (<code>TurnRunner._tag_agent_messages</code>), so a worker cannot reach the stored transcript wearing the user's
@@ -3668,8 +3668,8 @@ declaring <code>fs</code>, on an upgrade, with no config change and nothing repo
 read-before-replace guard on <code>save_document</code> close the other silent one, since <code>read_document</code> now
 returns a window and replacing a whole document from a windowed read deleted everything past the window
 (a 3,000-line document came back 51 lines long). And <code>compaction</code> is a spec key <code>core/agents.py</code> writes
-per worker from a declared <code>context_length</code>, so a long delegation trims its own messages rather than
-dying in its window.</p>
+per worker from a declared <code>context_length</code>, so a long delegation trims what its requests send rather
+than dying in its window (since AIMU 0.40.0 the trim leaves the worker's own history whole).</p>
 <p>The probe gripped the third of those, <code>SUBAGENT_SPEC_KEYS</code>'s <code>"compaction"</code>, and that choice was the one
 time this preflight has passed over a <em>newer</em> handle on purpose. <code>select</code> landed earlier in the release
 and is a plain name lookup for a function Kokua calls directly, but the <code>save_document</code> guard landed two
@@ -3768,6 +3768,14 @@ not do: that stream ends at its card. The turn persists the records under
 <code>metadata["artifacts"][&lt;user index&gt;]</code>, each with the message it was published after, and replay places
 it there. The image toolset moves AIMU's timestamp-named output to its content address
 (<code>images.adopt_file</code>) before publishing, so generated images are stored by content like uploads.</p>
+<p>The model gets the image too, through the first audience's channel rather than the second's. The tool's
+final result is an AIMU <code>ToolResult</code> carrying the stored file, so on a vision model AIMU stores the tool
+message's content as a text block and an image block, the shape of a user's attached image, and the model
+can look at what it made. On a model without vision AIMU stores the text alone. Nothing in Kokua had to
+learn a new shape for this: the persist-and-restore rewrite above maps <code>image_url</code> blocks in a message of
+any role, so the image is stored as a reference and re-inlined on restore like an upload. The readers that
+want a tool result's <em>text</em> (a replayed tool card, the planning reviewer's evidence) read it through
+<code>messages.message_text</code> rather than <code>str()</code>, so a card never shows the image's base64.</p>
 <h2 id="payloads">Payloads<a class="headerlink" href="#payloads" title="Permanent link">&para;</a></h2>
 <p><code>payloads.py</code> solves the same problem <code>images.py</code> does, for oversized text instead of image bytes:
 content-addressed filenames under <code>payloads_path</code> (the sha256 of the UTF-8 text, so identical content
