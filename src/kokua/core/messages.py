@@ -162,7 +162,7 @@ def resolve_message_indices(messages: list[dict], user_index: int) -> list[int]:
     boundary, and a reader that treats one as a boundary cuts a turn off mid tool loop.
 
     Resolved after the run rather than recorded as the bus delivers, because only the message list
-    says where a message ended up, and a compaction between rounds can move it. ``user_index`` is
+    says where a message ended up. ``user_index`` is
     ``resolve_user_index``'s answer, so ``-1`` means the turn committed no user message and there is no
     turn here to attribute anything to.
     """

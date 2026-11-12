@@ -14,6 +14,7 @@ from typing import Optional
 from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
+from kokua.core.messages import message_text
 from kokua.core.messaging import ENTRY_SOURCE
 from kokua.workflows import WorkflowContext, WorkflowResult, critics
 from kokua.workflows.planning import critics as review
@@ -37,7 +38,7 @@ def _tool_evidence(messages: list[dict], max_chars: int = 2000) -> str:
             names[call.get("id")] = call.get("function", {}).get("name")
         if msg.get("role") == "tool":
             name = msg.get("name") or names.get(msg.get("tool_call_id")) or "tool"
-            content = str(msg.get("content", ""))
+            content = message_text(msg.get("content", ""))  # an image result is a block list; keep its text
             if len(content) > max_chars:
                 content = content[:max_chars] + " ...[truncated]"
             lines.append(f"- {name}: {content}")

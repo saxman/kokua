@@ -325,7 +325,9 @@ def tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
     results in completion order, so the join has to be by id and not by position.
     """
     return {
-        message["tool_call_id"]: str(message.get("content", ""))
+        # message_text, not str(): a tool result carrying an image is a content-block list, and its image
+        # is shown as an artifact of its own rather than as base64 inside the card.
+        message["tool_call_id"]: message_text(message.get("content", ""))
         for message in messages
         if message.get("role") == "tool" and message.get("tool_call_id")
     }

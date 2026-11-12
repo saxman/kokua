@@ -178,47 +178,42 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_announcement_phase_tool_cards_are_drawn_from():
-    """The surface today is ``StreamingContentType.TOOL_REQUESTED``, on AIMU main and in no release yet.
+def test_the_probe_targets_the_tool_result_that_carries_an_image_to_the_model():
+    """The surface today is ``aimu.tools.ToolResult``, on AIMU main and in no release yet.
 
-    A membership check: the enum is far older than this floor, so only whether it carries the member
-    dates a checkout. ``channels/ui.py`` and ``channels/web.py`` read the member by attribute, so an AIMU
-    without it would raise ``AttributeError`` on a turn's first chunk rather than here.
+    A name lookup: the class is a new export, so its presence alone dates a checkout. ``toolsets/image.py``
+    imports it at module scope, so an AIMU without it would raise ``ImportError`` while the toolsets load
+    rather than here, naming a symbol rather than the fix.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    assert "TOOL_REQUESTED" in getattr(module, aimu_compat._PROBE_SYMBOL).__members__
-    assert aimu_compat._PROBE_MODULE == "aimu.models"
+    assert isinstance(getattr(module, aimu_compat._PROBE_SYMBOL), type)
+    assert aimu_compat._PROBE_MODULE == "aimu.tools"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "StreamingContentType"
+    assert aimu_compat._PROBE_SYMBOL == "ToolResult"
     assert aimu_compat._PROBE_PARAMETER is None
-    assert aimu_compat._PROBE_MEMBER == "TOOL_REQUESTED"
+    assert aimu_compat._PROBE_MEMBER is None
     assert aimu_compat._PROBE_UNRELEASED == "0.40.0"
 
 
-def _phases_without_tool_requested(monkeypatch):
-    from enum import Enum
-
-    class _Phases(str, Enum):
-        TOOL_CALLING = "tool_calling"
-
+def _tools_without_tool_result(monkeypatch):
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
-        lambda name: SimpleNamespace(__file__="/site-packages/aimu/models/__init__.py", StreamingContentType=_Phases),
+        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/__init__.py"),
     )
 
 
-def test_a_release_at_the_floor_without_the_announcement_phase_is_told_no_release_has_it(monkeypatch):
-    """While no release carries the phase, a PyPI AIMU at the floor lacks it, and the message names the
-    member rather than the enum (which every AIMU has) and does not recommend the install that just failed."""
-    _phases_without_tool_requested(monkeypatch)
+def test_a_release_at_the_floor_without_the_tool_result_is_told_no_release_has_it(monkeypatch):
+    """While no release carries ``ToolResult``, a PyPI AIMU at the floor lacks it, and the message does not
+    recommend the install that just failed."""
+    _tools_without_tool_result(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "StreamingContentType.TOOL_REQUESTED" in message
+    assert "ToolResult" in message
     assert "no AIMU release" in message and "0.40.0" in message
     assert "predates that release" not in message
     assert "--no-sources" not in message
@@ -228,17 +223,43 @@ def test_a_release_at_the_floor_without_the_probe_is_sent_to_pypi_once_one_has_i
     """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
     checkout, and installing the floor from PyPI is a real remedy again."""
     monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
-    _phases_without_tool_requested(monkeypatch)
+    _tools_without_tool_result(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "TOOL_REQUESTED" in message and "predates that release" in message
+    assert "ToolResult" in message and "predates that release" in message
     assert "--no-sources" in message
     assert "no AIMU release" not in message
 
 
+def test_the_floor_covers_the_announcement_phase_the_probe_no_longer_grips():
+    """The previous probe surface is the floor's job now that ``ToolResult``, which landed later in the same
+    release, holds the one probe slot. ``channels/ui.py`` reads the member by attribute on a turn's first
+    chunk, so an AIMU without it fails mid-turn naming a symbol."""
+    from aimu.models import StreamingContentType
+
+    assert "TOOL_REQUESTED" in StreamingContentType.__members__
+
+
+def test_the_floor_covers_the_image_blocks_behind_the_probed_name():
+    """What the name lookup cannot see: a vision model's tool message carries the image, and a model
+    without vision is sent the text alone. Both are silent when missing (the turn still completes)."""
+    from unittest.mock import MagicMock
+
+    from aimu.agents._tool_loop import _ToolLoop
+    from aimu.tools import ToolResult
+
+    response = ToolResult("drew it", images=[b"\x89PNG"])
+    call = {"name": "draw", "arguments": {}}
+    for vision, expected in ((True, list), (False, str)):
+        client = MagicMock()
+        client.model.supports_vision = vision
+        message = _ToolLoop._tool_message(SimpleNamespace(_client=client), call, "call-0", response)
+        assert isinstance(message["content"], expected)
+
+
 def test_the_floor_covers_the_page_tools_the_probe_no_longer_grips():
-    """0.39.0's probe surface is the floor's job now that ``TOOL_REQUESTED`` holds the one probe slot. An
+    """0.39.0's probe surface is the floor's job since ``TOOL_REQUESTED`` took the one probe slot. An
     AIMU without it fails the first ``web`` build with an ``AttributeError``: loud, but naming a symbol."""
     from aimu.tools import builtin
 

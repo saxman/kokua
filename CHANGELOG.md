@@ -1778,9 +1778,10 @@ alone. The case that does cost something is a configured MCP server, which conne
   `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
   is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
   `[assistant]` key holding a table.
-  **`context_length` has a second job, and it applies on every backend.** A spawned worker now trims its
-  own messages before each model turn to fit the window declared for it, so a long delegation bounds its
-  own growth instead of failing once the window fills. `core.agents.compaction_for_window` builds the
+  **`context_length` has a second job, and it applies on every backend.** A spawned worker now trims what
+  each of its requests sends to fit the window declared for it, so a long delegation bounds what it sends
+  instead of failing once the window fills. Since AIMU 0.40.0 the trim applies to the request only: the
+  worker's own history stays whole, so nothing it trims is lost. `core.agents.compaction_for_window` builds the
   trimmer from the resolved `context_length` and `build_agent_specs` writes it into each worker's spec,
   which means a worker declaring its own window compacts to that one and an undeclared worker to the
   global one, never to its delegator's. Three quarters of the window is left for messages, since the
@@ -1789,15 +1790,16 @@ alone. The case that does cost something is a configured MCP server, which conne
   two of them cannot be measured before the turn that needs them and a subtraction of guesses goes
   negative on a small window, which would stop compacting exactly where a window fills soonest.
   Declaring no `context_length` leaves it off: nothing else states a window (no client reports the one it
-  is talking to), and guessing one would mean rewriting a worker's messages against a number nobody
+  is talking to), and guessing one would mean trimming a worker's requests against a number nobody
   wrote down. What a worker with no declared window does instead is AIMU 0.31.0's doing rather than
   Kokua's: a spawn that runs out of context now returns a tool result naming the *sub-agent's* window as
   the one that filled, where it used to hand the parent a message about "the conversation" that the
-  parent read as its own and stopped delegating over. **The conversation you are in is never trimmed**,
-  whatever you declare: it is yours to read and Kokua stores it, so dropping from it would delete history
-  still on screen, silently and for the rest of that conversation's life. A worker's messages are built
-  per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
-  `tests/core/test_delegation.py` pins the asymmetry. Needs `aimu>=0.31.0`, which added the `compaction`
+  parent read as its own and stopped delegating over. **The conversation you are in is not compacted**,
+  whatever you declare. Before AIMU 0.40.0 a compaction rewrote the messages it ran on, so compacting
+  this one would have deleted history still on screen; a compaction now leaves the history whole, which
+  removes that reason, but which strategy your conversation should run is a choice the configuration
+  does not yet let you write down, so Kokua does not pick one for you. `tests/core/test_delegation.py`
+  pins the asymmetry. Needs `aimu>=0.31.0`, which added the `compaction`
   factory argument and the matching `"compaction"` entry in `SUBAGENT_SPEC_KEYS`; it is also the surface
   the startup preflight's capability probe then gripped. **The trim keeps the worker's task.** AIMU
   0.39.0's `trim_messages` protects the first message after the system prompt by default, which in a
@@ -1981,6 +1983,11 @@ alone. The case that does cost something is a configured MCP server, which conne
 - Generated images are stored content-addressed like uploads (the image client's own timestamp name is
   replaced), and each is recorded on the turn that made it, with a readable download name taken from the
   prompt.
+- **The assistant can see an image it generated.** `generate_image` returns the image to the model as
+  well as showing it to the user (AIMU's `ToolResult`), so a vision model can say how close it came to
+  the request instead of reporting that it cannot see its own result. A model without vision is sent
+  the result's text alone. The image is stored by reference like an upload, and it is re-sent with every
+  later request in that conversation, as an attached image is.
 
 ### Payloads
 

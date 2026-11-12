@@ -356,8 +356,21 @@ from typing import Optional
 
 MINIMUM_AIMU = (0, 39, 0)
 
-# The surface is `StreamingContentType.TOOL_REQUESTED`, the phase a streamed agent loop yields for each
-# tool call before it is approved or run. Kokua's web page draws a call from it while the tool works and
+# The surface is `aimu.tools.ToolResult`, a tool's answer carrying images as well as text. `generate_image`
+# returns one so the model can look at the image it just made instead of only knowing it was shown; without
+# it a vision model reported that it could not see its own result. It runs ahead of every release, like
+# `TOOL_REQUESTED` below, which it replaced: both are on AIMU's main branch for 0.40.0, `ToolResult` landed
+# later, so a sibling that has it has the phase too. `_PROBE_UNRELEASED` still names 0.40.0.
+#
+# The shape is a plain name lookup, the eighth time: the class is a new export, so its presence alone dates
+# a checkout. Left unprobed it is loud, `toolsets/image.py` importing it at module scope while the toolsets
+# load, after this preflight; but that names a symbol rather than the fix. What it leaves to the floor is the
+# behavior behind the name: that both tool loops store the image blocks on every dispatch path, that a model
+# without vision is sent the text alone, and that each provider adapter places the images where its format
+# allows. `tests/test_aimu_compat.py` pins the loop half. `TOOL_REQUESTED` is the floor's job now.
+#
+# Previously, on AIMU main before 0.40.0: the surface was `StreamingContentType.TOOL_REQUESTED`, the phase a
+# streamed agent loop yields for each tool call before it is approved or run. Kokua's web page draws a call from it while the tool works and
 # fills that card in when the call's `TOOL_CALLING` result arrives with the same `id`; without it, a call
 # that takes a minute (an image generation) shows nothing for that minute. It runs ahead of every release
 # the way `make_page_tools` did below: it is on AIMU's main branch, the floor stays at 0.39.0 so a sibling
@@ -468,11 +481,11 @@ MINIMUM_AIMU = (0, 39, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.models"
+_PROBE_MODULE = "aimu.tools"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "StreamingContentType"
+_PROBE_SYMBOL = "ToolResult"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = "TOOL_REQUESTED"
+_PROBE_MEMBER: Optional[str] = None
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None
 #: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
 _PROBE_UNRELEASED: Optional[str] = "0.40.0"
