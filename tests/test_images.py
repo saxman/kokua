@@ -86,6 +86,38 @@ def test_compact_leaves_non_data_urls_and_text_only(tmp_path):
     assert out[1] is text_msg  # untouched messages are shared, not copied
 
 
+def _generated_image_turn(url: str) -> list[dict]:
+    """A generate_image call and the result AIMU stores for it on a vision model: text plus the image."""
+    call = {"type": "function", "function": {"name": "generate_image", "arguments": {"prompt": "a giraffe"}}}
+    return [
+        {"role": "user", "content": "draw a giraffe"},
+        {"role": "assistant", "content": "", "tool_calls": [{**call, "id": "call-0"}]},
+        {
+            "role": "tool",
+            "name": "generate_image",
+            "tool_call_id": "call-0",
+            "content": [
+                {"type": "text", "text": "Generated image, shown to the user (/images/x.png)."},
+                {"type": "image_url", "image_url": {"url": url}},
+            ],
+        },
+    ]
+
+
+def test_a_generated_image_in_a_tool_result_is_stored_as_a_reference(tmp_path):
+    """The image the model was sent is stored by reference like a user's, and re-inlined on restore, so
+    the model can still see it after a restart without sessions.json carrying its bytes."""
+    compacted = compact_message_images(_generated_image_turn(_PNG_DATA_URL), tmp_path)
+    assert compacted[2]["content"][1]["image_url"]["url"].startswith("/images/")
+    assert "base64" not in json.dumps(compacted)
+    assert expand_message_images(compacted, tmp_path)[2]["content"][1]["image_url"]["url"] == _PNG_DATA_URL
+
+
+def test_a_replayed_tool_card_shows_the_result_text_not_the_image_blocks():
+    (card,) = [item for item in replay_items(_generated_image_turn("/images/abc.png")) if item["type"] == "tool"]
+    assert card["response"] == "Generated image, shown to the user (/images/x.png)."
+
+
 def test_expand_missing_file_left_as_reference(tmp_path):
     msg = _image_message("/images/deadbeef.png")
     out = expand_message_images([msg], tmp_path)

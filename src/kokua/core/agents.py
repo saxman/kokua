@@ -717,20 +717,21 @@ _COMPACTION_WINDOW_SHARE = 0.75
 
 
 def compaction_for_window(generation: Mapping) -> Optional[Callable[[list[dict]], list[dict]]]:
-    """The trimmer a spawned worker applies before each of its model turns, or None to apply none.
+    """The trimmer a spawned worker applies to each request it sends, or None to apply none.
 
     Engaged by a declared ``context_length`` and nothing else, because that key is the only place a
     window size is ever stated: no client reports the window it is talking to, so the alternative is
-    Kokua guessing one and rewriting a worker's messages against a number nobody wrote down. A worker
+    Kokua guessing one and trimming a worker's requests against a number nobody wrote down. A worker
     with no declared window therefore still fills it and still dies in it, and what it reports when it
     does is AIMU's own doing rather than Kokua's -- since 0.31.0 a spawn returns a tool result naming
     the *sub-agent's* window as the one that filled, where it used to hand the parent a message about
     "the conversation" that the parent read as its own.
 
-    Only a spawned worker gets one. The entry agent's messages are the conversation the user is reading
-    and Kokua persists, so trimming them would drop history that is still on screen, silently and for
-    the rest of that conversation's life; a worker's messages are built per spawn and discarded with it,
-    which is what makes an automatic rewrite of them safe to do at all.
+    AIMU applies a compaction to what each request sends and leaves the worker's history whole, so
+    nothing it trims is lost. Only a spawned worker gets one today. The entry agent could take one
+    safely for the same reason (its history is the conversation on screen, and a compaction no longer
+    touches that), but which strategy it should run is a choice the configuration does not yet let a
+    user write down, and a window share is not a policy to impose on a conversation nobody asked to trim.
     """
     window = generation.get("context_length")
     if not window:

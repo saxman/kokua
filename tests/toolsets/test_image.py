@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import sys
 import threading
@@ -77,7 +78,11 @@ def test_generate_image_publishes_the_image_and_tells_the_model(tmp_path, monkey
         (reference, "a-photorealistic-cat-sitting.png", "image/png", config.images_path / reference.rsplit("/", 1)[1])
     ]
     assert contents[0] == {"progress": 0.5}
-    assert contents[-1] == {"final": True, "result": f"Generated image, shown to the user ({reference})."}
+    result = contents[-1]["result"]
+    assert contents[-1]["final"] is True
+    assert str(result) == f"Generated image, shown to the user ({reference})."
+    # The pixels go back to the model too, so a vision model can see what it made.
+    assert result.images == ("data:image/png;base64," + base64.b64encode(b"png").decode("ascii"),)
 
 
 def test_generate_image_reports_no_output(tmp_path, monkeypatch):

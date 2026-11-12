@@ -383,7 +383,7 @@ Which of a turn's messages were sent mid-turn is recorded, because nothing in th
 message the user
 handed to a running turn is appended as an ordinary `user` message, indistinguishable from one that
 started a turn, so `resolve_message_indices` reads the positions back off the message list after the
-run (a compaction between rounds can move them) and `record_turn_provenance` stores them under
+run and `record_turn_provenance` stores them under
 `metadata["messages"]`. A message one of the turn's *agents* sent is not indistinguishable: the turn
 writes `messages.PROVENANCE_AGENT` onto it before `_persist` snapshots the turn
 (`TurnRunner._tag_agent_messages`), so a worker cannot reach the stored transcript wearing the user's
@@ -1439,8 +1439,8 @@ declaring `fs`, on an upgrade, with no config change and nothing reported. `edit
 read-before-replace guard on `save_document` close the other silent one, since `read_document` now
 returns a window and replacing a whole document from a windowed read deleted everything past the window
 (a 3,000-line document came back 51 lines long). And `compaction` is a spec key `core/agents.py` writes
-per worker from a declared `context_length`, so a long delegation trims its own messages rather than
-dying in its window.
+per worker from a declared `context_length`, so a long delegation trims what its requests send rather
+than dying in its window (since AIMU 0.40.0 the trim leaves the worker's own history whole).
 
 The probe gripped the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and that choice was the one
 time this preflight has passed over a *newer* handle on purpose. `select` landed earlier in the release
@@ -1552,6 +1552,15 @@ not do: that stream ends at its card. The turn persists the records under
 `metadata["artifacts"][<user index>]`, each with the message it was published after, and replay places
 it there. The image toolset moves AIMU's timestamp-named output to its content address
 (`images.adopt_file`) before publishing, so generated images are stored by content like uploads.
+
+The model gets the image too, through the first audience's channel rather than the second's. The tool's
+final result is an AIMU `ToolResult` carrying the stored file, so on a vision model AIMU stores the tool
+message's content as a text block and an image block, the shape of a user's attached image, and the model
+can look at what it made. On a model without vision AIMU stores the text alone. Nothing in Kokua had to
+learn a new shape for this: the persist-and-restore rewrite above maps `image_url` blocks in a message of
+any role, so the image is stored as a reference and re-inlined on restore like an upload. The readers that
+want a tool result's *text* (a replayed tool card, the planning reviewer's evidence) read it through
+`messages.message_text` rather than `str()`, so a card never shows the image's base64.
 
 ## Payloads
 

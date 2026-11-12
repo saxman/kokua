@@ -428,6 +428,11 @@ Consequences for working in this repo:
   membership check (the enum is far older than the floor), the floor stays at 0.39.0 so a sibling on AIMU
   main can start, and `_PROBE_UNRELEASED` names 0.40.0 until that is published, when the floor moves to it
   and `_PROBE_UNRELEASED` returns to None. `make_page_tools` is pinned in `tests/test_aimu_compat.py` now.
+  **It then moved within that same unreleased 0.40.0, onto `aimu.tools.ToolResult`**, a tool's answer
+  carrying images, which `generate_image` returns so a vision model can see the image it made. A plain name
+  lookup, the eighth; it landed after `TOOL_REQUESTED`, so it subsumes it, and `TOOL_REQUESTED` is pinned in
+  the test now. What the name cannot see, that the loops store the image blocks only on a vision model, is
+  pinned there by behavior.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

@@ -4,7 +4,10 @@ Contributes one tool, ``generate_image``, that runs an AIMU ``ImageClient`` and 
 ``images_path`` (the same folder uploaded images live in, served by the web front end at
 ``/images/<name>``), under its content address. The tool then publishes the image to the running turn
 (``core/artifacts.py``) rather than relying on the web channel spotting its stream chunk or a regex spotting
-its result text, so the image shows whichever agent made it. The model is told only that it was shown.
+its result text, so the image shows whichever agent made it. The model is sent the image too, as an AIMU
+``ToolResult``, so a vision model can see what it made and say how close it came to the request; a model
+without vision gets the sentence alone. The image rides every later request in that conversation, as a
+user's attached image does.
 
 Unlike AIMU's built-in ``image`` tool group, this saves into Kokua's servable ``images_path`` rather than
 a folder inside the aimu package, and it defers building the client until the tool is first called: the
@@ -29,7 +32,7 @@ import re
 from pathlib import Path
 
 from aimu.models import StreamChunk, StreamingContentType
-from aimu.tools import tool
+from aimu.tools import ToolResult, tool
 
 from kokua import images
 from kokua.config import AssistantConfig
@@ -46,10 +49,10 @@ def _filename_for(prompt: str, suffix: str) -> str:
     return ("-".join(words) or "image") + suffix
 
 
-def _final(text: str) -> StreamChunk:
+def _final(result: str | ToolResult) -> StreamChunk:
     """The tool's answer to the model. An async generator cannot return a value, so AIMU's tool loop
     takes the last chunk's ``result`` as the response instead."""
-    return StreamChunk(StreamingContentType.IMAGE_GENERATING, {"final": True, "result": text})
+    return StreamChunk(StreamingContentType.IMAGE_GENERATING, {"final": True, "result": result})
 
 
 def build(config: AssistantConfig) -> list:
@@ -111,7 +114,11 @@ def build(config: AssistantConfig) -> list:
         stored = config.images_path / reference.rsplit("/", 1)[1]
         mime = mimetypes.guess_type(stored.name)[0] or "image/png"
         await publish(reference, filename=_filename_for(prompt, stored.suffix), mime=mime, path=stored)
-        yield _final(f"Generated image, shown to the user ({reference}).")
+        # Reads the file to inline it, so off the loop like the adopt above.
+        result = await asyncio.to_thread(
+            ToolResult, f"Generated image, shown to the user ({reference}).", images=[stored]
+        )
+        yield _final(result)
 
     return [generate_image]
 

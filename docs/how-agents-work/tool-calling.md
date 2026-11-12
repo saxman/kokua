@@ -118,7 +118,7 @@ tool and the declaration that offers it, trimmed here to those two things:
         """
         ...
         await publish(reference, ...)  # the file reaches the user here (core/artifacts.py)
-        yield _final(f"Generated image, shown to the user ({reference}).")
+        yield _final(ToolResult(f"Generated image, shown to the user ({reference}).", images=[stored]))
 
     return [generate_image]
 
@@ -133,11 +133,15 @@ TOOLSET = Toolset(
 Read it as three separate contracts. The signature, `prompt: str`, becomes the parameter schema. The
 docstring's first paragraph becomes the tool's description, and its `Args:` section becomes the
 description of `prompt`; both are what the model reads when deciding whether this tool answers the
-question in front of it. The final text the tool yields is a string because the result is going into the
-conversation as a message, so it is written to be read: it tells the model the image was already shown,
-which stops it from trying to show it again. That sentence is only for the model. The image reaches the
-person another way: the tool *publishes* the file to the running turn (`core/artifacts.py`), and the
-turn shows it, so nothing depends on the model or the channel noticing a reference in the text.
+question in front of it. The result the tool yields is going into the conversation as a message, so its
+text is written to be read: it tells the model the image was already shown, which stops it from trying to
+show it again. The image itself rides along in the same message. AIMU's `ToolResult` makes that
+message's content a text block followed by an image block, the shape a user's attached image already has,
+so a vision model can look at what it made and say how close it came to the request. Until it did, the
+result was the sentence alone, and an assistant asked how its giraffe turned out answered, accurately,
+that it could not see it. A model without vision is still sent the sentence alone. The person gets the
+image another way: the tool *publishes* the file to the running turn (`core/artifacts.py`), and the turn
+shows it, so nothing depends on the model or the channel noticing a reference in the text.
 
 The second paragraph is worth reading twice on a page arguing that a docstring is a promise, because an
 earlier version of it broke one. That version told the model that without `AIMU_IMAGE_MODEL` the tool
@@ -212,6 +216,11 @@ an agent holds exactly the capabilities its table declares. For a capability an 
 sometimes, the lever is its `resident` list: a toolset left out of it is named in one line of the prompt,
 and its schemas join the request only once the model loads it with `load_tools`, at the price of one
 round ([Tool access](../explanation/tool-access.md#residency-what-is-in-context-and-what-loads-on-demand)).
+
+**An image result is re-sent every round after it.** A tool result is part of the conversation, so the
+image `generate_image` returns travels with every later request in that conversation, as an image the
+user attached does. That is what lets the model still refer to it three turns on, and it is a cost a text
+result does not have: a few hundred input tokens for a small image, more for a large one, on every call.
 
 **A returned error costs a round.** Handing the model `Tool 'X' raised an error: ...` buys recovery, and
 it pays for it with a full extra round trip carrying the entire conversation. Under a cap of ten model

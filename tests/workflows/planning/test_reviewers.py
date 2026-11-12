@@ -168,6 +168,8 @@ def test_tool_evidence_renders_and_truncates():
     assert _tool_evidence([{"role": "assistant", "content": "no tools used"}]) == ""
     truncated = _tool_evidence([{"role": "tool", "name": "t", "content": "y" * 100}], max_chars=10)
     assert truncated == "- t: " + "y" * 10 + " ...[truncated]"
+    image_blocks = [{"type": "text", "text": "drew it"}, {"type": "image_url", "image_url": {"url": "data:..."}}]
+    assert _tool_evidence([{"role": "tool", "name": "draw", "content": image_blocks}]) == "- draw: drew it"
 
 
 async def test_review_result_includes_evidence_in_prompt(monkeypatch):
