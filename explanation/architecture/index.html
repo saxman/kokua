@@ -3912,7 +3912,7 @@ reaches the DOM through <code>textContent</code>, since a request is model and u
 the turn's number, which the user bubble wears as a <code>turn N</code> badge.</p>
 <p>A <code>tool</code> frame carries one key AIMU's does not: <code>toolset</code>, the toolset that gave the calling agent that
 tool, which the page prints as <code>toolset.tool</code>. Naming it takes the live registry, which a channel must
-not reach for, so <code>ChannelUI</code> writes it into the entry agent's TOOL_CALLING chunks (through
+not reach for, so <code>ChannelUI</code> writes it into the entry agent's TOOL_REQUESTED and TOOL_CALLING chunks (through
 <code>core.agents.toolset_of</code>, bound by the composition root) and each channel only reads it. That is also
 why Kokua's <code>send</code> maps a tool call itself instead of leaving it to AIMU's loop, which would drop the
 key; the terminal renames the call to <code>toolset.tool</code> before AIMU prints it. A sub-agent's entries get
@@ -4278,11 +4278,36 @@ would not build -- has no turn to key one to, and only its empty transcript says
 at a firing rather than at an edit is what makes lowering one non-destructive and leaves a disabled task
 whole. This is also why the record needs no <code>session_id</code>: nothing reuses a conversation, so a firing
 writes nothing back to the task's table.</p>
-<p>A <code>tool</code> frame carries what the call returned as well as what it was asked to do (<code>response</code>, added to
-AIMU's base frame), because AIMU yields <code>TOOL_CALLING</code> only once the call has been dispatched. An error,
-an argument-binding failure, and a denied approval are results too and arrive on that same key, so the
-page needs no separate failure path and no second frame updating a card in place: the card is complete
-when it appears. <code>renderTool</code> puts the result in a nested foldable of its own below the arguments, filled
+<p>A call reaches the page in two frames, because AIMU reports it twice. <code>TOOL_REQUESTED</code> comes first, one
+per call in the round, before any of them is approved or run, and becomes a <code>tool_requested</code> frame: the
+page draws the card then, marked <code>running…</code>, so a tool that takes a minute (an image generation) is on
+screen for that minute instead of appearing only once it is over. <code>TOOL_CALLING</code> comes once the call has
+been dispatched and becomes a <code>tool</code> frame carrying what the call returned (<code>response</code>, added to AIMU's
+base frame) and the provider's tool-call <code>id</code>, the key the page uses to find the announced card and fill
+it in place (<code>renderToolResult</code>). It pairs by id rather than by position because concurrent dispatch
+reports results together after every call has run. An error, an argument-binding failure, and a denied
+approval are results too and arrive on that same key, so the page needs no separate failure path. A
+result with no announced card (a call announced before the page loaded, or one AIMU gave no id) is drawn
+complete, as every call was before announcements existed, and a turn that ends with a
+call still running (stopped mid-dispatch) leaves that card reading <code>no result</code> rather than <code>running…</code>. A
+spawn call is never announced, since its sub-agent card stands in for it. The announcement also carries
+its <code>round</code>, which the round buttons need: the <code>request</code> frame for that round is scheduled from AIMU's
+synchronous event sink while the announcement comes down the stream, so either can reach the page
+first, and <code>adoptRoundButton</code> refuses to move a round's button onto a card from a different round. A
+switch into a turn mid-call replays the call as the catch-up record holds it, <code>pending</code> until its result
+arrives, when that same item takes the result rather than a second one being added.</p>
+<p>A worker's calls inside a sub-agent card take the same two steps, as card entries rather than frames of
+their own. AIMU's observer hands <code>SubagentReporter</code> the worker's <code>TOOL_REQUESTED</code> chunk, which becomes
+a <code>tool</code> entry carrying <code>call_id</code>, <code>round</code>, and <code>pending</code>, recorded and shown at once; the matching
+<code>TOOL_CALLING</code> completes that recorded entry in place (spilling an oversized response as before) and
+is only shown, as an entry with the same <code>call_id</code> that the page uses to fill the pending one. The
+stored card therefore holds one complete entry per call, at the position it was announced, so a reload
+draws what the live card ended up showing. Two details keep that true: the recorded entry is a copy of
+the one sent, because the catch-up record copies a frame shallowly and a shared entry would turn the
+switch-in's pending item complete before its result arrived, which would then draw a second card; and
+a page keys a card's pending calls within that card, since two workers' providers can mint the same id.
+A worker that ends with a call still running stores it with no result, as any call missing one is.
+<code>renderTool</code> puts the result in a nested foldable of its own below the arguments, filled
 on first expand and clamped to <code>OUTPUT_CLAMP</code> characters with a button for the rest, as plain text --
 never markdown, since a tool result is untrusted input. Output travels whole and only the DOM clamps, so
 a <code>history</code> frame grows by every tool result in the conversation and is re-sent on every conversation
