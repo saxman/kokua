@@ -3643,6 +3643,19 @@ async def test_web_channel_never_announces_a_spawn_call(path, tool_name):
     assert not [frame for frame in ws.frames if frame["type"] == "tool_requested"]
 
 
+async def test_web_channel_does_not_announce_a_call_with_no_id():
+    """Its result could not find the card, so announcing it would leave a card that never completes."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    anonymous = {key: value for key, value in _REQUESTED.items() if key != "id"}
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_REQUESTED, anonymous)
+
+    await channel.send(gen())
+    assert ws.frames == [{"type": "done"}]
+
+
 async def test_web_channel_withholds_announcements_when_tools_are_not_streamed():
     ws = _FakeWS()
     channel = WebChannel(ws)

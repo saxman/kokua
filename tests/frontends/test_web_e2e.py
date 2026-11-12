@@ -3057,6 +3057,131 @@ def test_switching_into_a_running_call_shows_it_pending_and_its_result_fills_it(
     expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("16 chars")
 
 
+def _card_opened(card_id):
+    return {"id": card_id, "role": "researcher", "task": "look it up", "status": "running"}
+
+
+def _card_announced(card_id, call_id, round_index=0):
+    entry = {
+        "kind": "tool",
+        "name": "search",
+        "arguments": {},
+        "call_id": call_id,
+        "round": round_index,
+        "pending": True,
+    }
+    return {"id": card_id, "append": entry}
+
+
+def _card_returned(card_id, call_id, response):
+    return {
+        "id": card_id,
+        "append": {"kind": "tool", "name": "search", "arguments": {}, "call_id": call_id, "response": response},
+    }
+
+
+def _card_request(card_id, round_index):
+    entry = {
+        "kind": "request",
+        "round": round_index,
+        "payload_ref": None,
+        "payload_chars": 10,
+        "message_count": 1,
+        "tool_count": 1,
+        "endpoint": "http://x",
+        "model": "m",
+        "stop_reason": "tool_use",
+        "response_ref": None,
+        "tool_call_count": 1,
+        "error": None,
+        "agent": "researcher",
+    }
+    return {"id": card_id, "append": entry}
+
+
+def _card_tools(page, card_id):
+    """The tool entries in a card, found by position: these tests open "r-1" before "r-2"."""
+    card = page.locator("#log .bubble.subagent").nth({"r-1": 0, "r-2": 1}[card_id])
+    return card.locator("> .fold-body > .bubble.tool")
+
+
+def test_a_workers_call_shows_in_its_card_while_it_runs_and_its_result_fills_it(page, live_server):
+    _open(page, live_server())
+    _live_frame(page, {"type": "subagent", **_card_opened("r-1")})
+    _live_frame(page, {"type": "subagent", **_card_announced("r-1", "c1")})
+    tools = _card_tools(page, "r-1")
+    expect(tools).to_have_count(1)
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("running…")
+    _live_frame(page, {"type": "subagent", **_card_returned("r-1", "c1", "three results")})
+    expect(tools).to_have_count(1)
+    expect(tools.first).not_to_have_class(re.compile(r"\bpending\b"))
+    expect(tools.first.locator("> .fold-header .fold-metric")).to_have_text("13 chars")
+
+
+def test_a_workers_call_still_running_when_its_card_finishes_says_it_has_no_result(page, live_server):
+    _open(page, live_server())
+    _live_frame(page, {"type": "subagent", **_card_opened("r-1")})
+    _live_frame(page, {"type": "subagent", **_card_announced("r-1", "c1")})
+    _live_frame(page, {"type": "subagent", "id": "r-1", "status": "stopped"})
+    expect(_card_tools(page, "r-1").first.locator("> .fold-header .fold-metric")).to_have_text("no result")
+
+
+def test_two_workers_with_the_same_call_id_each_fill_their_own_card(page, live_server):
+    """Two workers' providers can mint the same id, so a pending call is found within its own card."""
+    _open(page, live_server())
+    for card_id in ("r-1", "r-2"):
+        _live_frame(page, {"type": "subagent", **_card_opened(card_id)})
+        _live_frame(page, {"type": "subagent", **_card_announced(card_id, "c1")})
+    _live_frame(page, {"type": "subagent", **_card_returned("r-2", "c1", "second")})
+    expect(_card_tools(page, "r-1").first.locator("> .fold-header .fold-metric")).to_have_text("running…")
+    expect(_card_tools(page, "r-2")).to_have_count(1)
+    expect(_card_tools(page, "r-2").first.locator("> .fold-header .fold-metric")).to_have_text("6 chars")
+
+
+@pytest.mark.parametrize("request_first", [True, False], ids=["request-first", "announcement-first"])
+def test_a_workers_two_tool_rounds_put_one_button_on_each_rounds_card(page, live_server, request_first):
+    """Inside a card the same race as at the top level: a round's request entry comes from AIMU's event
+    sink and the announcement from the worker's stream."""
+    _open(page, live_server())
+    _live_frame(page, {"type": "subagent", **_card_opened("r-1")})
+    _live_frame(page, {"type": "subagent", **_card_request("r-1", 0)})
+    _live_frame(page, {"type": "subagent", **_card_announced("r-1", "c0", 0)})
+    _live_frame(page, {"type": "subagent", **_card_returned("r-1", "c0", "first")})
+    second = [_card_request("r-1", 1), _card_announced("r-1", "c1", 1)]
+    for frame in second if request_first else reversed(second):
+        _live_frame(page, {"type": "subagent", **frame})
+    tools = _card_tools(page, "r-1")
+    expect(tools).to_have_count(2)
+    expect(tools.nth(0).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_attribute("data-round", "2")
+
+
+def test_a_reloaded_card_whose_call_was_stored_ahead_of_its_request_keeps_each_button_on_its_round(page, live_server):
+    """A stored card keeps a call where it was announced, which can be ahead of its own round's request
+    entry; the entry's `round` keeps the earlier round's button where it belongs on reload too."""
+
+    def call(call_id, round_index, response):
+        entry = {"kind": "tool", "name": "search", "arguments": {}, "call_id": call_id, "round": round_index}
+        return {"id": "r-1", "append": {**entry, "response": response}}
+
+    entries = [
+        _card_opened("r-1"),
+        _card_request("r-1", 0),
+        call("c0", 0, "first"),
+        call("c1", 1, "second"),
+        _card_request("r-1", 1),
+        {"id": "r-1", "status": "done"},
+    ]
+    _open(page, live_server(seed=_request_seed(subagent=entries)))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    tools = card.locator("> .fold-body > .bubble.tool")
+    expect(tools).to_have_count(2)
+    expect(tools.nth(0).locator(".round-button")).to_have_count(1)
+    expect(tools.nth(1).locator(".round-button")).to_have_count(1)
+
+
 def test_a_card_after_a_round_that_asked_for_no_tools_does_not_take_its_button(page, live_server):
     """A round that only answered has no dispatch results, so a card that follows it is not its output."""
     _open(page, live_server(seed=_request_seed()))

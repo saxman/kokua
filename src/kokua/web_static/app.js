@@ -940,13 +940,30 @@ function appendSubagentEntry(card, entry) {
   }
   if (entry.kind === "tool") {
     card.answer = null;
-    renderTool(entry.name, entry.arguments, undefined, {
-      parent: card.body,
-      toolset: entry.toolset,
+    // A worker's call is announced as it starts (`pending`) and its result, carrying the same `call_id`,
+    // fills that entry; see core/subagents.py's `_announce`. A stored card holds the completed entry
+    // where it was announced, so a reload takes the last branch. `round` rides both, for the reason it
+    // does at the top level (see adoptRoundButton).
+    const result = {
       response: entry.response,
       responseRef: entry.response_ref,
       responseBytes: entry.response_bytes,
+    };
+    card.pendingTools = card.pendingTools || new Map();
+    const announced = entry.call_id && !entry.pending ? card.pendingTools.get(entry.call_id) : null;
+    if (announced) {
+      card.pendingTools.delete(entry.call_id);
+      fillToolResult(announced, result);
+      return;
+    }
+    const f = renderTool(entry.name, entry.arguments, undefined, {
+      ...result,
+      parent: card.body,
+      toolset: entry.toolset,
+      round: entry.round,
+      pending: !!entry.pending,
     });
+    if (entry.pending && entry.call_id) card.pendingTools.set(entry.call_id, f);
     return;
   }
   if (entry.kind === "error") {
@@ -981,6 +998,7 @@ function appendSubagentEntry(card, entry) {
 function finalizeSubagentCard(card) {
   card.reasoning = null;
   card.answer = null;
+  if (card.pendingTools) settlePendingTools(card.pendingTools);
   for (const answer of card.answers) {
     const html = renderMarkdown(answer.text);
     if (html === null) continue;  // markdown libs absent: the streamed plain text stands
@@ -2090,8 +2108,10 @@ function fillToolResult(f, opts) {
   }
 }
 
-// Calls announced and not yet returned, by tool-call id: the card each one's `tool` frame fills in.
-// Emptied by a history repaint (the cards are gone) and at a turn's end (see settlePendingTools).
+// The top level's calls announced and not yet returned, by tool-call id: the card each one's `tool` frame
+// fills in. Emptied by a history repaint (the cards are gone) and at a turn's end (see
+// settlePendingTools). A sub-agent card keeps its own (`card.pendingTools`), since two workers'
+// providers can mint the same id.
 let pendingTools = new Map();
 
 function renderToolRequested(frame, ts) {
@@ -2100,7 +2120,7 @@ function renderToolRequested(frame, ts) {
 }
 
 // A call's result: into the card its announcement drew, or, with none (a call announced before this page
-// loaded, or a sub-agent's), a card of its own exactly as before announcements existed.
+// loaded), a card of its own exactly as before announcements existed.
 function renderToolResult(frame, ts) {
   const f = frame.id ? pendingTools.get(frame.id) : null;
   if (!f) {
@@ -2111,14 +2131,14 @@ function renderToolResult(frame, ts) {
   fillToolResult(f, { response: frame.response });
 }
 
-// A turn that ended with a call still running (stopped, or failed mid-dispatch) will never send its
-// result, so its card stops claiming the call is running.
-function settlePendingTools() {
-  for (const f of pendingTools.values()) {
+// A turn or a worker that ended with a call still running (stopped, or failed mid-dispatch) will never
+// send its result, so its card stops claiming the call is running.
+function settlePendingTools(pending) {
+  for (const f of pending.values()) {
     f.outer.classList.remove("pending");
     setFoldLabel(f.label, "tool", f.payload, "no result");
   }
-  pendingTools.clear();
+  pending.clear();
 }
 // The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this
 // marker is deliberately not drawn there (the tool block is that boundary), so both words below
@@ -2262,7 +2282,7 @@ function handleFrame(event) {
     scheduleStreamRender();
   } else if (frame.type === "done") {
     finalizeStreaming();
-    settlePendingTools();
+    settlePendingTools(pendingTools);
     autoscroll();
     setProcessing(false);
     setWorking(null);
@@ -2281,7 +2301,7 @@ function handleFrame(event) {
     // A proactive one interrupts whatever is going on without ending it, so it leaves both alone: the
     // indicator belongs to the turn now, not to "the last thing that arrived".
     if (!frame.proactive) {
-      settlePendingTools();
+      settlePendingTools(pendingTools);
       setProcessing(false);
       setWorking(null);
     }
