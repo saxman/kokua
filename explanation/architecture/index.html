@@ -3668,8 +3668,10 @@ declaring <code>fs</code>, on an upgrade, with no config change and nothing repo
 read-before-replace guard on <code>save_document</code> close the other silent one, since <code>read_document</code> now
 returns a window and replacing a whole document from a windowed read deleted everything past the window
 (a 3,000-line document came back 51 lines long). And <code>compaction</code> is a spec key <code>core/agents.py</code> writes
-per worker from a declared <code>context_length</code>, so a long delegation trims what its requests send rather
-than dying in its window (since AIMU 0.40.0 the trim leaves the worker's own history whole).</p>
+per worker from a declared <code>context_length</code>, so a long delegation compacts what its requests send rather
+than dying in its window (since AIMU 0.40.0 that is <code>chain(mask(budget), trim(budget))</code>: old results
+masked in place with notes naming each message and the <code>get_message</code> tool the worker then carries, whole
+messages dropped only as a backstop, and the worker's own history left whole).</p>
 <p>The probe gripped the third of those, <code>SUBAGENT_SPEC_KEYS</code>'s <code>"compaction"</code>, and that choice was the one
 time this preflight has passed over a <em>newer</em> handle on purpose. <code>select</code> landed earlier in the release
 and is a plain name lookup for a function Kokua calls directly, but the <code>save_document</code> guard landed two

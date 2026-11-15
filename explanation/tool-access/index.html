@@ -1983,9 +1983,12 @@ declared. Kokua instead split the group by reach into two toolsets, <code>fs</co
 <code>introspector</code> holds <code>fs</code> for exactly that reason.</p>
 <p>One name inside the approval lists, <code>core</code>, is reserved for the tools no toolset provides:
 <code>spawn_subagent</code> and <code>activate_skill</code>, plus <code>available_tools</code> and <code>load_tools</code> once any agent defers a
-toolset (see <a href="#residency-what-is-in-context-and-what-loads-on-demand">Residency</a>). A bare <code>core</code> covers
-all of them and <code>core.&lt;tool&gt;</code> names one. A delegating agent earns <code>spawn_subagent</code> by naming workers in
-<code>delegates_to</code> rather than by <code>available</code>.</p>
+toolset (see <a href="#residency-what-is-in-context-and-what-loads-on-demand">Residency</a>), and <code>get_message</code> once
+any declared <code>context_length</code> makes a worker compact its requests. A bare <code>core</code> covers all of them and
+<code>core.&lt;tool&gt;</code> names one. A delegating agent earns <code>spawn_subagent</code> by naming workers in <code>delegates_to</code>
+rather than by <code>available</code>, and a compacting worker earns <code>get_message</code> the same way, by its window: it
+reads only the worker's own history, the way back from the notes its compaction leaves in place of what
+it masked.</p>
 <h2 id="residency-what-is-in-context-and-what-loads-on-demand">Residency: what is in context, and what loads on demand<a class="headerlink" href="#residency-what-is-in-context-and-what-loads-on-demand" title="Permanent link">&para;</a></h2>
 <p>Residency asks a different question from availability: of what an agent <em>could</em> call, how much sits in
 its context window on every request? Every other surveyed framework treats this as the dynamic axis.
