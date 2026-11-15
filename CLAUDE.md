@@ -432,7 +432,12 @@ Consequences for working in this repo:
   carrying images, which `generate_image` returns so a vision model can see the image it made. A plain name
   lookup, the eighth; it landed after `TOOL_REQUESTED`, so it subsumes it, and `TOOL_REQUESTED` is pinned in
   the test now. What the name cannot see, that the loops store the image blocks only on a vision model, is
-  pinned there by behavior.
+  pinned there by behavior. **And once more, onto `aimu.context.compaction.chain`**, from the module that
+  bundles AIMU's compaction strategies, which `compaction_for_window` uses to build a worker's
+  `chain(mask(budget), trim(budget))`. A plain name lookup, the ninth, on a module that did not exist before,
+  so an older checkout fails the import itself; it landed after `ToolResult`, which is pinned in the test
+  now. What the name cannot see, masking in place and `get_message` coming with every compaction, is pinned
+  there by behavior.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
@@ -526,8 +531,9 @@ change. Full rationale, with the code that backs each claim, is in
    prompt that never comes. You may loosen as well as tighten; only the key holding the lock list is
    unconditional. **A `confirm` or `review` entry speaks the same vocabulary an agent's `available` list does:**
    `<toolset>` (or `<toolset>.*`) for a whole capability, `<toolset>.<tool>` for one of its tools, with
-   `core` reserved for the tools no toolset provides (`spawn_subagent`, `activate_skill`, and AIMU's
-   `available_tools` / `load_tools` once any agent defers a toolset, so a bare `core` covers all four)
+   `core` reserved for the tools no toolset provides (`spawn_subagent`, `activate_skill`, AIMU's
+   `available_tools` / `load_tools` once any agent defers a toolset, and AIMU's `get_message` once any
+   declared window engages compaction, so a bare `core` covers all five)
    and refused as a toolset name at registration so nothing can shadow it (as `all` is, which
    `available = "all"` has spent). An entry naming a toolset an
    agent defers, and that is not built yet, cannot resolve at startup, since its tools do not exist

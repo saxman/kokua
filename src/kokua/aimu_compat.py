@@ -356,7 +356,23 @@ from typing import Optional
 
 MINIMUM_AIMU = (0, 39, 0)
 
-# The surface is `aimu.tools.ToolResult`, a tool's answer carrying images as well as text. `generate_image`
+# The surface is `aimu.context.compaction.chain`, from the module that bundles AIMU's compaction strategies
+# and ready-made compactions. `compaction_for_window` builds a worker's compaction as
+# `chain(mask(budget), trim(budget))`: old content masked in place with notes naming each message, whole
+# messages dropped only if that is not enough. It runs ahead of every release, like `ToolResult` below,
+# which it replaced: both are on AIMU's main branch for 0.40.0, and the compaction module landed later, so a
+# sibling that has it has `ToolResult` and `TOOL_REQUESTED` too. `_PROBE_UNRELEASED` still names 0.40.0.
+#
+# The shape is a plain name lookup, the ninth time, on a module that did not exist before (the strategies
+# lived in a single `aimu.context` module), so an older checkout fails the import itself and the preflight
+# reports that. Left unprobed it is loud, `core/agents.py` importing it at module scope, but naming a module
+# rather than the fix. What it leaves to the floor is the behavior behind the names: that `mask` replaces
+# content in place in the documented order, and that every run with a compaction carries AIMU's
+# `get_message` for the notes to name. `tests/test_aimu_compat.py` pins both by behavior. `ToolResult` is the
+# floor's job now.
+#
+# Previously, on AIMU main before 0.40.0: the surface was `aimu.tools.ToolResult`, a tool's answer carrying
+# images as well as text. `generate_image`
 # returns one so the model can look at the image it just made instead of only knowing it was shown; without
 # it a vision model reported that it could not see its own result. It runs ahead of every release, like
 # `TOOL_REQUESTED` below, which it replaced: both are on AIMU's main branch for 0.40.0, `ToolResult` landed
@@ -481,9 +497,9 @@ MINIMUM_AIMU = (0, 39, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.tools"
+_PROBE_MODULE = "aimu.context.compaction"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "ToolResult"
+_PROBE_SYMBOL = "chain"
 _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None
@@ -584,6 +600,7 @@ def require_aimu() -> None:
         raise AimuVersionError(
             _message(
                 f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} takes no "
-                f"{_PROBE_PARAMETER!r} argument, so it predates that release"
+                f"{_PROBE_PARAMETER!r} argument"
+                + (", so it predates that release" if _PROBE_UNRELEASED is None else "")
             )
         )

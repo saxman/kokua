@@ -67,9 +67,12 @@ declared. Kokua instead split the group by reach into two toolsets, `fs` (reads)
 
 One name inside the approval lists, `core`, is reserved for the tools no toolset provides:
 `spawn_subagent` and `activate_skill`, plus `available_tools` and `load_tools` once any agent defers a
-toolset (see [Residency](#residency-what-is-in-context-and-what-loads-on-demand)). A bare `core` covers
-all of them and `core.<tool>` names one. A delegating agent earns `spawn_subagent` by naming workers in
-`delegates_to` rather than by `available`.
+toolset (see [Residency](#residency-what-is-in-context-and-what-loads-on-demand)), and `get_message` once
+any declared `context_length` makes a worker compact its requests. A bare `core` covers all of them and
+`core.<tool>` names one. A delegating agent earns `spawn_subagent` by naming workers in `delegates_to`
+rather than by `available`, and a compacting worker earns `get_message` the same way, by its window: it
+reads only the worker's own history, the way back from the notes its compaction leaves in place of what
+it masked.
 
 ## Residency: what is in context, and what loads on demand
 

@@ -381,13 +381,17 @@ Three things to know:
 - **`context_length` is set per request only on Ollama's native API.** Everywhere else the window is
   fixed at model load time, at server launch (`--ctx-size`, `--max-model-len`), or by the vendor, and the
   key is dropped with a warning naming that remedy.
-- **`context_length` has a second job, and it applies on every backend.** A spawned sub-agent trims what
-  each of its requests sends to fit the window declared for it, so a long delegation bounds what it sends
-  instead of failing once the window fills. The trim applies to the request only: the worker's own
-  history stays whole. Three quarters of the declared window is left for messages, since the same window
+- **`context_length` has a second job, and it applies on every backend.** A spawned sub-agent compacts
+  what each of its requests sends to fit the window declared for it, so a long delegation bounds what it
+  sends instead of failing once the window fills. It masks first: its oldest tool results (then images,
+  then its own replies) are replaced in place by a note naming each message, so it still sees which pages
+  it fetched, and the note names `get_message`, a tool the worker carries whenever it compacts, to read a
+  result back from its own history. Only if the notes alone do not fit does it drop whole messages, oldest
+  first. Either way the worker's own history stays whole; only what each request sends changes.
+  Three quarters of the declared window is left for messages, since the same window
   has to hold that worker's system message, its tool block, and the reply. Declaring no `context_length`
-  leaves the trimming off: nothing else states a window (no client reports the one it is talking to), and
-  guessing one would mean trimming a worker's requests against a number nobody wrote down. A worker with
+  leaves compaction off: nothing else states a window (no client reports the one it is talking to), and
+  guessing one would mean compacting a worker's requests against a number nobody wrote down. A worker with
   no declared window instead reports, when it fills, that *its* window filled and that yours is neither
   the cause nor something it ever saw.
   **The conversation you are in is not compacted**, whatever you declare here. Compacting it would no
