@@ -321,8 +321,8 @@ def test_a_spec_carries_a_trimmer_sized_to_the_window_its_agent_resolves(tmp_pat
     compaction = build_agent_specs(config, state, "assistant")["researcher"]["compaction"]
 
     # Its own window, not the global one and not its delegator's: 8,000 leaves 6,000 for messages, so a
-    # conversation over that is trimmed and one under it is handed back unchanged. The bulk sits after the
-    # task, because the task is the one message a trim keeps (AIMU's `keep_first`, default 1): a worker
+    # conversation over that is compacted and one under it is handed back unchanged. The bulk sits after the
+    # task, because the task is the one message compaction keeps (AIMU's `keep_first`, default 1): a worker
     # that lost it would carry on answering a question it could no longer see.
     task = {"role": "user", "content": "find the release date"}
     long_conversation = [
@@ -331,9 +331,9 @@ def test_a_spec_carries_a_trimmer_sized_to_the_window_its_agent_resolves(tmp_pat
         {"role": "user", "content": "and?"},
         {"role": "assistant", "content": "ok"},
     ]
-    trimmed = compaction(long_conversation)
-    assert len(trimmed) < len(long_conversation)
-    assert trimmed[0] == task
+    compacted = compaction(long_conversation)
+    assert long_conversation[1] not in compacted  # the bulk is gone (masked to a note naming it)
+    assert compacted[0] == task
     short = [{"role": "user", "content": "hello"}]
     assert compaction(short) == short
 
@@ -378,11 +378,58 @@ def test_a_worker_inherits_the_global_window_when_it_declares_none(tmp_path):
     assert spec["compaction"](exchange) == exchange
 
 
+def test_a_compacting_worker_masks_its_old_results_before_dropping_anything():
+    """A worker's compaction is mask first, trim as the backstop. The old search result becomes a note naming
+    it and ``get_message``, in place, so the worker still sees that it searched and how to read the result
+    back; no message is dropped while masking is enough."""
+    from kokua.core.agents import compaction_for_window
+
+    task = {"role": "user", "content": "find the release date"}
+    lookup = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "search", "arguments": {}}}],
+    }
+    found = {"role": "tool", "tool_call_id": "c1", "name": "search", "content": "word " * 3_000}
+    latest = [{"role": "assistant", "content": "checking"}, {"role": "user", "content": "and?"}]
+    messages = [{"role": "system", "content": "You are a researcher."}, task, lookup, found, *latest]
+
+    compacted = compaction_for_window({"context_length": 800})(messages)
+
+    assert [m["role"] for m in compacted] == [m["role"] for m in messages]
+    assert compacted[2] == lookup  # the call stays, so the worker knows it searched
+    assert compacted[3]["content"].startswith("[Message 3, the result of search")
+    assert "get_message(3)" in compacted[3]["content"]
+
+
+def test_a_compacting_workers_get_message_is_a_core_tool(tmp_path):
+    """AIMU gives every run with a compaction ``get_message``, which no toolset provides, so a call to it is
+    shown, and can be gated, under the reserved ``core`` prefix like ``available_tools``. It is reserved
+    only when some window engages compaction, since otherwise no agent holds it."""
+    from types import SimpleNamespace
+
+    from aimu.tools.builtin import HISTORY_TOOL_NAME
+
+    from kokua.core.agents import gateable_tools, toolset_of
+
+    entry = SimpleNamespace(tools=[])
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(available=["web"], generation={"context_length": 8000}),
+    }
+    config, state = _state(tmp_path, agents)
+    assert toolset_of(state, "researcher", HISTORY_TOOL_NAME) == "core"
+    assert HISTORY_TOOL_NAME in gateable_tools(state, entry)["core"]
+
+    agents["researcher"] = AgentConfig(available=["web"])
+    config, state = _state(tmp_path, agents)
+    assert HISTORY_TOOL_NAME not in gateable_tools(state, entry)["core"]
+
+
 async def test_the_conversation_the_user_reads_is_never_trimmed(tmp_path):
-    """Compaction reaches a spawned worker's messages and nothing else. The entry agent's messages are
-    the conversation on screen and in the session store, so rewriting them would drop history the user
-    can still see, silently and for the rest of that conversation's life. A worker's are built per spawn
-    and discarded with it, which is what makes an automatic rewrite of them safe to do at all."""
+    """Compaction reaches a spawned worker's requests and nothing else. A compaction no longer rewrites
+    the history it runs on, so compacting the conversation the user reads would not delete it; but no
+    strategy for it is something the configuration lets a user declare yet, so the entry agent has none."""
     from kokua.core.agents import compaction_for_window
     from kokua.core.assistant import Assistant
 

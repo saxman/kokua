@@ -14,8 +14,9 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Collection, Mapping, Optional, Sequence
 
-from aimu import trim_messages
 from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
+from aimu.context.compaction import chain, mask, trim
+from aimu.tools.builtin import HISTORY_TOOL_NAME
 from aimu.tools.groups import CORE_TOOL_NAMES
 
 from kokua.config.file import ConfigError, check_resident_within_available
@@ -707,7 +708,7 @@ def assemble_system_message(
     return "".join(parts)
 
 
-# The share of a declared window left for a worker's messages. `trim_messages` counts messages alone,
+# The share of a declared window left for a worker's messages. A compaction counts messages alone,
 # while the window it has to fit also holds that worker's system message, its tool schemas, and the reply
 # still to be generated -- and a worker's tool block runs to several thousand tokens on its own. A
 # fraction rather than a subtraction of those three sizes: two of them cannot be measured before the
@@ -717,21 +718,27 @@ _COMPACTION_WINDOW_SHARE = 0.75
 
 
 def compaction_for_window(generation: Mapping) -> Optional[Callable[[list[dict]], list[dict]]]:
-    """The trimmer a spawned worker applies to each request it sends, or None to apply none.
+    """The compaction a spawned worker applies to each request it sends, or None to apply none.
 
     Engaged by a declared ``context_length`` and nothing else, because that key is the only place a
     window size is ever stated: no client reports the window it is talking to, so the alternative is
-    Kokua guessing one and trimming a worker's requests against a number nobody wrote down. A worker
+    Kokua guessing one and compacting a worker's requests against a number nobody wrote down. A worker
     with no declared window therefore still fills it and still dies in it, and what it reports when it
     does is AIMU's own doing rather than Kokua's -- since 0.31.0 a spawn returns a tool result naming
     the *sub-agent's* window as the one that filled, where it used to hand the parent a message about
     "the conversation" that the parent read as its own.
 
-    AIMU applies a compaction to what each request sends and leaves the worker's history whole, so
-    nothing it trims is lost. Only a spawned worker gets one today. The entry agent could take one
-    safely for the same reason (its history is the conversation on screen, and a compaction no longer
-    touches that), but which strategy it should run is a choice the configuration does not yet let a
-    user write down, and a window share is not a policy to impose on a conversation nobody asked to trim.
+    Masking first, trimming as the backstop: AIMU's ``mask`` replaces the worker's oldest content in
+    place with a note naming each message (tool results first, the bulk of a research worker's window),
+    so the worker still sees which pages it fetched; ``trim`` drops whole messages only if the notes
+    alone do not fit. Any run with a compaction carries AIMU's ``get_message``, which the notes name, so
+    a worker can read a masked page back from its own history. AIMU leaves that history whole, so
+    nothing either step leaves out is lost.
+
+    Only a spawned worker gets one today. The entry agent could take one safely for the same reason (its
+    history is the conversation on screen, and a compaction never touches that), but which strategy it
+    should run is a choice the configuration does not yet let a user write down, and a window share is
+    not a policy to impose on a conversation nobody asked to compact.
     """
     window = generation.get("context_length")
     if not window:
@@ -745,7 +752,7 @@ def compaction_for_window(generation: Mapping) -> Optional[Callable[[list[dict]]
         # droppable before every turn". Declining leaves the reporting to AIMU, as an undeclared window
         # does.
         return None
-    return lambda messages: trim_messages(messages, max_tokens=budget)
+    return chain(mask(budget), trim(budget))
 
 
 def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str) -> dict[str, dict]:
@@ -979,6 +986,10 @@ def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
     back the entry point to all of them. It is discarded from each skill here and attributed only to the
     reserved prefix. A skill's own scripts stay under the skill, which is also its toolset name.
 
+    AIMU adds tools of its own on top of those three: ``available_tools`` / ``load_tools`` when an agent
+    defers a toolset, and ``get_message`` when a worker's declared window engages compaction (see
+    :func:`compaction_for_window`). Neither has a toolset, so both join the reserved prefix too.
+
     The reserved key is always present, even when it is empty (no delegates declared, no skills on
     disk), so a gate naming it reads as a capability that provides nothing rather than as a misspelling.
     """
@@ -998,6 +1009,11 @@ def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
     # on them is writable only under the reserved prefix.
     if any(loadable_toolsets(state.config, state.registry, name) for name in state.config.agents):
         reserved |= set(CORE_TOOL_NAMES)
+    # A worker whose window engages compaction carries AIMU's get_message, which no toolset provides
+    # either. The global window counts too: it is the one a composed worker compacts to.
+    windows = [state.config.generation_for(name) for name in state.config.agents] + [state.config.generation]
+    if any(compaction_for_window(generation) is not None for generation in windows):
+        reserved.add(HISTORY_TOOL_NAME)
     by_toolset[RESERVED_GATE_NAMESPACE] = reserved
     return by_toolset
 
@@ -1023,7 +1039,7 @@ def toolset_of(state: LiveState, agent_name: Optional[str], tool: str) -> Option
     for name in declared:
         if tool in recorded.get(name, ()):
             return name
-    if tool in CORE_TOOL_NAMES or tool in (_ACTIVATE_SKILL, SPAWN_SUBAGENT_TOOL_NAME):
+    if tool in CORE_TOOL_NAMES or tool in (_ACTIVATE_SKILL, SPAWN_SUBAGENT_TOOL_NAME, HISTORY_TOOL_NAME):
         return RESERVED_GATE_NAMESPACE
     # Every skill on disk rather than the entry agent's scoped catalogue: a script's name already says
     # which skill it belongs to, so the only question left is which skill that is.

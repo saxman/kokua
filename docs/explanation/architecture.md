@@ -1439,8 +1439,10 @@ declaring `fs`, on an upgrade, with no config change and nothing reported. `edit
 read-before-replace guard on `save_document` close the other silent one, since `read_document` now
 returns a window and replacing a whole document from a windowed read deleted everything past the window
 (a 3,000-line document came back 51 lines long). And `compaction` is a spec key `core/agents.py` writes
-per worker from a declared `context_length`, so a long delegation trims what its requests send rather
-than dying in its window (since AIMU 0.40.0 the trim leaves the worker's own history whole).
+per worker from a declared `context_length`, so a long delegation compacts what its requests send rather
+than dying in its window (since AIMU 0.40.0 that is `chain(mask(budget), trim(budget))`: old results
+masked in place with notes naming each message and the `get_message` tool the worker then carries, whole
+messages dropped only as a backstop, and the worker's own history left whole).
 
 The probe gripped the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and that choice was the one
 time this preflight has passed over a *newer* handle on purpose. `select` landed earlier in the release

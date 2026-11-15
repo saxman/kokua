@@ -178,44 +178,43 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_tool_result_that_carries_an_image_to_the_model():
-    """The surface today is ``aimu.tools.ToolResult``, on AIMU main and in no release yet.
+def test_the_probe_targets_the_compaction_module_a_worker_compacts_with():
+    """The surface today is ``aimu.context.compaction.chain``, on AIMU main and in no release yet.
 
-    A name lookup: the class is a new export, so its presence alone dates a checkout. ``toolsets/image.py``
-    imports it at module scope, so an AIMU without it would raise ``ImportError`` while the toolsets load
-    rather than here, naming a symbol rather than the fix.
+    A name lookup on a module that did not exist before (the strategies lived in a single
+    ``aimu.context`` module), so an older checkout fails at the import and the preflight says so.
+    ``core/agents.py`` imports it at module scope, so without the probe the failure would name a module
+    rather than the fix.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    assert isinstance(getattr(module, aimu_compat._PROBE_SYMBOL), type)
-    assert aimu_compat._PROBE_MODULE == "aimu.tools"
+    assert callable(getattr(module, aimu_compat._PROBE_SYMBOL))
+    assert aimu_compat._PROBE_MODULE == "aimu.context.compaction"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "ToolResult"
+    assert aimu_compat._PROBE_SYMBOL == "chain"
     assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
     assert aimu_compat._PROBE_UNRELEASED == "0.40.0"
 
 
-def _tools_without_tool_result(monkeypatch):
+def _aimu_without_the_compaction_module(monkeypatch):
+    def import_module(name):
+        raise ModuleNotFoundError(f"No module named {name!r}")
+
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
-    monkeypatch.setattr(
-        aimu_compat.importlib,
-        "import_module",
-        lambda name: SimpleNamespace(__file__="/site-packages/aimu/tools/__init__.py"),
-    )
+    monkeypatch.setattr(aimu_compat.importlib, "import_module", import_module)
 
 
-def test_a_release_at_the_floor_without_the_tool_result_is_told_no_release_has_it(monkeypatch):
-    """While no release carries ``ToolResult``, a PyPI AIMU at the floor lacks it, and the message does not
-    recommend the install that just failed."""
-    _tools_without_tool_result(monkeypatch)
+def test_a_release_at_the_floor_without_the_module_is_told_no_release_has_it(monkeypatch):
+    """While no release carries the module, a PyPI AIMU at the floor lacks it, and the message names it and
+    does not recommend the install that just failed."""
+    _aimu_without_the_compaction_module(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "ToolResult" in message
+    assert "aimu.context.compaction" in message
     assert "no AIMU release" in message and "0.40.0" in message
-    assert "predates that release" not in message
     assert "--no-sources" not in message
 
 
@@ -223,19 +222,68 @@ def test_a_release_at_the_floor_without_the_probe_is_sent_to_pypi_once_one_has_i
     """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
     checkout, and installing the floor from PyPI is a real remedy again."""
     monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
-    _tools_without_tool_result(monkeypatch)
+    _aimu_without_the_compaction_module(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "ToolResult" in message and "predates that release" in message
+    assert "aimu.context.compaction" in message
     assert "--no-sources" in message
     assert "no AIMU release" not in message
 
 
+def test_the_floor_covers_masking_in_place_behind_the_probed_name():
+    """What a name lookup cannot see: ``mask`` keeps every message where it is and replaces old content
+    with a note naming the message and ``get_message``, tool results first."""
+    from aimu.context.compaction import MASK_ORDER, mask
+
+    messages = [
+        {"role": "user", "content": "task"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "search", "arguments": {}}}],
+        },
+        {"role": "tool", "tool_call_id": "c1", "name": "search", "content": "word " * 400},
+        {"role": "assistant", "content": "noted"},
+        {"role": "user", "content": "and?"},
+    ]
+    masked = mask(100)(messages)
+    assert len(masked) == len(messages)
+    assert (
+        masked[2]["content"].startswith("[Message 2, the result of search") and "get_message(2)" in masked[2]["content"]
+    )
+    assert MASK_ORDER[0] == "tool"
+
+
+def test_the_floor_covers_get_message_coming_with_a_compaction():
+    """Silent if missing: the notes would name a tool the worker does not hold. Every run with a compaction
+    carries AIMU's ``get_message``, read from the agent's own history."""
+    from aimu.aio import Agent
+    from aimu.context.compaction import trim
+    from aimu.tools.builtin import HISTORY_TOOL_NAME
+
+    from tests.helpers import MockAsyncModelClient
+
+    client = MockAsyncModelClient([])
+    client.messages = [{"role": "user", "content": "task"}, {"role": "tool", "name": "search", "content": "found it"}]
+    agent = Agent(client, compaction=trim(1000))
+    tools = agent._make_tool_loop(None, None, None)._current_tools()
+    (history,) = [fn for fn in tools if fn.__name__ == HISTORY_TOOL_NAME]
+    assert history(1).endswith("found it")
+
+
+def test_the_floor_covers_the_tool_result_the_probe_no_longer_grips():
+    """The previous probe surface is the floor's job now that the compaction module, which landed later in
+    the same release, holds the one probe slot. ``toolsets/image.py`` imports it at module scope, so an AIMU
+    without it fails while the toolsets load, naming a symbol."""
+    from aimu.tools import ToolResult
+
+    assert str(ToolResult("drew it")) == "drew it"
+
+
 def test_the_floor_covers_the_announcement_phase_the_probe_no_longer_grips():
-    """The previous probe surface is the floor's job now that ``ToolResult``, which landed later in the same
-    release, holds the one probe slot. ``channels/ui.py`` reads the member by attribute on a turn's first
-    chunk, so an AIMU without it fails mid-turn naming a symbol."""
+    """Two probes back, and the floor's job since: ``channels/ui.py`` reads the member by attribute on a
+    turn's first chunk, so an AIMU without it fails mid-turn naming a symbol."""
     from aimu.models import StreamingContentType
 
     assert "TOOL_REQUESTED" in StreamingContentType.__members__

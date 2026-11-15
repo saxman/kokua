@@ -1778,11 +1778,18 @@ alone. The case that does cost something is a configured MCP server, which conne
   `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
   is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
   `[assistant]` key holding a table.
-  **`context_length` has a second job, and it applies on every backend.** A spawned worker now trims what
-  each of its requests sends to fit the window declared for it, so a long delegation bounds what it sends
-  instead of failing once the window fills. Since AIMU 0.40.0 the trim applies to the request only: the
-  worker's own history stays whole, so nothing it trims is lost. `core.agents.compaction_for_window` builds the
-  trimmer from the resolved `context_length` and `build_agent_specs` writes it into each worker's spec,
+  **`context_length` has a second job, and it applies on every backend.** A spawned worker now compacts
+  what each of its requests sends to fit the window declared for it, so a long delegation bounds what it
+  sends instead of failing once the window fills. Since AIMU 0.40.0 a compaction applies to the request
+  only: the worker's own history stays whole, so nothing it leaves out is lost. **It masks before it drops**:
+  the compaction is AIMU's `chain(mask(budget), trim(budget))`, so the worker's oldest tool results (then
+  images, then its own replies) are replaced in place by a note naming each message and `get_message`,
+  and whole messages are dropped only if the notes alone do not fit. A trim alone used to drop a tool call
+  with its result, and a worker carried on with no record of the pages it had fetched; now the call stays,
+  and the worker can read a masked result back with `get_message`, which AIMU gives every run with a
+  compaction and which Kokua lists under the reserved `core` prefix, so it can be gated like
+  `available_tools`. `core.agents.compaction_for_window` builds the
+  compaction from the resolved `context_length` and `build_agent_specs` writes it into each worker's spec,
   which means a worker declaring its own window compacts to that one and an undeclared worker to the
   global one, never to its delegator's. Three quarters of the window is left for messages, since the
   same window has to hold that worker's system message, its tool block, and the reply, and
