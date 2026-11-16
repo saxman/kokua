@@ -51,7 +51,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.39.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.40.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -60,7 +60,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.39.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.40.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -407,12 +407,12 @@ Consequences for working in this repo:
   "genuinely offers no handle": the probe stays on `RunEvent.run_id`, `aimu_compat` says what that leaves
   uncovered (a checkout claiming 0.38.0 without either change passes), and `tests/test_aimu_compat.py`
   pins both by behavior, which a test may do and a preflight may not.
-  **AIMU 0.39.0 is the current floor, and its probe is the first that ran ahead of every release.** It is a
-  name lookup on `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds, and it moved there
+  **AIMU 0.39.0 was the floor until 0.40.0, and its probe was the first that ran ahead of every release.** It
+  was a name lookup on `aimu.tools.builtin.make_page_tools`, which the `web` toolset builds, and it moved there
   while only AIMU main had it: the floor stayed at 0.38.0 so a sibling on main (still reporting 0.38.0)
   could start, and `_PROBE_UNRELEASED` made the refusal say no release had it rather than recommend
-  `--no-sources`, the install that had just failed. With 0.39.0 published, `_PROBE_UNRELEASED` is None
-  again and kept for the next probe that runs ahead. It subsumes the `RunEvent.run_id` probe it replaced
+  `--no-sources`, the install that had just failed. With 0.39.0 published, `_PROBE_UNRELEASED` went back to
+  None, kept for the next probe that ran ahead. It subsumed the `RunEvent.run_id` probe it replaced
   (it landed later), and that field is pinned in `tests/test_aimu_compat.py` now. The same release's
   silent capability does not get the probe, and the reason is new: `trim_messages` keeps the first message
   after the system prompt (`keep_first`, default 1), a spawned worker's task, which `compaction_for_window`
@@ -423,21 +423,20 @@ Consequences for working in this repo:
   pinned in `tests/test_aimu_compat.py`. 0.39.0 is also when Ollama clients stopped downloading a missing
   model on construction, so a missing model reaches a turn as `ModelNotInstalledError`, imported at module
   scope by `core/turns.py` (loud when absent, so the floor's job).
-  **The probe has since run ahead again, onto `StreamingContentType.TOOL_REQUESTED`, the phase a streamed
-  loop yields for each tool call before it runs, which the web page draws a call's card from.** It is a
-  membership check (the enum is far older than the floor), the floor stays at 0.39.0 so a sibling on AIMU
-  main can start, and `_PROBE_UNRELEASED` names 0.40.0 until that is published, when the floor moves to it
-  and `_PROBE_UNRELEASED` returns to None. `make_page_tools` is pinned in `tests/test_aimu_compat.py` now.
-  **It then moved within that same unreleased 0.40.0, onto `aimu.tools.ToolResult`**, a tool's answer
-  carrying images, which `generate_image` returns so a vision model can see the image it made. A plain name
-  lookup, the eighth; it landed after `TOOL_REQUESTED`, so it subsumes it, and `TOOL_REQUESTED` is pinned in
-  the test now. What the name cannot see, that the loops store the image blocks only on a vision model, is
-  pinned there by behavior. **And once more, onto `aimu.context.compaction.chain`**, from the module that
-  bundles AIMU's compaction strategies, which `compaction_for_window` uses to build a worker's
-  `chain(mask(budget), trim(budget))`. A plain name lookup, the ninth, on a module that did not exist before,
-  so an older checkout fails the import itself; it landed after `ToolResult`, which is pinned in the test
-  now. What the name cannot see, masking in place and `get_message` coming with every compaction, is pinned
-  there by behavior.
+  **AIMU 0.40.0 is the current floor, and its probe ran ahead of the release three times before it shipped.**
+  First onto `StreamingContentType.TOOL_REQUESTED`, the phase a streamed loop yields for each tool call before
+  it runs, which the web page draws a call's card from: a membership check (the enum is far older than the
+  floor). Then onto `aimu.tools.ToolResult`, a tool's answer carrying images, which `generate_image` returns so
+  a vision model can see the image it made: a plain name lookup, the eighth. Then onto
+  `aimu.context.compaction.chain`, from the module that bundles AIMU's compaction strategies, which
+  `compaction_for_window` uses to build a worker's `chain(mask(budget), trim(budget))`: a plain name lookup,
+  the ninth, on a module that did not exist before, so an older checkout fails the import itself. Each landed
+  after the one before, so each probe subsumed the last. Throughout, the floor stayed at 0.39.0 so a sibling
+  on AIMU main could start, and `_PROBE_UNRELEASED` named 0.40.0 so the refusal said no release had the
+  surface yet; with 0.40.0 published, the floor is that release and `_PROBE_UNRELEASED` is None again.
+  `make_page_tools`, `TOOL_REQUESTED`, and `ToolResult` are pinned in `tests/test_aimu_compat.py`, and so is
+  what the current probe's name cannot see: that the loops store image blocks only on a vision model, that
+  masking happens in place, and that `get_message` comes with every compaction.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

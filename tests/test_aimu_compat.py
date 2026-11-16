@@ -179,7 +179,7 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
 
 
 def test_the_probe_targets_the_compaction_module_a_worker_compacts_with():
-    """The surface today is ``aimu.context.compaction.chain``, on AIMU main and in no release yet.
+    """The surface today is ``aimu.context.compaction.chain``, published in 0.40.0, the floor.
 
     A name lookup on a module that did not exist before (the strategies lived in a single
     ``aimu.context`` module), so an older checkout fails at the import and the preflight says so.
@@ -195,7 +195,8 @@ def test_the_probe_targets_the_compaction_module_a_worker_compacts_with():
     assert aimu_compat._PROBE_SYMBOL == "chain"
     assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
-    assert aimu_compat._PROBE_UNRELEASED == "0.40.0"
+    # 0.40.0 is published, so no probe is running ahead of a release.
+    assert aimu_compat._PROBE_UNRELEASED is None
 
 
 def _aimu_without_the_compaction_module(monkeypatch):
@@ -206,22 +207,9 @@ def _aimu_without_the_compaction_module(monkeypatch):
     monkeypatch.setattr(aimu_compat.importlib, "import_module", import_module)
 
 
-def test_a_release_at_the_floor_without_the_module_is_told_no_release_has_it(monkeypatch):
-    """While no release carries the module, a PyPI AIMU at the floor lacks it, and the message names it and
-    does not recommend the install that just failed."""
-    _aimu_without_the_compaction_module(monkeypatch)
-    with pytest.raises(AimuVersionError) as excinfo:
-        require_aimu()
-    message = str(excinfo.value)
-    assert "aimu.context.compaction" in message
-    assert "no AIMU release" in message and "0.40.0" in message
-    assert "--no-sources" not in message
-
-
-def test_a_release_at_the_floor_without_the_probe_is_sent_to_pypi_once_one_has_it(monkeypatch):
+def test_a_checkout_claiming_the_floor_without_the_module_is_sent_to_pypi(monkeypatch):
     """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
-    checkout, and installing the floor from PyPI is a real remedy again."""
-    monkeypatch.setattr(aimu_compat, "_PROBE_UNRELEASED", None)
+    checkout, and installing the floor from PyPI is a real remedy."""
     _aimu_without_the_compaction_module(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
@@ -639,10 +627,10 @@ def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
     assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_39_0():
+def test_the_floor_is_0_40_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 39, 0)
+    assert MINIMUM_AIMU == (0, 40, 0)
 
 
 def test_the_floor_covers_a_trim_that_keeps_the_workers_task():

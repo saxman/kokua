@@ -1332,7 +1332,16 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.39.0`**, and the probe is a name lookup on `aimu.tools.builtin.make_page_tools`,
+The floor is now **`aimu>=0.40.0`**, and the probe is a name lookup on `aimu.context.compaction.chain`, from
+the module that bundles AIMU's compaction strategies, which a spawned worker compacts with. That release
+carries three capabilities Kokua depends on, and the probe ran ahead of it through each in turn while only
+AIMU's main branch had them: `StreamingContentType.TOOL_REQUESTED` (the phase the web page draws a running
+tool call from), then `aimu.tools.ToolResult` (so `generate_image` hands the model its image), then the
+compaction module. Each landed after the one before, so each probe subsumed the last, and throughout the
+floor read 0.39.0 so a sibling on main could start, with `_PROBE_UNRELEASED` keeping the refusal from
+recommending a PyPI install that could not yet work. With 0.40.0 published, `_PROBE_UNRELEASED` is None.
+
+Before it, the floor was `aimu>=0.39.0`, and the probe was a name lookup on `aimu.tools.builtin.make_page_tools`,
 the factory the `web` toolset builds `fetch_page`, `read_page`, and `find_in_page` from. The probe moved
 there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
 `aimu_compat._PROBE_UNRELEASED` kept the refusal from recommending the PyPI install that had just failed.

@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.39.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.40.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -354,14 +354,21 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 39, 0)
+MINIMUM_AIMU = (0, 40, 0)
 
+# The floor is 0.40.0, for the three capabilities that release carries and Kokua depends on: the
+# `TOOL_REQUESTED` phase the web page draws a running tool call from, `aimu.tools.ToolResult` so
+# `generate_image` can hand the model its image, and `aimu.context.compaction`, which a worker compacts with.
+# The probe ran ahead of the release through all three, the floor holding at 0.39.0 so a sibling on AIMU main
+# could start and `_PROBE_UNRELEASED` saying no release had them yet; with 0.40.0 published, the floor is that
+# release and `_PROBE_UNRELEASED` is back to None, kept for the next probe that runs ahead.
+#
 # The surface is `aimu.context.compaction.chain`, from the module that bundles AIMU's compaction strategies
 # and ready-made compactions. `compaction_for_window` builds a worker's compaction as
 # `chain(mask(budget), trim(budget))`: old content masked in place with notes naming each message, whole
-# messages dropped only if that is not enough. It runs ahead of every release, like `ToolResult` below,
-# which it replaced: both are on AIMU's main branch for 0.40.0, and the compaction module landed later, so a
-# sibling that has it has `ToolResult` and `TOOL_REQUESTED` too. `_PROBE_UNRELEASED` still names 0.40.0.
+# messages dropped only if that is not enough. It replaced `ToolResult` below while both were only on AIMU's
+# main branch, and the compaction module landed later in 0.40.0, so a checkout that has it has `ToolResult`
+# and `TOOL_REQUESTED` too.
 #
 # The shape is a plain name lookup, the ninth time, on a module that did not exist before (the strategies
 # lived in a single `aimu.context` module), so an older checkout fails the import itself and the preflight
@@ -374,9 +381,9 @@ MINIMUM_AIMU = (0, 39, 0)
 # Previously, on AIMU main before 0.40.0: the surface was `aimu.tools.ToolResult`, a tool's answer carrying
 # images as well as text. `generate_image`
 # returns one so the model can look at the image it just made instead of only knowing it was shown; without
-# it a vision model reported that it could not see its own result. It runs ahead of every release, like
-# `TOOL_REQUESTED` below, which it replaced: both are on AIMU's main branch for 0.40.0, `ToolResult` landed
-# later, so a sibling that has it has the phase too. `_PROBE_UNRELEASED` still names 0.40.0.
+# it a vision model reported that it could not see its own result. It ran ahead of the release, like
+# `TOOL_REQUESTED` below, which it replaced: both were on AIMU's main branch for 0.40.0, and `ToolResult`
+# landed later, so a sibling that had it had the phase too.
 #
 # The shape is a plain name lookup, the eighth time: the class is a new export, so its presence alone dates
 # a checkout. Left unprobed it is loud, `toolsets/image.py` importing it at module scope while the toolsets
@@ -388,9 +395,9 @@ MINIMUM_AIMU = (0, 39, 0)
 # Previously, on AIMU main before 0.40.0: the surface was `StreamingContentType.TOOL_REQUESTED`, the phase a
 # streamed agent loop yields for each tool call before it is approved or run. Kokua's web page draws a call from it while the tool works and
 # fills that card in when the call's `TOOL_CALLING` result arrives with the same `id`; without it, a call
-# that takes a minute (an image generation) shows nothing for that minute. It runs ahead of every release
-# the way `make_page_tools` did below: it is on AIMU's main branch, the floor stays at 0.39.0 so a sibling
-# on main (still reporting 0.39.0) can start, and `_PROBE_UNRELEASED` names 0.40.0 until that ships.
+# that takes a minute (an image generation) shows nothing for that minute. It ran ahead of the release the
+# way `make_page_tools` did below: it was on AIMU's main branch, the floor stayed at 0.39.0 so a sibling on
+# main (still reporting 0.39.0) could start, and `_PROBE_UNRELEASED` named 0.40.0 until that shipped.
 #
 # The shape is a membership check, the fourth time (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` and
 # `compaction`, `StreamingContentType`'s `CONTINUING`): the enum is far older than this floor, so only
@@ -504,7 +511,7 @@ _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None
 #: once one does. Set, it replaces the "install the floor from PyPI" remedy, which cannot work.
-_PROBE_UNRELEASED: Optional[str] = "0.40.0"
+_PROBE_UNRELEASED: Optional[str] = None
 
 
 class AimuVersionError(RuntimeError):
