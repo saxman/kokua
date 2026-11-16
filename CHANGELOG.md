@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.40.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -799,9 +799,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.39.0 or newer
   nothing against a transcript accepts it as `conversation_id=None` and ignores it. `send_prompt_retired()`
   is new and optional, like every rich frame: a channel without it gets no retirement, which is right
   for one whose prompt is a printed line.
-- **The AIMU floor is 0.39.0**, for the page tools the `web` toolset builds (`make_page_tools`) and for a
-  compaction that keeps a worker's task (see `context_length` under Configuration). Before it the floor
-  was 0.38.0, for a `calculate` that evaluates arithmetic and nothing else (it was an
+- **The AIMU floor is 0.40.0**, for the `TOOL_REQUESTED` phase that draws a tool call's card as it starts,
+  for `ToolResult` so `generate_image` can hand the model the image it made, and for
+  `aimu.context.compaction`, which a spawned worker compacts with (`chain(mask(...), trim(...))`, and the
+  `get_message` tool that comes with it). Before it the floor was 0.39.0, for the page tools the `web`
+  toolset builds (`make_page_tools`) and for a compaction that keeps a worker's task (see `context_length`
+  under Configuration). Before that it was 0.38.0, for a `calculate` that evaluates arithmetic and nothing else (it was an
   escapable `eval`, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
   of a worker cut off at its round cap. Before that it was 0.37.0, for the spawn spec's
   `"tool_approval"` key and for `ToolGroup`, which residency rides. See the floor history under
@@ -2262,7 +2265,13 @@ notice on startup.
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
-  Today the floor is **0.39.0**, and the check probes `aimu.tools.builtin.make_page_tools`, which the
+  Today the floor is **0.40.0**, and the check probes `aimu.context.compaction.chain`, from the module a
+  spawned worker compacts with. 0.40.0 carries three capabilities Kokua depends on: the `TOOL_REQUESTED`
+  phase a running tool call is drawn from, `ToolResult` so a generated image reaches the model, and the
+  compaction module. The probe ran ahead of the release through all three in turn (each landed after the
+  last, so each subsumed the one before), with the floor held at 0.39.0 and the message saying no release
+  had them yet, until 0.40.0 was published.
+  Before it the floor was **0.39.0**, and the check probed `aimu.tools.builtin.make_page_tools`, which the
   `web` toolset builds. The probe moved there before 0.39.0 was published, while the floor still read
   0.38.0 so a sibling on AIMU main could start, and for that stretch the message said no release had the
   page tools yet rather than offering `--no-sources` and PyPI, the install that had just failed. The same
