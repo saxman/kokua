@@ -1,4 +1,5 @@
-"""The image toolset: the env gate and the generator that publishes its image to the turn."""
+"""The image toolset: the env gate, the generator that publishes its image to the turn, and refining an
+earlier image by passing it as a reference."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import threading
 import types
 from pathlib import Path
 
+from kokua import images
 from kokua.config import AssistantConfig
 from kokua.toolsets.image import build
 
@@ -133,3 +135,104 @@ def test_generate_image_reports_an_unbuildable_client(tmp_path, monkeypatch):
     contents = _drain(generate_image("a cat"))
     assert len(contents) == 1  # it never reaches the generator loop
     assert "unavailable" in contents[0]["result"] and "AIMU_IMAGE_MODEL" in contents[0]["result"]
+
+
+# --- refining an earlier image ------------------------------------------------------------------
+
+
+def _parameters(tool) -> list[str]:
+    return list(tool.__tool_spec__["function"]["parameters"]["properties"])
+
+
+def _shaped(monkeypatch, starts_from_image, honours_strength):
+    monkeypatch.setenv("AIMU_IMAGE_MODEL", "hf:some/model")
+    monkeypatch.setattr("kokua.toolsets.image.reference_support", lambda model: (starts_from_image, honours_strength))
+
+
+def test_the_tool_offers_only_what_the_image_model_honours(tmp_path, monkeypatch):
+    _shaped(monkeypatch, False, False)
+    assert _parameters(build(_config(tmp_path))[0]) == ["prompt"]
+    _shaped(monkeypatch, True, False)
+    assert _parameters(build(_config(tmp_path))[0]) == ["prompt", "reference_image"]
+    _shaped(monkeypatch, True, True)
+    assert _parameters(build(_config(tmp_path))[0]) == ["prompt", "reference_image", "strength"]
+
+
+def test_the_description_says_a_reference_cannot_zoom_out(tmp_path, monkeypatch):
+    """ "Show me more of it" is the refinement a user most naturally asks for, and image-to-image cannot
+    do it; saying so lets the model set the expectation instead of discovering it after a minute."""
+    _shaped(monkeypatch, True, True)
+    description = build(_config(tmp_path))[0].__tool_spec__["function"]["description"]
+    assert "cannot zoom out" in description
+
+
+def _stored(config) -> str:
+    """Store an image the way an upload or a generation is stored, and return its reference."""
+    return images.save_data_url(config.images_path, "data:image/png;base64," + base64.b64encode(b"ref").decode("ascii"))
+
+
+def test_a_reference_and_strength_reach_the_image_client(tmp_path, monkeypatch):
+    _shaped(monkeypatch, True, True)
+    config = _config(tmp_path)
+    reference = _stored(config)
+    received = {}
+
+    def generate(prompt, *, format, output_dir, stream, **options):
+        received.update(options)
+        yield _Chunk({"progress": 1.0})
+
+    _install_fake_aimu(monkeypatch, generate)
+    (generate_image,) = build(config)
+    _drain(generate_image("the same giraffe, in watercolour", reference_image=reference, strength=0.4))
+
+    assert received == {"reference_image": images.reference_to_path(config.images_path, reference), "strength": 0.4}
+
+
+def test_no_reference_means_no_reference_options(tmp_path, monkeypatch):
+    _shaped(monkeypatch, True, True)
+    received = {}
+
+    def generate(prompt, *, format, output_dir, stream, **options):
+        received.update(options)
+        yield _Chunk({"progress": 1.0})
+
+    _install_fake_aimu(monkeypatch, generate)
+    (generate_image,) = build(_config(tmp_path))
+    _drain(generate_image("a giraffe"))
+    assert received == {}
+
+
+def test_an_unknown_or_escaping_reference_is_answered_not_generated(tmp_path, monkeypatch):
+    _shaped(monkeypatch, True, True)
+    calls = []
+
+    def generate(prompt, **kwargs):
+        calls.append(prompt)
+        yield _Chunk({"progress": 1.0})
+
+    _install_fake_aimu(monkeypatch, generate)
+    (generate_image,) = build(_config(tmp_path))
+    for reference in ("/images/nope.png", "/images/../config.toml", "/etc/passwd"):
+        (answer,) = _drain(generate_image("x", reference_image=reference))
+        assert "There is no stored image" in answer["result"]
+    assert calls == []
+
+
+def test_a_strength_out_of_range_is_answered(tmp_path, monkeypatch):
+    _shaped(monkeypatch, True, True)
+    config = _config(tmp_path)
+    reference = _stored(config)
+    _install_fake_aimu(monkeypatch, lambda prompt, **kwargs: iter(()))
+    (generate_image,) = build(config)
+    (answer,) = _drain(generate_image("x", reference_image=reference, strength=1.5))
+    assert "strength must be greater than 0 and at most 1" in answer["result"]
+
+
+def test_reference_support_reads_aimus_catalogue():
+    """The configured SD 1.5 has an image-to-image pipeline that takes strength; an uncatalogued model is
+    treated as taking neither, so nothing is offered that cannot be honoured."""
+    from kokua.toolsets.image import reference_support
+
+    reference_support.cache_clear()
+    assert reference_support("hf:runwayml/stable-diffusion-v1-5") == (True, True)
+    assert reference_support("hf:someone/not-catalogued") == (False, False)

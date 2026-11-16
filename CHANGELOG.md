@@ -1995,6 +1995,14 @@ alone. The case that does cost something is a configured MCP server, which conne
   the request instead of reporting that it cannot see its own result. A model without vision is sent
   the result's text alone. The image is stored by reference like an upload, and it is re-sent with every
   later request in that conversation, as an attached image is.
+- **The assistant can refine an earlier image.** `generate_image` takes a `reference_image`, the
+  `/images/...` reference of one it generated or one you attached, and starts from it rather than from
+  nothing; on a local HuggingFace model it also takes a `strength` for how far the result may move from
+  the original. Before, every refinement was a fresh image from text, and the assistant said it could not
+  edit the existing one. The arguments are offered only when the configured model can honour them (read
+  from AIMU's catalogue, so an uncatalogued model keeps the prompt-only tool), a reference is checked by
+  the same guard that serves uploads, and the tool's description says that starting from an image keeps
+  its framing and cannot zoom out, since "show more of it" is the request it cannot meet.
 
 ### Payloads
 

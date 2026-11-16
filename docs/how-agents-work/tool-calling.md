@@ -100,9 +100,10 @@ reasoning is more text it generated.
 
 ## In Kokua
 
-A tool is a plain Python function with a docstring. Kokua's smallest complete toolset,
-[`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py), is one
-tool and the declaration that offers it, trimmed here to those two things:
+A tool is a plain Python function with a docstring. Kokua's
+[`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) is one
+tool and the declaration that offers it, trimmed here to those two things and to the simplest of the
+tool's three shapes:
 
 ```python
     @tool
@@ -142,6 +143,16 @@ result was the sentence alone, and an assistant asked how its giraffe turned out
 that it could not see it. A model without vision is still sent the sentence alone. The person gets the
 image another way: the tool *publishes* the file to the running turn (`core/artifacts.py`), and the turn
 shows it, so nothing depends on the model or the channel noticing a reference in the text.
+
+The signature is not fixed, and that is a fourth contract. `build()` gives the tool one of three shapes,
+depending on what the configured image model can honour, read from AIMU's catalogue: `prompt` alone;
+`prompt` and `reference_image`, for a model that can start from an earlier image; or both plus
+`strength`, for a local model whose image-to-image step takes one. A schema is a promise made before any
+call, so an argument the model would be refused for using is better not offered than explained away
+afterwards. The same reasoning put a sentence in the reference-taking description that image-to-image
+keeps the original's framing and "cannot zoom out or extend the picture beyond its edges". Asked for the
+same giraffe "but with more of its body", a model that has read that can say up front what the tool can
+and cannot do, instead of generating three images and discovering it.
 
 The second paragraph is worth reading twice on a page arguing that a docstring is a promise, because an
 earlier version of it broke one. That version told the model that without `AIMU_IMAGE_MODEL` the tool

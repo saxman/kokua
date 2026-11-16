@@ -293,7 +293,7 @@ writes into. So the useful thing to do next is read one:
 - [`toolsets/benchmark.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/benchmark.py) is the smallest complete one with real
   work in it: one tool, no arguments, no dependencies beyond what Kokua already has.
 - [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) shows a `build` that returns *nothing* when its
-  prerequisite is missing, so the model is never offered a tool it cannot satisfy.
+  prerequisite is missing, so the model is never offered a tool it cannot satisfy, and offers only the\n  arguments the configured image model honours (`reference_image`, `strength`).
 - [`toolsets/github_backup.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py) shows a toolset that owns
   `config.toml` settings of its own, via `Setting` declarations in its `[github_backup]` section.
 - [`toolsets/aimu_agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py) shows the same shape carrying a
@@ -378,7 +378,7 @@ Kokua's own three toolsets register exactly this way in its
 [`pyproject.toml`](https://github.com/saxman/kokua/blob/main/pyproject.toml). If the built-in path and the plugin path ever diverge, the
 plugin path is the broken one.
 
-- [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) is the minimal template, and also shows a
+- [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) is the template, and also shows a
   `build` that returns no tools when its prerequisite is absent, so the model never sees a tool it cannot
   satisfy.
 - [`skills/dice-roller/`](https://github.com/saxman/kokua/tree/main/skills/dice-roller/) is the equivalent template for a skill, which is the
