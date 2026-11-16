@@ -1564,6 +1564,14 @@ any role, so the image is stored as a reference and re-inlined on restore like a
 want a tool result's *text* (a replayed tool card, the planning reviewer's evidence) read it through
 `messages.message_text` rather than `str()`, so a card never shows the image's base64.
 
+Refining goes the other way: the model hands an image *to* the tool. `generate_image` takes a
+`reference_image` (an `/images/...` reference, resolved through `images.reference_to_path`, the same guard
+the web server's image route uses, so only a file directly in `images_path` can be named) and, on a local
+HuggingFace model, a `strength`. The image client starts from that file (image-to-image), which keeps the
+original's framing. The tool's shape is chosen at build time from AIMU's catalogue entry for the configured
+model (`toolsets.image.reference_support`, cached because the lookup imports the provider's library), so a
+model that cannot start from an image is never offered the argument.
+
 ## Payloads
 
 `payloads.py` solves the same problem `images.py` does, for oversized text instead of image bytes:
