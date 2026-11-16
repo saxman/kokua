@@ -2086,7 +2086,7 @@ writes into. So the useful thing to do next is read one:</p>
 <li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/benchmark.py"><code>toolsets/benchmark.py</code></a> is the smallest complete one with real
   work in it: one tool, no arguments, no dependencies beyond what Kokua already has.</li>
 <li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> shows a <code>build</code> that returns <em>nothing</em> when its
-  prerequisite is missing, so the model is never offered a tool it cannot satisfy.</li>
+  prerequisite is missing, so the model is never offered a tool it cannot satisfy, and offers only the\n  arguments the configured image model honours (<code>reference_image</code>, <code>strength</code>).</li>
 <li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py"><code>toolsets/github_backup.py</code></a> shows a toolset that owns
   <code>config.toml</code> settings of its own, via <code>Setting</code> declarations in its <code>[github_backup]</code> section.</li>
 <li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py"><code>toolsets/aimu_agents.py</code></a> shows the same shape carrying a
@@ -2163,7 +2163,7 @@ section -- see <a href="#own-a-config-section">own a config section</a> above fo
 <a href="https://github.com/saxman/kokua/blob/main/pyproject.toml"><code>pyproject.toml</code></a>. If the built-in path and the plugin path ever diverge, the
 plugin path is the broken one.</p>
 <ul>
-<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> is the minimal template, and also shows a
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> is the template, and also shows a
   <code>build</code> that returns no tools when its prerequisite is absent, so the model never sees a tool it cannot
   satisfy.</li>
 <li><a href="https://github.com/saxman/kokua/tree/main/skills/dice-roller/"><code>skills/dice-roller/</code></a> is the equivalent template for a skill, which is the

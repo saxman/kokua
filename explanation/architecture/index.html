@@ -3571,7 +3571,15 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.39.0</code></strong>, and the probe is a name lookup on <code>aimu.tools.builtin.make_page_tools</code>,
+<p>The floor is now <strong><code>aimu&gt;=0.40.0</code></strong>, and the probe is a name lookup on <code>aimu.context.compaction.chain</code>, from
+the module that bundles AIMU's compaction strategies, which a spawned worker compacts with. That release
+carries three capabilities Kokua depends on, and the probe ran ahead of it through each in turn while only
+AIMU's main branch had them: <code>StreamingContentType.TOOL_REQUESTED</code> (the phase the web page draws a running
+tool call from), then <code>aimu.tools.ToolResult</code> (so <code>generate_image</code> hands the model its image), then the
+compaction module. Each landed after the one before, so each probe subsumed the last, and throughout the
+floor read 0.39.0 so a sibling on main could start, with <code>_PROBE_UNRELEASED</code> keeping the refusal from
+recommending a PyPI install that could not yet work. With 0.40.0 published, <code>_PROBE_UNRELEASED</code> is None.</p>
+<p>Before it, the floor was <code>aimu&gt;=0.39.0</code>, and the probe was a name lookup on <code>aimu.tools.builtin.make_page_tools</code>,
 the factory the <code>web</code> toolset builds <code>fetch_page</code>, <code>read_page</code>, and <code>find_in_page</code> from. The probe moved
 there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
 <code>aimu_compat._PROBE_UNRELEASED</code> kept the refusal from recommending the PyPI install that had just failed.
@@ -3778,6 +3786,13 @@ learn a new shape for this: the persist-and-restore rewrite above maps <code>ima
 any role, so the image is stored as a reference and re-inlined on restore like an upload. The readers that
 want a tool result's <em>text</em> (a replayed tool card, the planning reviewer's evidence) read it through
 <code>messages.message_text</code> rather than <code>str()</code>, so a card never shows the image's base64.</p>
+<p>Refining goes the other way: the model hands an image <em>to</em> the tool. <code>generate_image</code> takes a
+<code>reference_image</code> (an <code>/images/...</code> reference, resolved through <code>images.reference_to_path</code>, the same guard
+the web server's image route uses, so only a file directly in <code>images_path</code> can be named) and, on a local
+HuggingFace model, a <code>strength</code>. The image client starts from that file (image-to-image), which keeps the
+original's framing. The tool's shape is chosen at build time from AIMU's catalogue entry for the configured
+model (<code>toolsets.image.reference_support</code>, cached because the lookup imports the provider's library), so a
+model that cannot start from an image is never offered the argument.</p>
 <h2 id="payloads">Payloads<a class="headerlink" href="#payloads" title="Permanent link">&para;</a></h2>
 <p><code>payloads.py</code> solves the same problem <code>images.py</code> does, for oversized text instead of image bytes:
 content-addressed filenames under <code>payloads_path</code> (the sha256 of the UTF-8 text, so identical content
