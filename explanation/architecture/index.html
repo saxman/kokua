@@ -3543,9 +3543,8 @@ which is the silent-degradation shape this preflight exists to catch.</p>
 the second time membership has answered (0.18.0's <code>SUBAGENT_SPEC_KEYS</code> was the first). <code>StreamingContentType</code>
 itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
 this member dates a checkout, the same argument <code>SUBAGENT_SPEC_KEYS</code> made one container kind over. It
-reads <code>__members__</code> rather than testing membership directly, because <code>in</code> on an enum compares <em>values</em> on
-Python 3.12 and raises <code>TypeError</code> for a plain string on 3.11, which Kokua still supports, and the
-capability here is a member's <em>name</em>, not its value.</p>
+reads <code>__members__</code> rather than testing membership directly, because <code>in</code> on an enum compares <em>values</em>,
+and the capability here is a member's <em>name</em>, not its value.</p>
 <p>What the probe leaves to the floor: whether both streamed drivers emit the chunk, and whether both
 injection kinds (a continuation nudge and a forced wrap-up) do. A checkout carrying the member but wired
 to only one driver, or emitting it for only one injection kind, still passes, the same shape of gap
