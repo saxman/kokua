@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.14'
           cache: pip
       # AIMU comes from its main branch for the same reason ci.yml does it: the two projects are
       # developed together. The web extra is here because the API reference page will import the

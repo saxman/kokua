@@ -189,8 +189,8 @@ Consequences for working in this repo:
   `"CONTINUING"`, the third shape it has taken and the second time membership has answered
   (0.18.0's `SUBAGENT_SPEC_KEYS` was the first): the class itself predates this floor by a long way, so its
   mere presence proves nothing, and only whether it carries this member dates a checkout. It reads
-  `__members__` rather than writing a bare `in`, because `in` on an enum compares *values* on Python 3.12
-  and raises `TypeError` for a plain string on 3.11, which Kokua still supports, and the capability here is
+  `__members__` rather than writing a bare `in`, because `in` on an enum compares *values* (and raised
+  `TypeError` for a plain string on Python 3.11, which Kokua supported then), and the capability here is
   a member's *name*, not its value. What it leaves to the floor: whether both streamed drivers emit the
   chunk, and whether both injection kinds (a continuation nudge and a forced wrap-up) do, the same shape of
   gap `events`' recursive passthrough left one level down for its own capability.

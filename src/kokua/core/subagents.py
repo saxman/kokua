@@ -381,7 +381,7 @@ class SubagentReporter:
             return
         try:
             await self._ui.show_subagent(event)
-        except (Exception, asyncio.CancelledError):
+        except Exception, asyncio.CancelledError:
             logger.debug("A sub-agent's closing frame could not be sent; it is still recorded.", exc_info=True)
 
     def _record(self, event: dict) -> None:

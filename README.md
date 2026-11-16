@@ -80,7 +80,7 @@ None of these is a mode or a preset. Each is the same declared machinery pointed
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.40.0 or newer.
+Kokua needs Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.40.0 or newer.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua

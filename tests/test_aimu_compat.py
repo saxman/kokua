@@ -83,9 +83,9 @@ def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
 
 
 def test_a_probe_that_checks_an_enum_member_still_works(monkeypatch):
-    """Two container shapes reach the same check. A frozenset answers ``in`` by value; an enum class
-    answers it by value too on 3.12 and raises TypeError on 3.11, so the check reads ``__members__``
-    when it is there and the container itself when it is not.
+    """Two container shapes reach the same check. A frozenset answers ``in`` by value, and so does an
+    enum class, whose capability is a member's name, so the check reads ``__members__`` when it is
+    there and the container itself when it is not.
     """
     from enum import Enum
 

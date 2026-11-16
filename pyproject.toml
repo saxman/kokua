@@ -3,7 +3,7 @@ name = "kokua"
 version = "0.1.0"
 description = "Kokua (Hawaiian: help, assistance): a hackable, modular personal-assistant application built on AIMU."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { file = "LICENSE" }
 authors = [{ name = "Paul Saxman" }]
 keywords = ["ai", "assistant", "agent", "llm", "aimu", "personal-assistant"]
@@ -12,9 +12,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -193,7 +191,7 @@ kokua = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py314"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

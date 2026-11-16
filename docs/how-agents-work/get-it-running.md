@@ -8,7 +8,7 @@ run needs.
 
 ## Requirements
 
-Python 3.11+, and a model. Every capture behind these pages talked to a local model served by
+Python 3.14+, and a model. Every capture behind these pages talked to a local model served by
 [Ollama](https://ollama.com): free, runs on your own machine, nothing to sign up for.
 
 ```bash

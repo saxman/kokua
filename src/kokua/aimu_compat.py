@@ -592,8 +592,7 @@ def require_aimu() -> None:
         )
     # `in` reads a frozenset directly and an enum class by name through `__members__`. The fallback is
     # the container itself, so the set shape is unchanged; the detour matters because `in` on an enum
-    # compares *values* on Python 3.12 and raises TypeError on 3.11, and the capability here is a
-    # member's name.
+    # compares *values*, and the capability here is a member's name.
     if _PROBE_MEMBER is not None and _PROBE_MEMBER not in getattr(probed, "__members__", probed):
         raise AimuVersionError(
             _message(

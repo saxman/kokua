@@ -1300,9 +1300,8 @@ The probe is a membership check on `StreamingContentType.CONTINUING`, the third 
 the second time membership has answered (0.18.0's `SUBAGENT_SPEC_KEYS` was the first). `StreamingContentType`
 itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
 this member dates a checkout, the same argument `SUBAGENT_SPEC_KEYS` made one container kind over. It
-reads `__members__` rather than testing membership directly, because `in` on an enum compares *values* on
-Python 3.12 and raises `TypeError` for a plain string on 3.11, which Kokua still supports, and the
-capability here is a member's *name*, not its value.
+reads `__members__` rather than testing membership directly, because `in` on an enum compares *values*,
+and the capability here is a member's *name*, not its value.
 
 What the probe leaves to the floor: whether both streamed drivers emit the chunk, and whether both
 injection kinds (a continuation nudge and a forced wrap-up) do. A checkout carrying the member but wired

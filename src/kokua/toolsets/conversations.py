@@ -110,7 +110,7 @@ def _clamp(value, low: int, high: int, default: int) -> int:
     """
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if number < low:
         return default

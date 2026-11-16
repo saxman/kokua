@@ -110,7 +110,7 @@ def _parse_control(raw: str) -> Optional[dict]:
     """
     try:
         obj = json.loads(raw)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     if isinstance(obj, dict) and obj.get("type") in _CONTROL_TYPES:
         return obj
@@ -134,7 +134,7 @@ def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str], Opti
     """
     try:
         obj = json.loads(raw)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     if not (isinstance(obj, dict) and obj.get("type") == "input"):
         return None
@@ -581,7 +581,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                     elif control["type"] == "branch":
                         try:
                             index = int(control.get("message_index", -1))
-                        except (TypeError, ValueError):
+                        except TypeError, ValueError:
                             await channel.send("Sorry, that branch point could not be read.")
                             continue
                         try:
@@ -598,7 +598,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                     elif control["type"] == "truncate":
                         try:
                             index = int(control.get("message_index", -1))
-                        except (TypeError, ValueError):
+                        except TypeError, ValueError:
                             await channel.send("Sorry, that turn could not be read.")
                             continue
                         try:

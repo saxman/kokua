@@ -773,7 +773,7 @@ def _read_json(payloads_path: Path, reference: Optional[str]) -> Any:
     try:
         text = payloads.read_text(payloads_path, reference)
         return None if text is None else json.loads(text)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
 
 

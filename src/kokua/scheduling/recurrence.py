@@ -17,7 +17,7 @@ def _parse_hhmm(value) -> tuple[int, int]:
     try:
         hour_str, minute_str = value.split(":")
         hour, minute = int(hour_str), int(minute_str)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         raise ValueError(f"time must be 'HH:MM', got {value!r}")
     if not (0 <= hour < 24 and 0 <= minute < 60):
         raise ValueError(f"time out of range: {value!r}")
@@ -36,7 +36,7 @@ def next_fire(schedule: dict, now: datetime) -> Optional[float]:
         raw = schedule.get("at")
         try:
             at = datetime.fromisoformat(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise ValueError(f"once.at must be an ISO-8601 datetime, got {raw!r}")
         delta = (at - now).total_seconds()
         return delta if delta > 0 else None
