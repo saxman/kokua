@@ -534,7 +534,7 @@ change. Full rationale, with the code that backs each claim, is in
    `[security] locked_config_keys`, an agent's `available` list), never a constant in the source. A control that would do nothing, a gate that would hold nothing back or a lock pattern
    matching no real key, is a hard startup error rather than a silent no-op, because nobody notices a
    prompt that never comes. You may loosen as well as tighten; only the key holding the lock list is
-   unconditional. **A `confirm` or `review` entry speaks the same vocabulary an agent's `available` list does:**
+   unconditional. **A `confirm` or `review` entry speaks the same vocabulary an agent's `available` list does,** except parts, which an entry never names (it names their toolset):
    `<toolset>` (or `<toolset>.*`) for a whole capability, `<toolset>.<tool>` for one of its tools, with
    `core` reserved for the tools no toolset provides (`spawn_subagent`, `activate_skill`, AIMU's
    `available_tools` / `load_tools` once any agent defers a toolset, and AIMU's `get_message` once any

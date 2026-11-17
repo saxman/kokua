@@ -54,9 +54,12 @@ also in: work:/archive/Methods.md
 ```
 
 That is the shape of the output, built in AIMU's `search_documents`; a result longer than an excerpt
-ends with the `read_document` call that returns the rest. The guidance in `toolsets/documents.py` asks
-the model to search first, then read the document a result came from before summarizing it, because a
-result is one passage and an answer built from passages alone is an answer built from fragments.
+ends with the `read_document` call that returns the rest. The guidance in `toolsets/documents.py` sets
+the order. `list_documents` first, with no collection, because it is where the model learns which
+collections it holds, what each is for, and which it may change, and because files you copied into a
+folder are documents it did not put there. Then search, and then read the document a result came from
+before summarizing it, because a result is one passage and an answer built from passages alone is an
+answer built from fragments.
 
 ## Passages: cutting documents where their authors did
 
@@ -158,9 +161,10 @@ Note: indexing in progress (412 of 1870 files embedded); results may be incomple
 The same honesty covers failures. An embedding model that fails to load leaves keyword search working and
 says `semantic search is unavailable (...); these are keyword matches only`; a file the index could not
 process is named. A file that changed and has not been re-indexed yet is left out rather than returned
-with text it no longer contains. And `list_documents` names every file it could not read and why, a
+with text it no longer contains. And `list_documents` names the files it could not read and why, a
 scanned PDF with no extractable text among them, so the model can tell you instead of reporting the file
-missing. Nothing is skipped in silence, because a skipped file is invisible to everyone involved.
+missing. The list is capped (AIMU's `LIST_DOCUMENTS_LIMIT`) and says how many it left out (`... and N
+more`), so a folder of unreadable exports cannot fill the context either. Nothing is skipped in silence, because a skipped file is invisible to everyone involved.
 
 ## The index is a cache, and never lives in a vault
 
@@ -177,7 +181,8 @@ directory, since indexing that would index the index and your conversations
 [`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)). An index inside a
 vault would be synced to your other devices, shown in Obsidian, and, if it were ever read as documents,
 searched. For the same reason the [GitHub backup](../how-to/back-up-to-github.md) leaves `data/index/`
-out: it is rebuilt from what the backup already holds.
+out. It holds only the built-in `kokua` collection's folder, which the index can be rebuilt from; a folder
+you declared lives outside `$KOKUA_HOME`, is yours rather than Kokua's state, and is not backed up at all.
 
 The stores themselves are opened lazily and shared. `LiveState.document_stores` builds one per collection
 the first time any agent's documents toolset is built, so two agents holding one collection share one
@@ -228,7 +233,8 @@ and an MCP server can never take one name.
 ## Writes ask first
 
 The shipped `config.example.toml` puts `documents.save_document` and `documents.edit_document` in
-`[assistant.tools].confirm`, so every document write asks you, in Kokua's own folder as much as in a
+`[assistant.tools].confirm`, and so does the code default a config without that table gets, so every
+document write asks you, in Kokua's own folder as much as in a
 vault. That is coarser than it might be, and on purpose for now: the gate decides by tool name, so it
 cannot tell a write to `kokua` from one to your personal vault, and the safe reading of "cannot tell" is
 "ask". Loosen it in your own config if Kokua's folder is the only one you mark writable. A scheduled task
@@ -248,11 +254,13 @@ what leaves the machine is decided by which models you configure.
 - **The embedding model reads every passage of every collection.** `hf:` models run locally. Naming a
   remote embedding model instead (AIMU accepts `openai:` ones) would send the whole of every collection
   to that provider during indexing, not only what a search turns up.
-- **`update_config` can change `[documents].embedding_model`.** No toolset section is locked by default,
-  and the change applies at the next restart. If your vaults must stay local, add
-  `"documents.embedding_model"` to [`[security].locked_config_keys`](../reference/configuration.md#locked_config_keys).
-  `[[documents.collection]]` itself is refused by `update_config` whatever the lock list says, since it
-  names folders the assistant may read.
+- **`update_config` cannot change `[documents].embedding_model` by default.** The shipped
+  [`[security].locked_config_keys`](../reference/configuration.md#locked_config_keys) locks it, for the
+  reason it locks `compute.command_env_passthrough`: a write pointing it at a remote endpoint would send
+  every collection there at the next restart's indexing. A `config.toml` scaffolded before the lock
+  existed writes its lock list out in full, so add `"documents.embedding_model"` to it by hand.
+  `[[documents.collection]]` is refused by `update_config` whatever the lock list says, since it names
+  folders the assistant may read.
 
 ## What it does not do
 

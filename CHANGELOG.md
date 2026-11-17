@@ -1205,9 +1205,11 @@ assistant may read.
   `hf:BAAI/bge-base-en-v1.5` (about 440 MB), and builds the index; set `[documents] embedding_model = ""`
   to search by keyword alone, with no download. And saving or editing a document now asks first in the
   shipped config, which adds `documents.save_document` and `documents.edit_document` to
-  `[assistant.tools].confirm`. **An existing install keeps writing documents ungated** if its
-  `config.toml` has its own `[assistant.tools]` table, and so does one with no such table, since the
-  built-in default lacks them too. Add these two lines to `confirm`:
+  `[assistant.tools].confirm`, and in the code default a config with no such table gets. Like every
+  default entry, the code default's two fail startup naming the gate when no agent declares
+  `documents`; write an `[assistant.tools]` table for such a config. **An existing install keeps
+  writing documents ungated** if its `config.toml` has its own `[assistant.tools]` table. Add these two
+  lines to its `confirm`:
 
   ```toml
       "documents.save_document",
@@ -1222,9 +1224,11 @@ assistant may read.
   rename it to a listed suffix, or export it, to bring it back. Saving under any other suffix is refused.
   PDFs are searchable and read-only.
 - **`[documents]` has two keys**, `embedding_model` and `rerank` (a cross-encoder pass over the fused
-  results, default `false`), both startup-only. A remote embedding model reads every passage of every
-  collection while indexing, and `update_config` can write this key, so lock
-  `"documents.embedding_model"` if your collections must stay local.
+  results, default `false`), both startup-only. **`documents.embedding_model` is locked by default**:
+  a remote embedding model reads every passage of every collection while indexing, so `update_config`
+  refuses it, for the reason it refuses `compute.command_env_passthrough`. A `config.toml` scaffolded
+  earlier writes its lock list out in full, so add `"documents.embedding_model"` to
+  `[security].locked_config_keys` by hand.
 - **For plugin authors: `Toolset.parts`, `build_parts`, and `writable_part_remedy`.** A toolset can be
   granted narrower than whole. `parts` maps the config to the names an agent may declare and what each
   grants, `build_parts` builds the tools for the parts named, and `writable_part_remedy` is the sentence
@@ -2106,10 +2110,10 @@ notice on startup.
   agent capability boundaries, the web front end's download and image routes, the `[email].to`
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).
-- **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
-  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
-  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, `fs_write`, and
-  `config.update_config`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
+- **Tool approval.** Configured risky tools require confirmation before each call (terminal `y/N`, web
+  Allow/Deny), built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
+  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, `fs_write`,
+  `config.update_config`, `documents.save_document`, and `documents.edit_document`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
   are currently viewing. **That question is asked again at every point the answer can have gone stale**,

@@ -146,7 +146,14 @@ Declaring `confirm` replaces the default pair whole, so write out the entries yo
 
 ```toml
 [assistant.tools]
-confirm = ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config", "jobme.tailor_application"]
+confirm = [
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+    "config.update_config",
+    "documents.save_document",
+    "documents.edit_document",
+    "jobme.tailor_application",
+]
 review = ["compute.run_command", "compute.execute_python", "fs_write"]
 ```
 

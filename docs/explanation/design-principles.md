@@ -159,7 +159,7 @@ else. One file is also what makes a running system's whole configuration legible
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
 that one file. A `runtime-settings.json` store used to exist and was
 retired in favour of the file itself. `[security].locked_config_keys` is a user-set list of patterns
-naming what `update_config` refuses even behind the approval prompt, and it ships with eight patterns.
+naming what `update_config` refuses even behind the approval prompt, and it ships with nine patterns.
 The first is the whole `[security]` section rather than any one key in it, which is the pattern worth
 reading closely, because what that section holds has grown: the `[security.auto_approval]` sub-table,
 the `never_auto_approve` floor beneath it, and the lock list itself. The approval policy itself moved out
@@ -168,8 +168,9 @@ taking over the lock `security.*` once gave the old `confirm_tools`. Every contr
 is therefore hand-edit-only by default, not just the one that was there first. The rest are `[email] to`
 (the locked recipient), `[paths] data_dir` (where all state lives), the whole `[agents.*]` (which includes
 each agent's `[agents.<name>.tools]` and so its own approval pair) and `[reviewers.*]` sections, `[scheduling.task.*]` (see below,
-where the reason is routing rather than capability), and `[compute] command_env_passthrough`, which
-decides which environment variables a `run_command` child can see. The two section patterns are matched
+where the reason is routing rather than capability), `[compute] command_env_passthrough`, which
+decides which environment variables a `run_command` child can see, and `[documents] embedding_model`,
+which decides where every passage of every document collection is sent to be embedded. The two section patterns are matched
 by prefix rather than by a key entry, since agent and reviewer names cannot be enumerated ahead of
 time, and each is locked by default for a reason of the same shape: `update_config` is a tool the
 assistant holds, so a writable agent table would let the assistant widen its own reach, and a writable

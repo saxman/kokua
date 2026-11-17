@@ -97,6 +97,7 @@ locked_config_keys = [
     "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
+    "documents.embedding_model",
 ]
 ```
 
@@ -135,6 +136,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `reviewers.*` | changes the error message only. `update_config` refuses `[reviewers.*]` whatever the list says, for the reason it is listed here: a reviewer's prompt and model decide how the assistant's own work is judged, including (with [`[security.auto_approval]`](#securityauto_approval) on) whether a gated call reaches you at all. Hand-edit to change one. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 | `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
+| `documents.embedding_model` | lets the assistant point the model that embeds your document collections at a remote endpoint, which would receive every passage of every collection at the next restart's indexing |
 
 A flat agent key (`model`, `thinking`, `system_message`, `description`, `delegates_to`) is
 checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
@@ -427,16 +429,22 @@ review = ["compute.run_command", "compute.execute_python", "fs_write"]
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `confirm` | list of strings | six entries, see below | calls that ask you |
+| `confirm` | list of strings | eight entries, see below | calls that ask you |
 | `review` | list of strings | `[]` | calls that ask a reviewer first, then you |
 
-The block above is what `config.example.toml` ships. A config that sets neither key gets the schema
-default instead: all six tools the old `confirm_tools` gated (the first three above plus
-`compute.execute_python`, `compute.run_command`, and `fs_write`) in `confirm`, and an empty `review`, so
-it gates exactly what it always did. The two document writers are not in that default, so a config with
-no `[assistant.tools]` table, like one whose table predates them, saves and edits documents without
-asking until you add them. Enabling auto-approval on that default is a startup error until you move entries into
-`review`, since a reviewer with nothing to answer for would do nothing.
+The block above is what `config.example.toml` ships. A config that sets neither key gets the code
+default instead: the same eight tools, all in `confirm` (the five above plus `compute.execute_python`,
+`compute.run_command`, and `fs_write`), and an empty `review`. Enabling auto-approval on that default is
+a startup error until you move entries into `review`, since a reviewer with nothing to answer for would
+do nothing.
+
+The default is checked like an entry you wrote, so it only fits a config whose agents declare every
+toolset it names: `skills`, `mcp`, `compute`, `fs_write`, `config`, and `documents`. An agent set that
+leaves one out (say, no agent declares `documents`) fails startup naming the entry, the same
+[gate-nothing error](#an-entry-that-would-gate-nothing-fails-startup) a hand-written one gets. Write an
+`[assistant.tools]` table listing only what your agents hold. A `config.toml` whose table predates the
+document writers keeps saving and editing documents without asking until you add both entries to its
+`confirm`.
 
 This table holds only those two keys. `available` or `resident` here is a startup error, because
 availability is declared per agent and never defaulted. The two lists must not name the same tool.
@@ -600,7 +608,7 @@ decides what a reviewer may never answer for.
 
 A list of patterns naming which keys `update_config` refuses. Default:
 `["security.*", "email.to", "paths.data_dir", "agents.*", "assistant.tools.*", "reviewers.*",
-"scheduling.task.*", "compute.command_env_passthrough"]`. Startup-only, and
+"scheduling.task.*", "compute.command_env_passthrough", "documents.embedding_model"]`. Startup-only, and
 always locked against `update_config` regardless of its own value. See
 [Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
 pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
@@ -1312,7 +1320,8 @@ repository's history with it.
 The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
 fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do unless
 you lock the key yourself with `"github_backup.repo"` in [`locked_config_keys`](#locked_config_keys), as
-no toolset section is locked by default) can never widen the capability past whatever repository that one
+the shipped list locks only two toolset keys, `compute.command_env_passthrough` and
+`documents.embedding_model`) can never widen the capability past whatever repository that one
 token already writes. Scope the token, a fine-grained GitHub PAT with `contents: write`, to the backup
 repository alone.
 
@@ -1388,10 +1397,11 @@ so in its result.
 Changing it re-embeds every collection on the next search.
 
 A remote embedding model (AIMU accepts `openai:` ones) reads every passage of every collection while it
-indexes, not just what a search returns. `update_config` can write this key, since no toolset section is
-locked by default, so add `"documents.embedding_model"` to [`locked_config_keys`](#locked_config_keys) if
-your collections must stay on this machine. [Retrieval](../explanation/retrieval.md#privacy) covers what
-the chat model reads as well.
+indexes, not just what a search returns, which is why this key is locked by default in
+[`locked_config_keys`](#locked_config_keys): `update_config` refuses it, so only a hand-edit changes
+where your collections are embedded. A `config.toml` scaffolded before that lock writes the list out in
+full, so add `"documents.embedding_model"` to it. [Retrieval](../explanation/retrieval.md#privacy) covers
+what the chat model reads as well.
 
 **`rerank`** reorders the top fused results with a cross-encoder, a model that reads the query and each
 passage together. It is slower than fusion alone and downloads a model of its own on first use.
@@ -1445,7 +1455,8 @@ Approval entries name the toolset (`documents.edit_document`), however the agent
 **What startup checks.** Each of these fails startup, naming the collection:
 
 - a `name` that is not lowercase letters, digits, underscores, and hyphens starting with a letter, that
-  ends in `_write`, that is `kokua` or `documents`, or that is declared twice;
+  ends in `_write`, that is `kokua` or `documents`, or `core` or `all` (both reserved for every name an
+  agent declares), or that is declared twice;
 - a `name`, or its `<name>_write`, that is already the name of a toolset, a skill, or an MCP server;
 - a `path` that is absent or relative, or names something that does not exist or is not a folder;
 - a `path` that is, is inside, or holds Kokua's data directory, since indexing it would index Kokua's own
