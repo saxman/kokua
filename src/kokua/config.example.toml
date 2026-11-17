@@ -44,6 +44,8 @@ confirm = [
     "skills.add_skill_script",
     "mcp.add_mcp_server",
     "config.update_config",
+    "documents.save_document",
+    "documents.edit_document",
 ]
 # Ask a reviewer first (see [security.auto_approval]), then you. With auto-approval off, these ask you.
 review = [

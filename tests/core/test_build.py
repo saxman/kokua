@@ -305,7 +305,7 @@ ENTRY_AGENT_TOOLS = {
 # asserted separately from the rest below.
 STORE_TOOLS = {
     "aimu make_memory_tools": {"store_memory", "search_memories", "list_memories"},
-    "aimu make_document_tools": {
+    "aimu make_collection_tools": {
         "save_document",
         "read_document",
         "edit_document",
@@ -316,7 +316,7 @@ STORE_TOOLS = {
 # The sources above whose toolsets the shipped entry agent defers: absent from its tools until it loads
 # them, and present in the inventory because they are still part of what it can reach.
 DEFERRED_SOURCES = {
-    "aimu make_document_tools",
+    "aimu make_collection_tools",
     "kokua toolsets/mcp.py",
     "kokua toolsets/scheduling.py",
     "kokua toolsets/benchmark.py",
@@ -665,7 +665,7 @@ def test_memory_stores_are_not_built_until_a_toolset_asks(tmp_path):
     just because a LiveState exists."""
     state = LiveState(config=_config(tmp_path))
     assert "memory_store" not in state.__dict__
-    assert "document_store" not in state.__dict__
+    assert state.built_document_stores is None
 
 
 async def test_no_store_declaration_omits_the_tools_and_the_stores(tmp_path):
@@ -685,7 +685,10 @@ async def test_document_tools_round_trip(tmp_path):
     """The document tools are wired to a working DocumentStore (pure-Python, hermetic)."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     tools = {fn.__name__: fn for fn in await _loaded_tools(assistant, "documents")}
-    assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
+    assert (
+        tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers")
+        == "Saved /notes/standup.md in the 'kokua' collection."
+    )
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 

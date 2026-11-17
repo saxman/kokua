@@ -592,7 +592,10 @@ def test_agents_command_prints_each_agents_three_axes(monkeypatch, tmp_path, cap
     assert "assistant\n  available: " in out
     assert "  resident:  memory, config, conversations, planning, capabilities, time, messaging" in out
     assert "  resident:  every available toolset" in out
-    confirm = "skills.add_skill_script, mcp.add_mcp_server, config.update_config"
+    confirm = (
+        "skills.add_skill_script, mcp.add_mcp_server, config.update_config, "
+        "documents.save_document, documents.edit_document"
+    )
     review = "compute.run_command, compute.execute_python, fs_write"
     assert f"  confirm:   {confirm}  (from [assistant.tools])" in out
     assert f"  review:    {review}  (from [assistant.tools])" in out

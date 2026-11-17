@@ -49,6 +49,29 @@ def isolate_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def keyword_only_documents(request, monkeypatch):
+    """Search document collections by keyword alone, as ``[documents].embedding_model = ""`` would.
+
+    The shipped embedding model is a Hugging Face download of several hundred megabytes, fetched on the
+    first embed, and any test that searches a collection would otherwise reach for it. Stubbed at
+    ``kokua.registry.context.embedding_client_for``, the one place Kokua turns the setting into a client.
+
+    To opt in, take one of two routes. A test wanting embeddings without a model patches
+    ``embedding_client_for`` itself with a fake client (its patch lands after this one, so it wins). A
+    test of the factory itself requests the ``real_embedding_factory`` fixture, which leaves it
+    unpatched, and then patches ``kokua.registry.context.EmbeddingClient`` so nothing downloads there either.
+    """
+    if "real_embedding_factory" in request.fixturenames:
+        return
+    monkeypatch.setattr("kokua.registry.context.embedding_client_for", lambda model: None)
+
+
+@pytest.fixture
+def real_embedding_factory():
+    """Opts a test out of ``keyword_only_documents``. It does nothing else: see that fixture."""
+
+
+@pytest.fixture(autouse=True)
 def no_generated_titles(monkeypatch):
     """Stub out the generated conversation title, since writing one is a model call.
 

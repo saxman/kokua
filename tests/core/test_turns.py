@@ -29,6 +29,7 @@ from tests.channels import (
     example_agents,
     planning_settings,
 )
+from kokua.core.interaction import UNATTENDED_DENIAL
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
 
@@ -341,7 +342,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     await asyncio.wait_for(assistant._proactive("do it"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
+    assert denied and denied[-1]["content"] == f"Tool 'update_config' was not approved: {UNATTENDED_DENIAL}"
 
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
@@ -355,7 +356,7 @@ async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     await asyncio.wait_for(assistant._proactive("do it", task_name="t"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
+    assert denied and denied[-1]["content"] == f"Tool 'update_config' was not approved: {UNATTENDED_DENIAL}"
 
 
 async def test_proactive_pins_agent_for_the_run(tmp_path):
@@ -826,7 +827,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     new_id = next(k for k in assistant._store.list_keys() if k != viewed)
     new_session = assistant._store.get(new_id)
     denied = [m for m in new_session.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
+    assert denied and denied[-1]["content"] == f"Tool 'update_config' was not approved: {UNATTENDED_DENIAL}"
 
     # And self._active_id is still the viewed conversation after the run completes.
     assert assistant._active_id == viewed

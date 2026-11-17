@@ -6,11 +6,12 @@ import asyncio
 import contextlib
 
 import pytest
+from aimu.tools import Denied
 
 from kokua.config.schema import AssistantConfig, ReviewerConfig
 from kokua.core.approval import DEFAULT_POLICY, ApprovalPolicies, ApprovalPolicy
 from kokua.core.auto_approval import AutoApproval, Outcome, Review, ReviewContext, current_review_context
-from kokua.core.interaction import HumanGate, PendingRequest
+from kokua.core.interaction import UNATTENDED_DENIAL, HumanGate, PendingRequest
 
 
 async def _noop() -> None:
@@ -663,10 +664,26 @@ async def test_a_proactive_turn_is_never_reviewed(monkeypatch, in_turn):
     gate.policies = _policies(review={"run_command"})
     gate.auto_approval = _auto()
 
-    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) == Denied(UNATTENDED_DENIAL)
 
     assert ui.asked == []
     assert ui.auto_approvals == []
+
+
+async def test_an_unattended_turn_is_refused_a_gated_tool_and_told_why():
+    """A scheduled task has nobody to approve a gated call, and a refusal that only says "not approved"
+    reads to the model like a call worth retrying. The reason is what lets it carry on without the tool and
+    say, in the report the user reads afterwards, what it could not do."""
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: True, turn_conversation=lambda: "c1")
+    gate.policies = _policies(confirm={"edit_document"})
+
+    verdict = await _settle_without_a_prompt(gate, "edit_document", {"path": "/idea.md"})
+
+    assert not verdict
+    assert isinstance(verdict, Denied)
+    assert "unattended" in verdict.reason and "report" in verdict.reason
+    assert ui.asked == []
 
 
 async def test_a_turn_switched_away_from_is_never_reviewed(monkeypatch, in_turn):

@@ -7,11 +7,13 @@ import asyncio
 import pytest
 
 from aimu.aio.channels.base import Channel, ChannelMessage
+from aimu.tools import Denied
 
 from kokua.config import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig, ReviewerConfig
 from kokua.core.agents import build_registry
 from kokua.core.assistant import Assistant
+from kokua.core.interaction import UNATTENDED_DENIAL
 from tests.channels import AlertCapturingChannel, FakeChannel, _config
 from tests.fakes import _RequestsToolOnce
 from tests.helpers import MockAsyncModelClient
@@ -517,7 +519,7 @@ async def test_proactive_auto_deny_stays_silent(tmp_path):
     await assistant.start()
     token = proactive_turn.set(True)
     try:
-        assert await assistant._gate_for("assistant")("execute_python", {}) is False
+        assert await assistant._gate_for("assistant")("execute_python", {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
     assert channel.alerts == []
@@ -714,24 +716,35 @@ async def test_the_shipped_example_resolves_to_todays_gate(tmp_path):
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     await assistant.start()
 
-    # `skills` and `mcp` are deferred by the shipped entry agent, so the two entries naming their tools
-    # wait for the build instead of resolving at startup.
+    # `skills`, `mcp`, and `documents` are deferred by the shipped entry agent, so the entries naming
+    # their tools wait for the build instead of resolving at startup.
     at_startup = assistant._human.policies.default
     assert at_startup.confirm == {"update_config"}
     assert at_startup.review == {"execute_python", "run_command", "write_file", "edit_file"}
-    assert at_startup.pending_confirm == {"skills.add_skill_script", "mcp.add_mcp_server"}
+    assert at_startup.pending_confirm == {
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+        "documents.save_document",
+        "documents.edit_document",
+    }
     assert at_startup.pending_review == frozenset()
     assert len(at_startup.gated) == 5
 
-    for toolset in ("skills", "mcp"):
+    for toolset in ("skills", "mcp", "documents"):
         await assistant._agent.load_tool_group(toolset)
 
-    # The union is what the old six-entry gate held, so neither the split nor residency changed which
-    # calls are held: two of them resolve on load instead of at startup.
+    # The old six-entry gate plus the two document writes, which reach folders the user keeps outside
+    # Kokua: neither the split nor residency changed which calls are held, only when an entry resolves.
     after_load = assistant._human.policies.default
     assert after_load.pending_confirm == frozenset()
     # A pending confirm entry must land in confirm, not review: review is the half a model can approve.
-    assert after_load.confirm == {"add_skill_script", "add_mcp_server", "update_config"}
+    assert after_load.confirm == {
+        "add_skill_script",
+        "add_mcp_server",
+        "update_config",
+        "save_document",
+        "edit_document",
+    }
     assert after_load.review == {"execute_python", "run_command", "write_file", "edit_file"}
     assert after_load.gated == {
         "add_skill_script",
@@ -741,6 +754,8 @@ async def test_the_shipped_example_resolves_to_todays_gate(tmp_path):
         "write_file",
         "edit_file",
         "update_config",
+        "save_document",
+        "edit_document",
     }
     assistant._state.close()
 
@@ -950,7 +965,7 @@ async def test_an_unattended_turn_denies_a_workers_gated_call(tmp_path):
     await assistant.start()
     token = proactive_turn.set(True)
     try:
-        assert await assistant._human.approve("coder", "run_command", {}) is False
+        assert await assistant._human.approve("coder", "run_command", {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
     assert channel.alerts == []
@@ -1255,7 +1270,7 @@ async def _gated_unattended(assistant, agent: str, tool: str) -> bool:
 
     token = proactive_turn.set(True)
     try:
-        return await assistant._human.approve(agent, tool, {}) is False
+        return await assistant._human.approve(agent, tool, {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
 
@@ -1568,3 +1583,69 @@ async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monk
     finally:
         streaming_conversation.reset(token)
         assistant._state.close()
+
+
+def _vault_config(tmp_path, agents, **overrides):
+    """A config with one writable vault, `notes`, holding one note, for gating the real documents toolset."""
+    from kokua.config.schema import DocumentCollectionConfig
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "idea.md").write_text("# Idea\n\nA first draft.\n")
+    collections = [DocumentCollectionConfig("notes", vault, writable=True)]
+    return _config(tmp_path / "home", agents=agents, document_collections=collections, **overrides), vault
+
+
+async def test_a_gate_on_document_edits_prompts_for_an_agent_granted_only_a_collection(tmp_path):
+    """The shipped entry gates `documents.edit_document`, and an agent holding only `notes_write` reaches
+    that tool through a part. The entry names the toolset, so it has to hold however the agent was
+    granted it, deferred or not."""
+    from kokua.channels.web import streaming_conversation
+
+    agents = {"assistant": AgentConfig(available=["time", "notes_write"], resident=["time"])}
+    config, vault = _vault_config(
+        tmp_path, agents, default_confirm=["documents.save_document", "documents.edit_document"], default_review=[]
+    )
+    channel = FakeChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+    assert "documents.edit_document" in assistant._human.policies.default.pending_confirm
+
+    assert (await assistant._agent.load_tool_group("documents")).startswith("Loaded 'documents':")
+    assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        arguments = {"path": "/idea.md", "old_str": "first", "new_str": "second", "collection": "notes"}
+        task = asyncio.create_task(assistant._human.approve("assistant", "edit_document", arguments))
+        async with asyncio.timeout(2):
+            while not assistant._human.approval.pending:
+                await asyncio.sleep(0.001)
+        assert any("documents.edit_document" in str(sent) for sent in channel.sent)
+        assistant._human.approval.resolve(False)
+        assert await task is False
+    finally:
+        streaming_conversation.reset(token)
+        assistant._state.close()
+    assert "first draft" in (vault / "idea.md").read_text()
+
+
+async def test_an_unattended_turn_document_write_is_refused_and_told_why(tmp_path):
+    """A scheduled task has nobody to approve a vault edit, so the gate refuses it, and the refusal says
+    why: a bare "not approved" invites the model to try the same call again, and leaves it nothing to put
+    in the report the user reads afterwards."""
+    agents = {"assistant": AgentConfig(available=["notes_write"])}
+    config, vault = _vault_config(tmp_path, agents, default_confirm=["documents.edit_document"], default_review=[])
+    arguments = {"path": "/idea.md", "old_str": "first", "new_str": "second", "collection": "notes"}
+    client = _RequestsToolOnce("edit_document", arguments)
+    assistant = await Assistant.create(config, FakeChannel(), client=client)
+    await assistant.start()
+    try:
+        await asyncio.wait_for(assistant._proactive("tidy the vault"), timeout=2.0)
+    finally:
+        assistant._state.close()
+
+    (refusal,) = [m["content"] for m in client.messages if m.get("role") == "tool"]
+    assert refusal.startswith("Tool 'edit_document' was not approved: ")
+    assert "unattended" in refusal
+    assert "first draft" in (vault / "idea.md").read_text()

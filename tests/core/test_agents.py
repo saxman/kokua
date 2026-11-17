@@ -772,3 +772,20 @@ def test_toolset_of_answers_a_part_holder_from_its_own_toolset(tmp_path, monkeyp
     state = LiveState(config=config, registry=registry)
     state.tools_by_toolset = {"time": {"read_shelf"}, "shelf": {"read_shelf"}}
     assert toolset_of(state, "a", "read_shelf") == "shelf"
+
+
+def test_a_write_grant_on_a_read_only_collection_is_refused_at_startup_naming_the_fix(tmp_path):
+    """`work_write` exists only for a collection declared writable, and the fix is in that collection's
+    entry, not in the agent's list, so the refusal says where to look."""
+    from kokua.config.schema import DocumentCollectionConfig
+    from kokua.core.agents import validated_registry
+
+    vault = tmp_path / "work"
+    vault.mkdir()
+    config = AssistantConfig(
+        data_dir=tmp_path / "data",
+        agents={"assistant": AgentConfig(available=["work_write"])},
+        document_collections=[DocumentCollectionConfig("work", vault)],
+    )
+    with pytest.raises(ConfigError, match=r"set writable = true on the \[\[documents.collection\]\] named 'work'"):
+        validated_registry(config)

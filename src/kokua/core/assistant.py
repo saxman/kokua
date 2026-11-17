@@ -38,6 +38,7 @@ from kokua.core.build import (
     model_record,
 )
 from kokua.config import AssistantConfig
+from kokua.config.schema import BUILTIN_COLLECTION
 from kokua.core import conversation_commands
 from kokua.core.auto_approval import resolve_auto_approval
 from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
@@ -432,11 +433,12 @@ class Assistant:
 
     @property
     def _document_store(self):
-        """The shared document store, or None when no agent declared the documents toolset.
+        """Kokua's own document collection's store, or None until some agent's documents toolset builds.
 
-        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
-        not force it into existence."""
-        return self._state.__dict__.get("document_store") if self._state else None
+        Read through ``LiveState.built_document_stores`` rather than ``document_store``, so merely asking
+        whether a store exists does not force every collection's store into existence."""
+        stores = self._state.built_document_stores if self._state else None
+        return stores[BUILTIN_COLLECTION] if stores else None
 
     def history_view(self) -> tuple[list[dict], dict]:
         """The active conversation's messages (OpenAI-format) and metadata (e.g. the ``subagent``

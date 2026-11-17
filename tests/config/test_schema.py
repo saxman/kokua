@@ -23,7 +23,8 @@ def test_logs_path_under_data_dir(tmp_path):
 def test_default_confirm_tools():
     """The code-level default still gates all six tools, and the shipped example covers the same six
     by splitting them across the pair: the three that install something to run later ask the user,
-    and the three that act once ask a reviewer first."""
+    and the three that act once ask a reviewer first. The shipped example also asks before every
+    document write, since a collection can be a folder the user keeps outside Kokua."""
     six = [
         "skills.add_skill_script",
         "mcp.add_mcp_server",
@@ -35,9 +36,16 @@ def test_default_confirm_tools():
     assert AssistantConfig().default_confirm == six
     assert AssistantConfig().default_review == []
     shipped = resolve_config(build_arg_parser().parse_args([]))
-    assert shipped.default_confirm == ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config"]
+    assert shipped.default_confirm == [
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+        "config.update_config",
+        "documents.save_document",
+        "documents.edit_document",
+    ]
     assert shipped.default_review == ["compute.run_command", "compute.execute_python", "fs_write"]
-    assert sorted(shipped.default_confirm + shipped.default_review) == sorted(six)
+    document_writes = ["documents.save_document", "documents.edit_document"]
+    assert sorted(shipped.default_confirm + shipped.default_review) == sorted(six + document_writes)
 
 
 # --- the default model: one resolution, carrying whatever the string carries ----------

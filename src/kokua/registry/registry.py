@@ -84,6 +84,9 @@ class Toolset:
     and an agent may name those in its ``available`` list instead of the toolset. ``select`` resolves
     them back into this one toolset with ``build_parts`` bound to the parts named, so a narrow grant
     still builds one toolset under one name, and one approval vocabulary covers it however it was granted.
+    ``writable_part_remedy`` says what to change so a read-only part gains a ``<part>_write`` twin, with
+    ``{part}`` standing for its name: an agent declaring a twin that does not exist is refused with it,
+    since the fix is in that part's configuration, which only the toolset knows the shape of.
     """
 
     name: str
@@ -96,6 +99,7 @@ class Toolset:
     settings: tuple[Setting, ...] = ()
     parts: Optional[Callable[["AssistantConfig"], Mapping[str, Hashable]]] = None
     build_parts: Optional[Callable[["ToolsetContext", frozenset[Hashable]], list]] = None
+    writable_part_remedy: str = ""
 
 
 class ToolsetRegistry(dict):
@@ -289,10 +293,12 @@ def _unknown_name(
     read_only = name.removesuffix("_write")
     if read_only != name and read_only in parts:
         owner = parts[read_only][0]
+        remedy = registry[owner].writable_part_remedy.format(part=read_only)
         return (
             f"agent {agent!r} declares {name!r}, but {name!r} is not a part of toolset {owner!r}: "
-            f"{read_only!r} is, read-only. Declare it writable where {read_only!r} is configured, or "
-            f"declare {read_only!r} instead."
+            f"{read_only!r} is, read-only. Declare it writable where {read_only!r} is configured"
+            + (f" ({remedy})" if remedy else "")
+            + f", or declare {read_only!r} instead."
         )
     available = ", ".join(sorted([*registry, *parts])) or "(none)"
     return f"agent {agent!r} declares unknown toolset {name!r}. Available toolsets: {available}."

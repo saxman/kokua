@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Optional, TypeVar, Union
+
+from aimu.tools import Denied
 
 from kokua.core.auto_approval import AutoApproval, review_call
 
@@ -27,6 +29,15 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _UNSET = object()  # distinguishes "no default given for this ask" from a legitimate default of None
+
+#: Why a gated call in an unattended turn is refused, as the model reads it in the tool result. Without it
+#: the model sees only that the call was not approved, which reads like a call worth retrying, and has
+#: nothing to put in the report the user reads afterwards.
+UNATTENDED_DENIAL = (
+    "this is an unattended turn (a scheduled task), so nobody is here to approve this tool, and it did not "
+    "run. Do not retry it. Carry on without it, and say in your report what you would have done with it, "
+    "so the user can do it or approve it next time."
+)
 
 
 class PendingRequest(Generic[T]):
@@ -188,7 +199,7 @@ class HumanGate:
         self.approval.abandon()
         self.decision.abandon()
 
-    async def approve(self, agent: str, name: str, arguments: dict) -> bool:
+    async def approve(self, agent: str, name: str, arguments: dict) -> Union[bool, Denied]:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
         ``agent`` is the name the calling agent was wired with (``Assistant._gate_for`` binds it), so the
@@ -198,7 +209,8 @@ class HumanGate:
         A proactive/scheduled turn always auto-denies a gated tool: it is
         unattended, so nobody is watching to confirm, and a firing that fell back to the viewed
         conversation would otherwise look foreground (its turn conversation equals the viewed one) and
-        wrongly prompt.
+        wrongly prompt. That denial is a ``Denied`` carrying :data:`UNATTENDED_DENIAL`, which AIMU writes
+        into the tool result, so the model learns why rather than only that; it is falsy like ``False``.
         Otherwise a reactive turn is approved only if its conversation is the one the user is
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
@@ -234,7 +246,7 @@ class HumanGate:
         if name not in policy.gated:
             return True
         if self._is_proactive():
-            return False
+            return Denied(UNATTENDED_DENIAL)
         turn_conversation = self._turn_conversation()
         if turn_conversation != self._active_id():
             return await self._deny_switched_away(name, turn_conversation)
