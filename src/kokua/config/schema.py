@@ -166,6 +166,27 @@ class ResolvedReviewer:
     system_message: str
 
 
+#: The collection every install has: the documents the assistant itself saves under ``documents_path``.
+#: Reserved so a declared ``[[documents.collection]]`` cannot take the name of the built-in one.
+BUILTIN_COLLECTION = "kokua"
+
+
+@dataclass
+class DocumentCollectionConfig:
+    """A folder of the user's own documents (an Obsidian vault, a paper folder) the assistant may search.
+
+    ``name`` is how the collection enters the toolset namespace, so an agent declares it as it declares any
+    other capability. ``writable`` is false unless declared, because a folder the user keeps outside Kokua
+    is theirs to protect: reading it is the default and writing it is a separate, explicit grant.
+    ``description`` is the catalogue line an agent reads to decide whether to load the collection.
+    """
+
+    name: str
+    path: Path
+    writable: bool = False
+    description: Optional[str] = None
+
+
 @dataclass
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
@@ -223,6 +244,9 @@ class AssistantConfig:
     configured_sections: tuple[str, ...] = ()
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    # Folders of the user's own documents, declared as [[documents.collection]]; paths are only
+    # expanded here, and checked against the filesystem at startup by core.agents.
+    document_collections: list[DocumentCollectionConfig] = field(default_factory=list)
     # Where an MCP server's OAuth approval is sent back to. The defaults are FastMCP's own (loopback,
     # a fresh port per process) and assume the browser runs on the same machine as Kokua; set both
     # when it does not, and see kokua.mcp.auth.OAuthSettings for why the port is worth pinning either
@@ -498,6 +522,10 @@ class AssistantConfig:
     @property
     def documents_path(self) -> Path:
         return self.data_dir / "documents"
+
+    @property
+    def index_dir(self) -> Path:
+        return self.data_dir / "index"
 
     @property
     def pages_path(self) -> Path:

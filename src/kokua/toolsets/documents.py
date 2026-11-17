@@ -10,6 +10,7 @@ from __future__ import annotations
 from aimu.tools.builtin import make_document_tools
 
 from kokua.registry import Toolset
+from kokua.registry.registry import Setting
 
 # Worth spelling out why this is six sentences rather than one. The store is a directory on disk
 # that the user can add files to directly, so documents arrive by two routes, not one. The earlier
@@ -42,10 +43,18 @@ GUIDANCE = (
     "a file it could not read, tell the user to export that file to Markdown or plain text."
 )
 
+#: Cold: the embedding model decides how every collection's index is built, so a change needs a restart.
+#: An empty ``embedding_model`` means keyword-only search.
+DOCUMENTS_SETTINGS: tuple[Setting, ...] = (
+    Setting("embedding_model", str, "hf:BAAI/bge-base-en-v1.5"),
+    Setting("rerank", bool, False),
+)
+
 TOOLSET = Toolset(
     name="documents",
     description="Longer reference documents the user provides, searchable across conversations.",
     build=lambda ctx: make_document_tools(ctx.state.document_store),
     guidance=GUIDANCE,
     cross_cutting=True,
+    settings=DOCUMENTS_SETTINGS,
 )

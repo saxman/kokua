@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import fields
 
+from pathlib import Path
+
 import pytest
 
 from kokua.config import paths
@@ -1282,3 +1284,47 @@ def test_mcp_server_description_parses_and_must_be_a_string(tmp_path):
     path.write_text('[[mcp.server]]\nurl = "https://b/mcp"\nname = "stocks"\ndescription = 3\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="description"):
         settings.load(str(path), table=core_table())
+
+
+# --- [[documents.collection]] -------------------------------------------------------------------------
+
+
+def test_document_collections_parse():
+    loaded = _load_text('[[documents.collection]]\nname = "work"\npath = "~/My Vault"\nwritable = true\n')
+    (collection,) = loaded["document_collections"]
+    assert collection.name == "work" and collection.writable and collection.path == Path.home() / "My Vault"
+
+
+@pytest.mark.parametrize(
+    "entry, message",
+    [
+        ('name = "work"', "path"),
+        ('name = "Work"\npath = "/x"', "name"),
+        ('name = "work_write"\npath = "/x"', "_write"),
+        ('name = "kokua"\npath = "/x"', "kokua"),
+        ('name = "documents"\npath = "/x"', "documents"),
+        ('name = "work"\npath = "/x"\ncolour = "red"', "colour"),
+        ('path = "/x"', "#1"),
+    ],
+)
+def test_bad_collection_entries_are_refused(entry, message):
+    with pytest.raises(settings.ConfigError, match=message):
+        _load_text(f"[[documents.collection]]\n{entry}\n")
+
+
+def test_duplicate_collection_names_refused():
+    text = '[[documents.collection]]\nname = "a"\npath = "/x"\n[[documents.collection]]\nname = "a"\npath = "/y"\n'
+    with pytest.raises(settings.ConfigError, match="'a'"):
+        _load_text(text)
+
+
+def test_documents_scalars_and_collections_coexist():
+    text = '[documents]\nembedding_model = ""\n\n[[documents.collection]]\nname = "work"\npath = "/x"\n'
+    loaded = settings.load(str(_write_config(text)), table=build_settings_table(), extra_schema=startup_schema())
+    assert loaded["toolset_settings"]["documents"]["embedding_model"] == ""
+    assert [collection.name for collection in loaded["document_collections"]] == ["work"]
+
+
+def test_update_config_refuses_documents_collection():
+    with pytest.raises(settings.ConfigError, match="config.toml"):
+        settings.coerce_config_string("documents", "collection", "[]", table=core_table())

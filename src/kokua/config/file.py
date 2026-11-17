@@ -24,7 +24,15 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
-from kokua.config.schema import ALL_TOOLSETS, AgentConfig, AllToolsets, MCPServerConfig, ReviewerConfig
+from kokua.config.schema import (
+    ALL_TOOLSETS,
+    BUILTIN_COLLECTION,
+    AgentConfig,
+    AllToolsets,
+    DocumentCollectionConfig,
+    MCPServerConfig,
+    ReviewerConfig,
+)
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -293,6 +301,68 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
             raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
         servers.append(MCPServerConfig(url=url, name=name, token_env=token_env, description=description))
     return servers
+
+
+_COLLECTION_NAME = re.compile(r"[a-z][a-z0-9_]*")
+_COLLECTION_KEYS = {"name", "path", "writable", "description"}
+
+
+def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
+    """Validate the [[documents.collection]] array of tables into ``DocumentCollectionConfig`` entries.
+
+    Shape only: whether a folder exists, sits under the data directory, or collides with a toolset needs
+    the filesystem and the registry, so ``core.agents.validate_document_collections`` checks those. A name
+    is also a toolset name an agent lists in ``available``, and ``<name>_write`` is the toolset a writable
+    collection adds, which is why a name may not itself end in ``_write``.
+    """
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ConfigError("[[documents.collection]] must be an array of tables")
+    collections: list[DocumentCollectionConfig] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(value, start=1):
+        name = entry.get("name")
+        label = f"collection {name!r}" if isinstance(name, str) and name else f"collection #{index}"
+        if not isinstance(name, str) or not _COLLECTION_NAME.fullmatch(name):
+            raise ConfigError(
+                f"[[documents.collection]] {label} needs a 'name' of lowercase letters, digits, and underscores "
+                "starting with a letter: it is the toolset name an agent lists in its available list."
+            )
+        if name.endswith("_write"):
+            raise ConfigError(
+                f"[[documents.collection]] {label}: a name may not end in '_write', which is the suffix of the "
+                "toolset a writable collection adds. Rename it."
+            )
+        if name == BUILTIN_COLLECTION or name == "documents":
+            raise ConfigError(
+                f"[[documents.collection]] {label}: '{name}' is reserved ('{BUILTIN_COLLECTION}' is the built-in "
+                "collection and 'documents' the toolset). Choose another name."
+            )
+        if name in seen:
+            raise ConfigError(f"[[documents.collection]] name {name!r} is declared twice. Names must be unique.")
+        seen.add(name)
+        raw_path = entry.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ConfigError(f"[[documents.collection]] {label} requires a string 'path' to its folder.")
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            raise ConfigError(
+                f"[[documents.collection]] {label}: path {raw_path!r} must be absolute (or start with ~), "
+                "since a relative one would depend on where Kokua was launched."
+            )
+        writable = entry.get("writable", False)
+        if not isinstance(writable, bool):
+            raise ConfigError(f"[[documents.collection]] {label}: 'writable' must be true or false.")
+        description = entry.get("description")
+        if description is not None and not isinstance(description, str):
+            raise ConfigError(f"[[documents.collection]] {label}: 'description' must be a string.")
+        unknown = set(entry) - _COLLECTION_KEYS
+        if unknown:
+            raise ConfigError(
+                f"unknown key(s) in [[documents.collection]] {label}: {', '.join(sorted(unknown))}. "
+                f"Known keys: {', '.join(sorted(_COLLECTION_KEYS))}."
+            )
+        collections.append(DocumentCollectionConfig(name=name, path=path, writable=writable, description=description))
+    return collections
 
 
 # String-list agent keys share the _str_list validator.
@@ -969,6 +1039,11 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     # and removed through the mcp tools, which connect it as well as write it.
     if section == "mcp" and key == "server":
         raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
+    if section == "documents" and key == "collection":
+        raise ConfigError(
+            "[[documents.collection]] is not editable with update_config: it names folders on disk the "
+            "assistant may read, so it is a hand-edit in config.toml."
+        )
     if section == "reviewers" or section.startswith("reviewers."):
         raise ConfigError(
             "[reviewers.<name>] is not editable with update_config. A reviewer's prompt and model decide "
@@ -1123,6 +1198,13 @@ def load(
             if "server" in entries:
                 overrides["mcp_servers"] = _parse_mcp_servers(entries["server"])
             entries = {key: value for key, value in entries.items() if key != "server"}
+        # [documents] holds both shapes like [mcp]: the [[documents.collection]] array is parsed here and
+        # the toolset's scalar settings fall through. "documents" is not in _STRUCTURED_SECTIONS, which
+        # would reserve the section and refuse the toolset's own settings.
+        if section == "documents":
+            if "collection" in entries:
+                overrides["document_collections"] = _parse_document_collections(entries["collection"])
+            entries = {key: value for key, value in entries.items() if key != "collection"}
         # Routed by section rather than by the dotted-target convention a toolset's keys use, because
         # `generation` is also a legal toolset name and would claim the same bucket.
         if section == _GENERATION_SECTION:

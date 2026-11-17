@@ -574,3 +574,55 @@ def test_toolset_of_is_none_for_a_name_nothing_recorded(tmp_path):
 
     state = _labelling_state(tmp_path, {"assistant": AgentConfig(available=["time"])}, {"time": {"now"}})
     assert toolset_of(state, "assistant", "mystery") is None
+
+
+def _collection_config(tmp_path, *collections):
+    from kokua.config.schema import DocumentCollectionConfig
+
+    return AssistantConfig(
+        data_dir=tmp_path / "data",
+        document_collections=[DocumentCollectionConfig(name, path) for name, path in collections],
+    )
+
+
+def test_collection_paths_validated_at_startup(tmp_path):
+    from kokua.core.agents import validate_document_collections
+
+    folder = tmp_path / "vault"
+    folder.mkdir()
+    a_file = tmp_path / "file.md"
+    a_file.write_text("x")
+    (tmp_path / "data").mkdir()
+    inside = tmp_path / "data" / "documents"
+    inside.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(folder)
+    registry = build_registry(AssistantConfig())
+
+    validate_document_collections(_collection_config(tmp_path, ("work", folder)), registry)
+    for collections, message in [
+        ([("work", tmp_path / "missing")], "does not exist"),
+        ([("work", a_file)], "not a folder"),
+        ([("work", inside)], "inside"),
+        ([("work", folder), ("other", link)], "both resolve"),
+    ]:
+        with pytest.raises(ConfigError, match=message) as error:
+            validate_document_collections(_collection_config(tmp_path, *collections), registry)
+        assert "'work'" in str(error.value) or "'other'" in str(error.value)
+
+
+def test_nested_collections_are_allowed(tmp_path):
+    from kokua.core.agents import validate_document_collections
+
+    (tmp_path / "vault" / "sub").mkdir(parents=True)
+    config = _collection_config(tmp_path, ("outer", tmp_path / "vault"), ("inner", tmp_path / "vault" / "sub"))
+    validate_document_collections(config, build_registry(AssistantConfig()))
+
+
+def test_collection_name_colliding_with_a_toolset_refused(tmp_path):
+    from kokua.core.agents import validate_document_collections
+
+    (tmp_path / "vault").mkdir()
+    registry = build_registry(AssistantConfig())
+    with pytest.raises(ConfigError, match="web.*toolset|toolset.*web"):
+        validate_document_collections(_collection_config(tmp_path, ("web", tmp_path / "vault")), registry)

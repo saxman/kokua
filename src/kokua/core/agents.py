@@ -20,7 +20,7 @@ from aimu.tools.builtin import HISTORY_TOOL_NAME
 from aimu.tools.groups import CORE_TOOL_NAMES
 
 from kokua.config.file import ConfigError, check_resident_within_available
-from kokua.config.schema import ALL_TOOLSETS, DEFAULT_SYSTEM_MESSAGE, AssistantConfig
+from kokua.config.schema import ALL_TOOLSETS, BUILTIN_COLLECTION, DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
 from kokua.core.messaging import EVERYONE, USER, WORKER_SOURCE
 from kokua.core.metrics import record_event
@@ -424,6 +424,45 @@ def validate_reviewers(config: AssistantConfig) -> None:
         _check_model(f"reviewers.{name}", reviewer.model)
 
 
+def validate_document_collections(config: AssistantConfig, registry: ToolsetRegistry) -> None:
+    """Refuse a ``[[documents.collection]]`` the filesystem or the registry cannot honor, at startup.
+
+    These checks live here rather than in the parser because they need the disk and the registry: a
+    folder that is missing, a file, or inside ``data_dir`` (where Kokua's own state lives, so indexing it
+    would index the index and the sessions), two entries resolving to the same folder (one index, two
+    owners), and a name that is, or whose ``_write`` twin is, already a toolset (a collection must never
+    shadow a capability). A folder nested inside another is allowed: the overlap is deduplicated when
+    documents are indexed. Resolved paths are compared, so a symlink cannot smuggle a folder past a check.
+    """
+    data_dir = config.data_dir.resolve()
+    resolved_owner: dict = {}
+    for collection in config.document_collections:
+        for toolset_name in (collection.name, f"{collection.name}_write"):
+            if toolset_name in registry:
+                raise ConfigError(
+                    f"[[documents.collection]] '{collection.name}': '{toolset_name}' is already a toolset, and "
+                    "a collection becomes a toolset of that name. Rename the collection."
+                )
+        if collection.name == BUILTIN_COLLECTION:
+            raise ConfigError(f"[[documents.collection]] '{collection.name}': that name is the built-in collection.")
+        if not collection.path.exists():
+            raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} does not exist.")
+        if not collection.path.is_dir():
+            raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} is not a folder.")
+        resolved = collection.path.resolve()
+        if resolved == data_dir or data_dir in resolved.parents:
+            raise ConfigError(
+                f"[[documents.collection]] '{collection.name}': {collection.path} is inside Kokua's data "
+                f"directory ({data_dir}), which holds its own state. Point it at a folder outside it."
+            )
+        if resolved in resolved_owner:
+            raise ConfigError(
+                f"[[documents.collection]] '{collection.name}' and '{resolved_owner[resolved]}' both resolve to "
+                f"{resolved}. Declare the folder once."
+            )
+        resolved_owner[resolved] = collection.name
+
+
 def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
     """The registry ``config`` resolves against, with its agents and reviewers already checked against it.
 
@@ -441,6 +480,7 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
     validate_reviewers(config)
+    validate_document_collections(config, registry)
     return registry
 
 
