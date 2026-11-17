@@ -1585,6 +1585,98 @@ async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monk
         assistant._state.close()
 
 
+# A read-only part can build fewer tools than its toolset has. A gate names the toolset, so its vocabulary
+# is the whole toolset's, whichever grant happened to build it first.
+
+
+async def test_a_resident_read_only_part_on_a_worker_leaves_the_write_gate_resolvable_at_startup(
+    tmp_path, monkeypatch
+):
+    from tests.fakes import install_binder
+
+    install_binder(monkeypatch)
+    agents = {
+        "assistant": AgentConfig(available=["time", "binder"], resident=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(description="Reads notes.", available=["notes"]),
+    }
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert assistant._human.policies.default.confirm == frozenset({"write_binder"})
+    finally:
+        assistant._state.close()
+
+
+async def test_a_deferred_read_only_part_loads_with_the_write_gate_pending(tmp_path, monkeypatch):
+    from tests.fakes import install_binder
+
+    install_binder(monkeypatch)
+    agents = {"assistant": AgentConfig(available=["time", "notes"], resident=["time"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert assistant._human.policies.default.pending_confirm == frozenset({"binder.write_binder"})
+        assert (await assistant._agent.load_tool_group("binder")).startswith("Loaded 'binder':")
+        assert "write_binder" not in {fn.__name__ for fn in assistant._agent._effective_tools(None)}
+        assert assistant._human.policies.default.confirm == frozenset({"write_binder"})
+    finally:
+        assistant._state.close()
+
+
+async def test_a_worker_composed_with_a_read_only_part_leaves_the_write_gate_resolvable(tmp_path, monkeypatch):
+    import kokua.core.agents  # noqa: F401  (bind the real spawn factory before the patch below)
+    from kokua.registry.context import ToolsetContext
+    from kokua.toolsets.capabilities import make_capability_tools
+    from tests.fakes import install_binder
+
+    class _Spawn:
+        def __call__(self, model, **kwargs):
+            async def spawn_subagent(agent_type: str, task: str, ctx=None) -> str:
+                return "ran"
+
+            return spawn_subagent
+
+    monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", _Spawn())
+    install_binder(monkeypatch)
+    agents = {"assistant": AgentConfig(available=["time", "binder", "capabilities"], resident=["time", "capabilities"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        compose = next(
+            fn
+            for fn in make_capability_tools(
+                ToolsetContext(state=assistant._state, agent=object(), agent_name="assistant")
+            )
+            if fn.__name__ == "compose_subagent"
+        )
+        result = await compose("reader", "Read the notes.", ["notes"], "Read notes.")
+        assert result == "ran"
+        assert "write_binder" in assistant._human.policies.for_agent("composed:reader").confirm
+    finally:
+        assistant._state.close()
+
+
+async def test_a_worker_holding_one_read_only_collection_starts_beside_the_shipped_document_gates(tmp_path):
+    """The real documents toolset: a vault worker granted read-only access builds `documents` without its
+    write tools at startup, and the shipped gates on those tools must still resolve."""
+    agents = {
+        "assistant": AgentConfig(available=["time", "documents"], resident=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(description="Reads the vault.", available=["notes"]),
+    }
+    config, _ = _vault_config(
+        tmp_path, agents, default_confirm=["documents.save_document", "documents.edit_document"], default_review=[]
+    )
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+    finally:
+        assistant._state.close()
+
+
 def _vault_config(tmp_path, agents, **overrides):
     """A config with one writable vault, `notes`, holding one note, for gating the real documents toolset."""
     from kokua.config.schema import DocumentCollectionConfig

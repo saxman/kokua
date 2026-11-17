@@ -434,9 +434,13 @@ arrival, and names `compute.execute_python` explicitly because `compute` also ho
 An entry names the toolset, never a [part](#parts-one-toolset-granted-narrower).
 `documents.edit_document` gates every document edit, for an agent holding `documents` whole and for one
 holding only `work_write`, because both agents' tools were built by the one `documents` toolset and
-recorded under its name. `work_write.edit_document` is refused at startup with the entry to write
-instead: a part narrows which folders a toolset's tools reach, never which tools it has, so a gate on a
-part could only ever hold back what the toolset's own entry does. The cost is that the gate cannot tell a
+recorded under its name. What is recorded is what the *whole* toolset builds, not what one grant built
+(`build_tools` builds the whole beside a part grant, through `Toolset.whole`), so a gate on
+`documents.edit_document` still resolves when the only agent to build `documents` so far holds one
+read-only collection and no write tool at all. `work_write.edit_document` is refused at startup with the
+entry to write instead: a part narrows which folders a toolset's tools reach and may leave its write tools
+out, but it never adds a tool the toolset lacks, so a gate on a part could only ever hold back what the
+toolset's own entry does. The cost is that the gate cannot tell a
 write to one collection from a write to another, which is why the shipped default asks before every
 document write.
 

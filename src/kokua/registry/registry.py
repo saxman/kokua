@@ -8,7 +8,7 @@ name is a startup error rather than a silent shadowing, since the loser would va
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Hashable, Iterable, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:
@@ -87,6 +87,12 @@ class Toolset:
     ``writable_part_remedy`` says what to change so a read-only part gains a ``<part>_write`` twin, with
     ``{part}`` standing for its name: an agent declaring a twin that does not exist is refused with it,
     since the fix is in that part's configuration, which only the toolset knows the shape of.
+
+    ``whole`` is set by ``select`` alone, on a copy bound to some parts: it is the toolset as registered.
+    A toolset author leaves it unset. It exists because a narrow grant can build fewer tools than its
+    toolset has (a read-only collection builds no write tool), while a gate names the toolset, so the
+    names a gate may hold back have to come from the whole build rather than from whichever grant
+    happened to build first (see ``build_tools``).
     """
 
     name: str
@@ -100,6 +106,7 @@ class Toolset:
     parts: Optional[Callable[["AssistantConfig"], Mapping[str, Hashable]]] = None
     build_parts: Optional[Callable[["ToolsetContext", frozenset[Hashable]], list]] = None
     writable_part_remedy: str = ""
+    whole: Optional["Toolset"] = field(default=None, repr=False, compare=False)
 
 
 class ToolsetRegistry(dict):
@@ -309,7 +316,7 @@ def _bound(toolset: Toolset, parts: set[Hashable] | None) -> Toolset:
     if parts is None:
         return toolset
     build_parts, frozen = toolset.build_parts, frozenset(parts)
-    return replace(toolset, build=lambda ctx: build_parts(ctx, frozen))
+    return replace(toolset, build=lambda ctx: build_parts(ctx, frozen), whole=toolset)
 
 
 def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
@@ -329,23 +336,27 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
     is still recorded under the toolset that offered it, because that toolset really does provide it and
     would win for an agent declaring it first. Recording only the survivors would make a truthful gate
     entry fail startup on the accident of one agent's declaration order.
+
+    It is wider in a second way for a toolset granted by its parts (see ``Toolset.whole``). The agent
+    gets what its grant builds, but what is recorded and reported is what the whole toolset builds, so
+    a worker granted one read-only collection does not make ``documents.edit_document`` name a tool the
+    ``documents`` toolset lacks. That costs a parted toolset a second build each time a part grant is
+    built, which stays cheap because a ``build`` creates only closures over shared state (see ``Toolset``).
     """
     tools: list = []
     seen: set[str] = set()
     for toolset in toolsets:
+        granted = toolset.build(ctx)
+        vocabulary = granted if toolset.whole is None else toolset.whole.build(ctx)
         # What this call built, kept apart from the shared record below: a concurrent build of the same
         # toolset in another worker thread may be adding to that set while the hook reads.
-        built: set[str] = set()
+        built = {name for fn in vocabulary if (name := getattr(fn, "__name__", None))}
         # Seeded even when the build returns nothing, so a workflow-only toolset like `planning` is
         # known-and-empty to the gate check rather than indistinguishable from a name nobody declared.
-        provided = ctx.state.tools_by_toolset.setdefault(toolset.name, set())
-        for fn in toolset.build(ctx):
+        ctx.state.tools_by_toolset.setdefault(toolset.name, set()).update(built)
+        for fn in granted:
             name = getattr(fn, "__name__", None)
-            if not name:
-                continue
-            provided.add(name)
-            built.add(name)
-            if name not in seen:
+            if name and name not in seen:
                 seen.add(name)
                 tools.append(fn)
         # After recording and before the tools go back to the caller: approval has to cover a toolset
