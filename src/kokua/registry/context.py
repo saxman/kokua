@@ -55,7 +55,9 @@ def embedding_client_for(model: str) -> Optional[EmbeddingClient]:
     """The client ``[documents].embedding_model`` names, or None for an empty one: keyword search alone.
 
     The one place that setting becomes a model, which is why the test suite stubs it (see
-    ``tests/conftest.py``): no test may download one. Building the client loads nothing. A Hugging Face
+    ``tests/conftest.py``): no test may download one. Building the client loads no model weights, but it does import AIMU's
+    provider for the model, and for ``hf:`` that is sentence_transformers and torch: seconds on every
+    startup. That is why the client is built at the first documents build, never at startup. A Hugging Face
     model downloads on its first embed, which happens in an index's background thread after the first
     search, and a model that fails to load then leaves keyword search working and says so in the results.
     """
