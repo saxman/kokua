@@ -1530,3 +1530,41 @@ def test_an_entry_for_parts_still_deferred_waits_on_their_toolset(tmp_path, monk
     assert policies.default.pending_confirm == frozenset({"shelf.edit_shelf"})
     updated = policies.with_built("shelf", frozenset({"read_shelf", "edit_shelf"}))
     assert updated.default.confirm == frozenset({"edit_shelf"})
+
+
+@pytest.mark.parametrize("tier", ["default", "own pair"])
+async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monkeypatch, tier):
+    """The whole chain a part grant's gate rides on: the bound toolset builds under its toolset's name, so
+    the build hook resolves the waiting entry, and the call then prompts. A bound copy that lost its name
+    would leave the entry pending forever and the tool ungated, with every policy-level test still green."""
+    from kokua.channels.web import streaming_conversation
+    from kokua.config.schema import AgentConfig
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    entry = ["shelf.edit_shelf"]
+    pair = {"confirm": entry, "review": []} if tier == "own pair" else {}
+    agents = {"assistant": AgentConfig(available=["time", "b"], resident=["time"], **pair)}
+    default_confirm = entry if tier == "default" else []
+    channel = FakeChannel()
+    config = _config(tmp_path, agents=agents, default_confirm=default_confirm, default_review=[])
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+    policy = assistant._human.policies.for_agent("assistant")
+    assert policy.pending_confirm == frozenset(entry)
+    assert "edit_shelf" not in policy.confirm
+
+    assert (await assistant._agent.load_tool_group("shelf")).startswith("Loaded 'shelf':")
+    assert "edit_shelf" in assistant._human.policies.for_agent("assistant").confirm
+
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        task = asyncio.create_task(assistant._human.approve("assistant", "edit_shelf", {}))
+        await asyncio.sleep(0)
+        assert assistant._human.approval.pending
+        assert channel.sent
+        assistant._human.approval.resolve(False)
+        assert await task is False
+    finally:
+        streaming_conversation.reset(token)
+        assistant._state.close()
