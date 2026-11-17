@@ -83,7 +83,9 @@ available = ["web", "work", "time"]   # searches and reads the work vault, write
 A part is a narrower availability, not a new capability. `select` resolves every part an agent names back
 into the one toolset, built only over those parts, so the researcher above holds `list_documents`,
 `read_document`, and `search_documents` bound to one folder, and no write tool at all. Naming the toolset
-and a part grants the whole. Part names share the namespace toolset names live in, so a part, a toolset, a
+and a part grants the whole. A part grant does not limit an agent that also holds `capabilities`, since
+`compose_subagent` draws from the whole registry and can hand a composed worker any part, or the toolset
+whole. Part names share the namespace toolset names live in, so a part, a toolset, a
 skill, and an MCP server can never be one name, and `kokua --list-toolsets` and `list_capabilities` print
 each toolset's parts beneath it. Why parts rather than a toolset per collection, which the `fs` /
 `fs_write` precedent might suggest, is argued in [Retrieval](retrieval.md#granting-collections-parts-of-one-toolset):

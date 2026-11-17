@@ -1235,11 +1235,15 @@ assistant may read.
   refuses it, for the reason it refuses `compute.command_env_passthrough`. A `config.toml` scaffolded
   earlier writes its lock list out in full, so add `"documents.embedding_model"` to
   `[security].locked_config_keys` by hand.
+- **A server `add_mcp_server` records is named clear of every registry name**, not only other servers',
+  so a server on a host named like a collection, a skill, or a toolset gets a numeric suffix instead of a
+  name the next start would refuse.
 - **For plugin authors: `Toolset.parts`, `build_parts`, and `writable_part_remedy`.** A toolset can be
   granted narrower than whole. `parts` maps the config to the names an agent may declare and what each
   grants, `build_parts` builds the tools for the parts named, and `writable_part_remedy` is the sentence
-  telling a user how to make a `<part>_write` exist. `select` collects every part an agent names into
-  one copy of the toolset, `registry.with_parts` refuses a part name that collides with any other name,
+  telling a user how to make a `<part>_write` exist (only `{part}` is substituted). `select` collects
+  every part an agent names into one copy of the toolset, whose gate vocabulary is still what the whole
+  toolset builds, `registry.with_parts` refuses a part name that collides with any other name,
   and `kokua --list-toolsets`, `kokua agents`, and `list_capabilities` show the parts.
 
 **The `compute` toolset now carries a shell tool, `run_command`, alongside `calculate` and
@@ -2137,7 +2141,8 @@ notice on startup.
   [#7](https://github.com/saxman/kokua/issues/7).
   **An unattended turn's denial tells the model why**, for every gated tool: the tool result says nobody
   is there to approve the call, that it did not run, not to retry it, and to say in the report what it
-  would have done. Before, the model saw only that the call was not approved, which reads like a call
+  would have done, so the user can do it. It no longer adds "or approve it next time": nothing ever
+  approves an unattended call, so that promise was false. Before, the model saw only that the call was not approved, which reads like a call
   worth retrying and left the report the user reads afterwards with nothing to say about it.
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests

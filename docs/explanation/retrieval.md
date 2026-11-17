@@ -212,7 +212,9 @@ names back into that single toolset, its build bound to the parts named. A resea
 `available = ["work"]` therefore holds `list_documents`, `read_document`, and `search_documents` over
 `work` alone, and no write tool at all: with no collection writable, AIMU builds none, so a read-only
 grant holds nothing that could write rather than tools that refuse. An agent naming both `documents` and
-a part gets the whole toolset, since the whole already holds every part.
+a part gets the whole toolset, since the whole already holds every part. A part grant does not limit an
+agent that also holds `capabilities`: its `compose_subagent` draws from the whole registry, so it can
+compose a worker holding `documents` whole, or any `_write` part.
 
 Per-collection tools (`search_work`, `read_personal`) would have needed no new mechanism, and were rejected
 for three reasons, each worth knowing for a toolset of your own:
@@ -264,6 +266,16 @@ what leaves the machine is decided by which models you configure.
 - **The embedding model reads every passage of every collection.** `hf:` models run locally. Naming a
   remote embedding model instead (AIMU accepts `openai:` ones) would send the whole of every collection
   to that provider during indexing, not only what a search turns up.
+- **Anything a collection holds can be steered out of the machine.** A passage is text the model reads,
+  and text can carry instructions: a note clipped from the web, a PDF someone sent you, or a page fetched
+  mid-turn can ask the model to send what it found somewhere. Any tool that reaches the network is a
+  route: a URL passed to `get_web_content` (the query string is the payload), the `email-report` skill's
+  send script (locked to your own address, but still a send), an MCP server's tools, and a delegated or
+  composed worker holding `web`. The shipped config gates none of those routes, and the approval gate
+  decides by tool name, not by what an argument carries. So grant collections to the agents that need
+  them rather than to every agent, keep network tools off an agent that holds a private vault where you
+  can, and gate the routes you care about (`web.get_web_content`, a skill, an MCP server by name) in that
+  agent's `confirm` list.
 - **`update_config` cannot change `[documents].embedding_model` by default.** The shipped
   [`[security].locked_config_keys`](../reference/configuration.md#locked_config_keys) locks it, for the
   reason it locks `compute.command_env_passthrough`: a write pointing it at a remote endpoint would send
