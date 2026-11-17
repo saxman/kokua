@@ -1573,14 +1573,16 @@ async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monk
     assert "edit_shelf" in assistant._human.policies.for_agent("assistant").confirm
 
     token = streaming_conversation.set(assistant._active_id)
+    task = asyncio.create_task(assistant._human.approve("assistant", "edit_shelf", {}))
     try:
-        task = asyncio.create_task(assistant._human.approve("assistant", "edit_shelf", {}))
-        await asyncio.sleep(0)
-        assert assistant._human.approval.pending
-        assert channel.sent
+        async with asyncio.timeout(2):
+            while not assistant._human.approval.pending:
+                await asyncio.sleep(0.001)
+        assert any("shelf.edit_shelf" in str(sent) for sent in channel.sent)
         assistant._human.approval.resolve(False)
         assert await task is False
     finally:
+        task.cancel()
         streaming_conversation.reset(token)
         assistant._state.close()
 
