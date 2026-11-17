@@ -15,8 +15,7 @@ gate written as ``documents.edit_document`` holds for an agent that holds only `
 
 from __future__ import annotations
 
-from functools import wraps
-from typing import TYPE_CHECKING, Callable, Mapping
+from typing import TYPE_CHECKING
 
 from aimu.tools.builtin import make_collection_tools
 
@@ -118,39 +117,14 @@ def _build_parts(ctx: "ToolsetContext", parts: frozenset[tuple[str, bool]]) -> l
     writable = {name for name, can_write in parts if can_write}
     stores = {name: store for name, store in ctx.state.document_stores().items() if name in held}
     rerank = ctx.config.toolset_settings.get(TOOLSET_NAME, {}).get("rerank", False)
-    tools = make_collection_tools(stores, writable=writable, rerank=rerank)
-    descriptions = {BUILTIN_COLLECTION: BUILTIN_DESCRIPTION}
-    descriptions |= {c.name: c.description for c in ctx.config.document_collections if c.description}
-    return [_with_descriptions(fn, descriptions) if fn.__name__ == "list_documents" else fn for fn in tools]
-
-
-def _with_descriptions(list_documents: Callable, descriptions: Mapping[str, str]) -> Callable:
-    """``list_documents``, with each collection's description beside its name in the overview it opens with.
-
-    AIMU's overview (``- work (read-only)``, one line per collection) says what a store knows. What a
-    collection is *for* is the user's to say, and it is how the model tells which collection a question
-    belongs to. It rides on the listing rather than the guidance because the guidance is the same text for
-    every agent, while the collections an agent holds differ by grant. ``wraps`` carries the tool's schema
-    across, so the model sees the same tool.
-    """
-
-    @wraps(list_documents)
-    def described(collection: str = "", prefix: str = "") -> str:
-        listing = list_documents(collection=collection, prefix=prefix)
-        if collection:
-            return listing
-        overview, separator, rest = listing.partition("\n\n")
-        lines = [_described(line, descriptions) for line in overview.splitlines()]
-        return "\n".join(lines) + separator + rest
-
-    return described
-
-
-def _described(line: str, descriptions: Mapping[str, str]) -> str:
-    for name, description in descriptions.items():
-        if line.startswith(f"- {name} (") and line.endswith(")"):
-            return f"{line}: {description}"
-    return line
+    # What a collection is for is the user's to say, and `list_documents` shows it beside the collection's
+    # name, which is where the model tells which collection a question belongs to. It rides on the listing
+    # rather than the guidance because the guidance is the same text for every agent, while the collections
+    # an agent holds differ by grant. Only held collections are passed: AIMU refuses any other.
+    described = {BUILTIN_COLLECTION: BUILTIN_DESCRIPTION}
+    described |= {c.name: c.description for c in ctx.config.document_collections if c.description}
+    descriptions = {name: text for name, text in described.items() if name in held}
+    return make_collection_tools(stores, writable=writable, rerank=rerank, descriptions=descriptions)
 
 
 TOOLSET = Toolset(
