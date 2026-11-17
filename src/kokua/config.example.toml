@@ -71,6 +71,7 @@ locked_config_keys = [
     "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
+    "documents.embedding_model",
 ]
 
 # Lets the [reviewers.*] named here approve a `review` call in your place. A convenience, not a boundary:

@@ -1649,3 +1649,40 @@ async def test_an_unattended_turn_document_write_is_refused_and_told_why(tmp_pat
     assert refusal.startswith("Tool 'edit_document' was not approved: ")
     assert "unattended" in refusal
     assert "first draft" in (vault / "idea.md").read_text()
+
+
+# --- The code default gates document writes --------------------------------------------------------
+
+
+async def test_a_config_with_no_assistant_tools_table_gates_document_writes(tmp_path):
+    """A table-less config gets the code default, which asks before every document write as the shipped
+    example does. The shipped entry agent defers `documents`, so the entries wait for its build and
+    resolve there."""
+    config = _config(tmp_path)  # no default_confirm override: AssistantConfig's own default
+    assert {"documents.save_document", "documents.edit_document"} <= set(config.default_confirm)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    default = assistant._human.policies.default
+    assert {"documents.save_document", "documents.edit_document"} <= default.pending_confirm
+
+    await assistant._agent.load_tool_group("documents")
+    assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+
+
+async def test_the_code_default_treats_an_undeclared_documents_toolset_like_every_other_default(tmp_path):
+    """No default entry is excused for naming a toolset nobody declares: a table-less config whose agents
+    leave out `documents` fails startup naming it, exactly as one leaving out `compute` already did. The
+    fix the error gives is the one every default entry has, declare the toolset or write the table."""
+    agents = {"assistant": AgentConfig(available=["skills", "mcp", "config", "compute", "fs_write", "time"])}
+    assistant = await Assistant.create(_config(tmp_path, agents=agents), FakeChannel(), client=MockAsyncModelClient([]))
+    with pytest.raises(ConfigError, match=r"'documents\.save_document' names the 'documents' toolset, which no agent"):
+        await assistant.start()
+
+
+async def test_a_declared_pair_without_document_entries_starts_with_no_agent_declaring_documents(tmp_path):
+    """Writing the table is how a config whose agents hold no documents opts out of those gates."""
+    agents = {"assistant": AgentConfig(available=["config", "time"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["config.update_config"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    assert assistant._human.policies.default.confirm == {"update_config"}

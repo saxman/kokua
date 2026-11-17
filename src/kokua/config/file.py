@@ -325,12 +325,12 @@ def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
         if not isinstance(name, str) or not _COLLECTION_NAME.fullmatch(name):
             raise ConfigError(
                 f"[[documents.collection]] {label} needs a 'name' of lowercase letters, digits, underscores, and hyphens "
-                "starting with a letter: it is the toolset name an agent lists in its available list."
+                "starting with a letter: an agent lists it in its available list to be granted the collection."
             )
         if name.endswith("_write"):
             raise ConfigError(
                 f"[[documents.collection]] {label}: a name may not end in '_write', which is the suffix of the "
-                "toolset a writable collection adds. Rename it."
+                "name that grants a writable collection read and write access. Rename it."
             )
         if name == BUILTIN_COLLECTION or name == "documents":
             raise ConfigError(
@@ -574,9 +574,10 @@ _TASK_SECTION = "scheduling.task"
 # Toolset sections named by an exact key in DEFAULT_LOCKED_CONFIG_KEYS (see `compute` below), unioned
 # into `_lock_pattern_sections` for the same reason `_TASK_SECTION` is: a shipped default has to stay
 # loadable under the core-only table a config test parses through, which knows nothing about installed
-# toolsets. Unlike `_TASK_SECTION`, `compute` is an ordinary toolset section with no structural parsing
-# of its own; it earns the carve-out only because a shipped security default names one of its keys.
-_LOCKED_TOOLSET_SECTIONS = frozenset({"compute"})
+# toolsets. Unlike `_TASK_SECTION`, `compute` and `documents` have no structural parsing of their own
+# for this to protect (`documents` parses its collection array, but that is not what the lock names);
+# each earns the carve-out only because a shipped security default names one of its keys.
+_LOCKED_TOOLSET_SECTIONS = frozenset({"compute", "documents"})
 
 # Per schedule type, the keys it requires: accepted TOML types plus the label an error uses. Only the
 # shape is checked here. Whether "25:99" is a real time is recurrence math, and `scheduling` sits above
@@ -876,8 +877,8 @@ def _lock_pattern_sections(schema: dict) -> frozenset[str]:
     itself, which have no schema entries to be found in. :data:`_TASK_SECTION` holds ``scheduling``,
     which must be a known section whether or not the scheduling toolset is installed: the shipped
     ``scheduling.task.*`` default has to survive every table this is called with, including the
-    core-only one a config test parses through. :data:`_LOCKED_TOOLSET_SECTIONS` holds ``compute`` for
-    the identical reason, this time for a shipped default naming an exact toolset key rather than a
+    core-only one a config test parses through. :data:`_LOCKED_TOOLSET_SECTIONS` holds ``compute`` and
+    ``documents`` for the identical reason, this time for a shipped default naming an exact toolset key rather than a
     section wildcard.
     """
     return frozenset(

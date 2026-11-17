@@ -255,6 +255,17 @@ async def test_update_config_refusal_names_the_pattern_that_matched(tmp_path):
     assert "locked_config_keys" in result
 
 
+async def test_update_config_refuses_the_embedding_model_by_default(tmp_path):
+    """The embedding model reads every passage of every document collection, so a write pointing it at a
+    remote endpoint would send the user's vaults there at the next restart. Locked by default, like
+    `compute.command_env_passthrough`, and the refusal names the pattern."""
+    path, _, update_config = _tools(tmp_path)
+    result = await update_config("documents", "embedding_model", "openai:text-embedding-3-small")
+    assert not path.exists()
+    assert "documents.embedding_model" in result
+    assert "locked_config_keys" in result
+
+
 async def test_update_config_refuses_the_lock_list_itself(tmp_path):
     _, _, update_config = _tools(tmp_path, config=_config(tmp_path, locked_config_keys=[]))
     result = await update_config("security", "locked_config_keys", "email.to")

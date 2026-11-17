@@ -497,8 +497,9 @@ def validate_document_collections(config: AssistantConfig, registry: ToolsetRegi
         for toolset_name in (collection.name, f"{collection.name}_write"):
             if toolset_name in registry:
                 raise ConfigError(
-                    f"[[documents.collection]] '{collection.name}': '{toolset_name}' is already a toolset, and "
-                    "a collection becomes a toolset of that name. Rename the collection."
+                    f"[[documents.collection]] '{collection.name}': '{toolset_name}' is already a toolset, and an "
+                    "agent names a collection the same way it names a toolset, as a part of the documents "
+                    "toolset. Rename the collection."
                 )
         if collection.name == BUILTIN_COLLECTION:
             raise ConfigError(f"[[documents.collection]] '{collection.name}': that name is the built-in collection.")

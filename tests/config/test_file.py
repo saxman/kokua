@@ -1196,7 +1196,7 @@ def test_assistant_tools_pair_rule():
     assert overrides["default_review"] == ["fs_write"] and overrides["default_confirm"] == []
 
 
-def test_assistant_tools_absent_keeps_todays_six():
+def test_assistant_tools_absent_keeps_the_code_default():
     config = AssistantConfig()
     assert config.default_confirm == [
         "skills.add_skill_script",
@@ -1205,6 +1205,8 @@ def test_assistant_tools_absent_keeps_todays_six():
         "compute.run_command",
         "fs_write",
         "config.update_config",
+        "documents.save_document",
+        "documents.edit_document",
     ]
     assert config.default_review == []
     assert "default_confirm" not in _load_text("[assistant]\n")

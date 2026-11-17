@@ -21,10 +21,11 @@ def test_logs_path_under_data_dir(tmp_path):
 
 
 def test_default_confirm_tools():
-    """The code-level default still gates all six tools, and the shipped example covers the same six
-    by splitting them across the pair: the three that install something to run later ask the user,
-    and the three that act once ask a reviewer first. The shipped example also asks before every
-    document write, since a collection can be a folder the user keeps outside Kokua."""
+    """The code-level default gates the eight tools the shipped example does, and the example covers
+    the same eight by splitting them across the pair: the three that install something to run later
+    and the two document writers ask the user, and the three that act once ask a reviewer first. Both
+    ask before every document write, since a collection can be a folder the user keeps outside Kokua,
+    so a config with no [assistant.tools] table must not be the one that writes into it unprompted."""
     six = [
         "skills.add_skill_script",
         "mcp.add_mcp_server",
@@ -33,7 +34,8 @@ def test_default_confirm_tools():
         "fs_write",
         "config.update_config",
     ]
-    assert AssistantConfig().default_confirm == six
+    document_writes = ["documents.save_document", "documents.edit_document"]
+    assert AssistantConfig().default_confirm == six + document_writes
     assert AssistantConfig().default_review == []
     shipped = resolve_config(build_arg_parser().parse_args([]))
     assert shipped.default_confirm == [
@@ -44,7 +46,6 @@ def test_default_confirm_tools():
         "documents.edit_document",
     ]
     assert shipped.default_review == ["compute.run_command", "compute.execute_python", "fs_write"]
-    document_writes = ["documents.save_document", "documents.edit_document"]
     assert sorted(shipped.default_confirm + shipped.default_review) == sorted(six + document_writes)
 
 

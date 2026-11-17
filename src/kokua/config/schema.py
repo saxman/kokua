@@ -38,6 +38,9 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     # decides which environment variables a run_command child can see; the assistant naming its own
     # API key here would hand a shell child the credential the allowlist exists to keep out of reach.
     "compute.command_env_passthrough",
+    # names the model that embeds every passage of every document collection, so pointing it at a remote
+    # endpoint would send the user's whole vault there on the next restart's indexing.
+    "documents.embedding_model",
 )
 
 
@@ -315,6 +318,8 @@ class AssistantConfig:
             "compute.run_command",
             "fs_write",
             "config.update_config",
+            "documents.save_document",
+            "documents.edit_document",
         ]
     )
     # Tools no reviewer may ever approve, whatever a review list names, in the same
