@@ -626,3 +626,12 @@ def test_collection_name_colliding_with_a_toolset_refused(tmp_path):
     registry = build_registry(AssistantConfig())
     with pytest.raises(ConfigError, match="web.*toolset|toolset.*web"):
         validate_document_collections(_collection_config(tmp_path, ("web", tmp_path / "vault")), registry)
+
+
+def test_collection_holding_the_data_directory_is_refused(tmp_path):
+    from kokua.core.agents import validate_document_collections
+
+    (tmp_path / "data").mkdir()
+    config = _collection_config(tmp_path, ("home", tmp_path))
+    with pytest.raises(ConfigError, match="'home'.*data directory"):
+        validate_document_collections(config, build_registry(AssistantConfig()))

@@ -1328,3 +1328,13 @@ def test_documents_scalars_and_collections_coexist():
 def test_update_config_refuses_documents_collection():
     with pytest.raises(settings.ConfigError, match="config.toml"):
         settings.coerce_config_string("documents", "collection", "[]", table=core_table())
+
+
+def test_hyphenated_collection_names_parse():
+    (collection,) = _load_text('[[documents.collection]]\nname = "my-vault"\npath = "/x"\n')["document_collections"]
+    assert collection.name == "my-vault"
+
+
+def test_relative_collection_path_is_refused():
+    with pytest.raises(settings.ConfigError, match="absolute"):
+        _load_text('[[documents.collection]]\nname = "work"\npath = "notes"\n')

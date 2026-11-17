@@ -303,7 +303,7 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
     return servers
 
 
-_COLLECTION_NAME = re.compile(r"[a-z][a-z0-9_]*")
+_COLLECTION_NAME = re.compile(r"[a-z][a-z0-9_-]*")
 _COLLECTION_KEYS = {"name", "path", "writable", "description"}
 
 
@@ -324,7 +324,7 @@ def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
         label = f"collection {name!r}" if isinstance(name, str) and name else f"collection #{index}"
         if not isinstance(name, str) or not _COLLECTION_NAME.fullmatch(name):
             raise ConfigError(
-                f"[[documents.collection]] {label} needs a 'name' of lowercase letters, digits, and underscores "
+                f"[[documents.collection]] {label} needs a 'name' of lowercase letters, digits, underscores, and hyphens "
                 "starting with a letter: it is the toolset name an agent lists in its available list."
             )
         if name.endswith("_write"):

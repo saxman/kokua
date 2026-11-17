@@ -450,10 +450,11 @@ def validate_document_collections(config: AssistantConfig, registry: ToolsetRegi
         if not collection.path.is_dir():
             raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} is not a folder.")
         resolved = collection.path.resolve()
-        if resolved == data_dir or data_dir in resolved.parents:
+        if resolved == data_dir or data_dir in resolved.parents or resolved in data_dir.parents:
             raise ConfigError(
-                f"[[documents.collection]] '{collection.name}': {collection.path} is inside Kokua's data "
-                f"directory ({data_dir}), which holds its own state. Point it at a folder outside it."
+                f"[[documents.collection]] '{collection.name}': {collection.path} is, is inside, or holds "
+                f"Kokua's data directory ({data_dir}), which holds its own state (sessions, the index), so "
+                "indexing it would index that state. Point it at a folder that does not overlap it."
             )
         if resolved in resolved_owner:
             raise ConfigError(
