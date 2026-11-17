@@ -242,7 +242,12 @@ The shipped `config.example.toml` puts `documents.save_document` and `documents.
 document write asks you, in Kokua's own folder as much as in a
 vault. That is coarser than it might be, and on purpose for now: the gate decides by tool name, so it
 cannot tell a write to `kokua` from one to your personal vault, and the safe reading of "cannot tell" is
-"ask". Loosen it in your own config if Kokua's folder is the only one you mark writable. A scheduled task
+"ask". Loosen it in your own config if Kokua's folder is the only one you mark writable. A
+`config.toml` whose `[assistant.tools]` table predates these entries has neither, so startup raises a
+notice when an agent can reach a `writable = true` collection and its policy names neither writer, with
+the two lines to add (`ungated_document_writes` in `core/approval.py`). It is a notice and not an error,
+because leaving a tool ungated is a choice a policy may make; what the notice catches is the choice
+nobody made. A scheduled task
 that tries to write a document is refused, and told that nobody is there to approve it, so it reports what
 it would have written instead.
 

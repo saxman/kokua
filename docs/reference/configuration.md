@@ -444,7 +444,8 @@ leaves one out (say, no agent declares `documents`) fails startup naming the ent
 [gate-nothing error](#an-entry-that-would-gate-nothing-fails-startup) a hand-written one gets. Write an
 `[assistant.tools]` table listing only what your agents hold. A `config.toml` whose table predates the
 document writers keeps saving and editing documents without asking until you add both entries to its
-`confirm`.
+`confirm`; once such an agent can reach a `writable = true` collection, startup raises a notice naming
+the table and the two lines.
 
 This table holds only those two keys. `available` or `resident` here is a startup error, because
 availability is declared per agent and never defaulted. The two lists must not name the same tool.

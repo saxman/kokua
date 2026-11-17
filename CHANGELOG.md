@@ -1208,8 +1208,10 @@ assistant may read.
   `[assistant.tools].confirm`, and in the code default a config with no such table gets. Like every
   default entry, the code default's two fail startup naming the gate when no agent declares
   `documents`; write an `[assistant.tools]` table for such a config. **An existing install keeps
-  writing documents ungated** if its `config.toml` has its own `[assistant.tools]` table. Add these two
-  lines to its `confirm`:
+  writing documents ungated** if its `config.toml` has its own `[assistant.tools]` table, and startup
+  says so with a notice once a `writable = true` collection is reachable by an agent whose policy names
+  neither document writer (a notice, not an error: your own policy wins). Add these two lines to its
+  `confirm`:
 
   ```toml
       "documents.save_document",

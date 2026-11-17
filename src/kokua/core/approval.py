@@ -46,6 +46,7 @@ from kokua.registry.registry import RESERVED_GATE_NAMESPACE, canonical_names
 if TYPE_CHECKING:
     from kokua.config.schema import AssistantConfig
     from kokua.registry.context import LiveState
+    from kokua.registry.registry import ToolsetRegistry
 
 #: The default tier's name (defined with the config, which labels entries by it). No agent can have it.
 DEFAULT_POLICY = DEFAULT_POLICY_SOURCE
@@ -211,6 +212,60 @@ def _resolve_pair(
         confirm_entries=frozenset(confirm),
         review_entries=frozenset(review),
     )
+
+
+#: The entries a policy holds a document write back with: the toolset whole, or either writer. One is
+#: enough, since a user gating only ``edit_document`` made a choice, and the user's policy wins.
+_DOCUMENT_TOOLSET = "documents"
+DOCUMENT_WRITE_ENTRIES = ("documents.save_document", "documents.edit_document")
+_DOCUMENT_GATING_ENTRIES = frozenset({_DOCUMENT_TOOLSET, f"{_DOCUMENT_TOOLSET}.*", *DOCUMENT_WRITE_ENTRIES})
+
+
+@dataclass(frozen=True)
+class UngatedDocumentWrites:
+    """Agents that can write a declared vault with no document write in their approval policy.
+
+    ``source`` is the table holding that policy, where the entries would go; ``collections`` are the
+    writable collections those agents reach.
+    """
+
+    source: str
+    agents: tuple[str, ...]
+    collections: tuple[str, ...]
+
+
+def ungated_document_writes(config: AssistantConfig, registry: ToolsetRegistry) -> list[UngatedDocumentWrites]:
+    """Every policy leaving a writable ``[[documents.collection]]`` writable without asking, by its table.
+
+    A notice rather than an error, unlike a gate that names nothing: an ungated tool is a choice a policy
+    may make, and the user's policy wins. What makes it worth saying is how the choice gets made without
+    anyone making it. An ``[assistant.tools]`` table written before document gates existed lacks both
+    entries, so the first ``writable = true`` lets every vault edit through unasked, a scheduled task's and
+    one a poisoned passage talked the model into among them. Kokua's own ``kokua`` collection is left out:
+    writing it ungated is what an install did before collections existed.
+
+    Read from the entries as written, which is what a resolved policy keeps too, so a toolset that is
+    deferred and unbuilt answers the same as one already built.
+    """
+    writable = [collection.name for collection in config.document_collections if collection.writable]
+    if not writable:
+        return []
+    by_source: dict[str, tuple[list[str], set[str]]] = {}
+    for name in config.agents:
+        available = set(available_for(config, registry, name))
+        reached = [c for c in writable if _DOCUMENT_TOOLSET in available or f"{c}_write" in available]
+        if not reached:
+            continue
+        confirm, review, source = config.approval_entries_for(name)
+        if _DOCUMENT_GATING_ENTRIES & {*confirm, *review}:
+            continue
+        agents, collections = by_source.setdefault(source, ([], set()))
+        agents.append(name)
+        collections.update(reached)
+    return [
+        UngatedDocumentWrites(source, tuple(agents), tuple(c for c in writable if c in collections))
+        for source, (agents, collections) in by_source.items()
+    ]
 
 
 def resolve_approval_policies(config: AssistantConfig, state: LiveState, entry_agent) -> ApprovalPolicies:

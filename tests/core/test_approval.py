@@ -1741,6 +1741,65 @@ async def test_an_unattended_turn_document_write_is_refused_and_told_why(tmp_pat
     assert "first draft" in (vault / "idea.md").read_text()
 
 
+# --- An install whose own policy leaves vault writes ungated is told so -----------------------------
+
+
+def _ungated_notices(channel) -> list[str]:
+    return [text for text, *_ in channel.alerts if "writable collection" in text]
+
+
+async def test_a_writable_vault_reachable_with_no_document_gate_raises_a_notice_naming_the_lines(tmp_path):
+    """An `[assistant.tools]` table written before document gates existed lacks both entries, so declaring
+    a collection writable would let every edit through unasked. The user's own policy wins, so this is a
+    notice rather than an error, and it says exactly what to add."""
+    agents = {"assistant": AgentConfig(available=["time", "notes_write"])}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    (notice,) = _ungated_notices(channel)
+    assert "'assistant'" in notice and "'notes'" in notice
+    assert "[assistant.tools].confirm" in notice
+    assert '"documents.save_document"' in notice and '"documents.edit_document"' in notice
+
+
+async def test_an_agents_own_pair_without_document_gates_is_named_in_the_notice(tmp_path):
+    agents = {"assistant": AgentConfig(available=["documents"], confirm=[], review=[])}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=["documents"], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    (notice,) = _ungated_notices(channel)
+    assert "[agents.assistant.tools].confirm" in notice
+
+
+@pytest.mark.parametrize(
+    "available, confirm, review",
+    [
+        (["time", "notes_write"], ["documents.edit_document"], []),  # one writer gated: the user chose that
+        (["time", "notes_write"], [], ["documents"]),  # a review entry still stops the call
+        (["time", "notes"], [], []),  # read-only grant: nothing to write with
+        (["time"], [], []),  # no grant at all
+    ],
+)
+async def test_no_notice_when_the_vault_is_gated_or_unreachable(tmp_path, available, confirm, review):
+    agents = {"assistant": AgentConfig(available=available)}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=confirm, default_review=review)
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    assert _ungated_notices(channel) == []
+
+
 # --- The code default gates document writes --------------------------------------------------------
 
 
