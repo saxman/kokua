@@ -349,3 +349,11 @@ def test_a_write_twin_of_a_part_says_the_part_is_read_only():
     message = str(excinfo.value)
     assert "'a_write' is not a part of toolset 'shelf': 'a' is, read-only" in message
     assert "writable where 'a' is configured" in message
+
+
+def test_a_stray_brace_in_a_plugins_remedy_cannot_break_the_refusal():
+    """The remedy is a plugin author's text, read on an error path: only ``{part}`` is substituted, so a
+    brace meant literally reaches the user rather than raising in place of the refusal."""
+    registry = _parted(_shelf(writable_part_remedy="set {writable: true} on shelf '{part}'"))
+    with pytest.raises(ToolsetError, match=r"set \{writable: true\} on shelf 'a'"):
+        select(["a_write"], registry, agent="assistant", entry_point="assistant")

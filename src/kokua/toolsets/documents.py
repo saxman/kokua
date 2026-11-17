@@ -41,7 +41,9 @@ DEFAULT_EMBEDDING_MODEL = "hf:BAAI/bge-base-en-v1.5"
 # documents in and left the other invisible: asked about papers the user had just copied into the folder,
 # the model had no reason to list, and reported an empty store while the files sat there. So it lists
 # first, and the listing is also where it learns which collections it holds, what each is for, and which
-# it may change, because those differ by agent and this text is the same for all of them.
+# it may change, because those differ by agent and this text is the same for all of them. For the same
+# reason it names `kokua` and the write tools conditionally: a worker granted one read-only vault holds
+# neither, and text telling it to save there would send it after a tool it does not have.
 #
 # Search before read, because search finds passages across every collection at once and a read needs a
 # collection and a path to start from. Read after search, because a search result is an excerpt of one
@@ -58,8 +60,8 @@ DEFAULT_EMBEDDING_MODEL = "hf:BAAI/bge-base-en-v1.5"
 # because the model cannot page a document it does not know is windowed. PDFs are read as extracted text
 # and can never be written, which the model would otherwise discover by trying.
 GUIDANCE = (
-    " Documents live in named collections: folders of the user's notes and papers, and `kokua`, Kokua's "
-    "own folder. The user adds files to these folders directly, so call `list_documents` with no "
+    " Documents live in named collections: folders of the user's notes and papers, and, if you hold it, "
+    "`kokua`, Kokua's own folder. The user adds files to these folders directly, so call `list_documents` with no "
     "collection to see which collections you hold, what each is for, whether it is writable, and what is "
     "in it, rather than assuming a document is missing because you did not put it there. To answer from "
     "documents, search first: `search_documents` finds passages across your collections, each citing its "
@@ -68,10 +70,11 @@ GUIDANCE = (
     "When you use a document, cite its collection, path, and page. `read_document` returns one window of a "
     "long document and says so, naming the offset that continues the read: page through it before "
     "summarizing, and say which part you read if you stop early. Only a writable collection can be "
-    "changed. To change a document, call `edit_document` with the exact text to replace, never "
-    "`save_document`: saving replaces the whole document with what you pass, so saving back a document you "
-    "read only part of would destroy the rest, and it is refused for that reason. Save longer reference "
-    "material the user gives you with `save_document` under a descriptive path ending in `.md`. Documents "
+    "changed, and you hold `edit_document` and `save_document` only where one of yours is. To change a "
+    "document, call `edit_document` with the exact text to replace, never `save_document`: saving replaces "
+    "the whole document with what you pass, so saving back a document you read only part of would destroy "
+    "the rest, and it is refused for that reason. Where you can write, save longer reference material the "
+    "user gives you with `save_document` under a descriptive path ending in `.md`. Documents "
     "are Markdown, plain text, or PDF files, and PDFs are read-only: you can search and read one, never "
     "save or edit it. If `list_documents` reports a file it could not read, tell the user why; for one "
     "that is not text, ask them to export it to Markdown or plain text."
@@ -136,5 +139,5 @@ TOOLSET = Toolset(
     settings=DOCUMENTS_SETTINGS,
     parts=_parts,
     build_parts=_build_parts,
-    writable_part_remedy="set writable = true on the [[documents.collection]] named {part!r}",
+    writable_part_remedy="set writable = true on the [[documents.collection]] named '{part}'",
 )

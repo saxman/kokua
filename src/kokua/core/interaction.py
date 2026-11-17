@@ -32,11 +32,12 @@ _UNSET = object()  # distinguishes "no default given for this ask" from a legiti
 
 #: Why a gated call in an unattended turn is refused, as the model reads it in the tool result. Without it
 #: the model sees only that the call was not approved, which reads like a call worth retrying, and has
-#: nothing to put in the report the user reads afterwards.
+#: nothing to put in the report the user reads afterwards. It says the user can do it, not approve it next
+#: time: nothing ever approves an unattended call, so that promise would be false on every later run.
 UNATTENDED_DENIAL = (
     "this is an unattended turn (a scheduled task), so nobody is here to approve this tool, and it did not "
     "run. Do not retry it. Carry on without it, and say in your report what you would have done with it, "
-    "so the user can do it or approve it next time."
+    "so the user can do it."
 )
 
 

@@ -85,8 +85,9 @@ class Toolset:
     them back into this one toolset with ``build_parts`` bound to the parts named, so a narrow grant
     still builds one toolset under one name, and one approval vocabulary covers it however it was granted.
     ``writable_part_remedy`` says what to change so a read-only part gains a ``<part>_write`` twin, with
-    ``{part}`` standing for its name: an agent declaring a twin that does not exist is refused with it,
-    since the fix is in that part's configuration, which only the toolset knows the shape of.
+    ``{part}`` standing for its name (the only placeholder: any other brace is kept as written). An agent
+    declaring a twin that does not exist is refused with it, since the fix is in that part's
+    configuration, which only the toolset knows the shape of.
 
     ``whole`` is set by ``select`` alone, on a copy bound to some parts: it is the toolset as registered.
     A toolset author leaves it unset. It exists because a narrow grant can build fewer tools than its
@@ -300,7 +301,9 @@ def _unknown_name(
     read_only = name.removesuffix("_write")
     if read_only != name and read_only in parts:
         owner = parts[read_only][0]
-        remedy = registry[owner].writable_part_remedy.format(part=read_only)
+        # Substituted by hand rather than with str.format: the template is a plugin author's text, and a
+        # brace they meant literally would raise here, on the error path, in place of the refusal.
+        remedy = registry[owner].writable_part_remedy.replace("{part}", read_only)
         return (
             f"agent {agent!r} declares {name!r}, but {name!r} is not a part of toolset {owner!r}: "
             f"{read_only!r} is, read-only. Declare it writable where {read_only!r} is configured"
