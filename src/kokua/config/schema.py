@@ -175,10 +175,12 @@ BUILTIN_COLLECTION = "kokua"
 class DocumentCollectionConfig:
     """A folder of the user's own documents (an Obsidian vault, a paper folder) the assistant may search.
 
-    ``name`` is how the collection enters the toolset namespace, so an agent declares it as it declares any
-    other capability. ``writable`` is false unless declared, because a folder the user keeps outside Kokua
-    is theirs to protect: reading it is the default and writing it is a separate, explicit grant.
-    ``description`` is the catalogue line an agent reads to decide whether to load the collection.
+    ``name`` enters the toolset namespace as parts of the ``documents`` toolset (``<name>`` reads it,
+    ``<name>_write`` reads and writes it), so an agent declares a collection as it declares any other
+    capability. ``writable`` is false unless declared, because a folder the user keeps outside Kokua is
+    theirs to protect: reading it is the default and writing it is a separate, explicit grant.
+    ``description`` is shown beside the name in ``list_documents``, where the model decides which
+    collection a question belongs to.
     """
 
     name: str
@@ -525,6 +527,8 @@ class AssistantConfig:
 
     @property
     def index_dir(self) -> Path:
+        """Each document collection's search index, at ``<name>/``. A cache derived from the folder it
+        indexes, so it lives here and never inside a collection, where a vault would sync and show it."""
         return self.data_dir / "index"
 
     @property
@@ -535,8 +539,8 @@ class AssistantConfig:
     @property
     def downloads_path(self) -> Path:
         """Generated artifacts (PDFs, exported conversation Markdown) the web UI serves at /download.
-        Kept out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at
-        startup, which a binary PDF would not survive."""
+        Kept out of ``documents_path`` because every PDF and Markdown file there is indexed and searched
+        as a document in the built-in collection, and these are Kokua's output, not the user's documents."""
         return self.data_dir / "downloads"
 
     @property
@@ -544,15 +548,15 @@ class AssistantConfig:
         """Uploaded and generated images the web UI serves at /images. Sessions store only a
         ``/images/<name>`` reference into this folder (never inline base64), so ``sessions.json`` stays
         small; the bytes are re-read here and base64-inlined only when a turn is sent to the model. Kept
-        out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
+        out of ``documents_path``, which holds documents only."""
         return self.data_dir / "images"
 
     @property
     def payloads_path(self) -> Path:
         """Oversized sub-agent tool responses the web UI serves at /payloads. Sessions store a short
         ``/payloads/<name>`` reference plus a preview, never the whole response, so ``sessions.json``
-        stays small; see ``payloads.py``. Kept out of ``documents_path`` because the DocumentStore
-        scans that folder as UTF-8 text at startup and these are not documents the user wrote."""
+        stays small; see ``payloads.py``. Kept out of ``documents_path``, which holds documents only, and
+        these are not documents the user wrote."""
         return self.data_dir / "payloads"
 
     @property

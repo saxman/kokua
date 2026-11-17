@@ -130,6 +130,7 @@ nav:
       - explanation/index.md
       - Architecture: explanation/architecture.md
       - Tool access: explanation/tool-access.md
+      - Retrieval: explanation/retrieval.md
       - Auto-approval: explanation/auto-approval.md
       - Design principles: explanation/design-principles.md
   - Changelog: changelog.md

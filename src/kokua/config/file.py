@@ -312,8 +312,8 @@ def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
 
     Shape only: whether a folder exists, sits under the data directory, or collides with a toolset needs
     the filesystem and the registry, so ``core.agents.validate_document_collections`` checks those. A name
-    is also a toolset name an agent lists in ``available``, and ``<name>_write`` is the toolset a writable
-    collection adds, which is why a name may not itself end in ``_write``.
+    is also a part of the ``documents`` toolset an agent lists in ``available``, and ``<name>_write`` is
+    the part a writable collection adds, which is why a name may not itself end in ``_write``.
     """
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
         raise ConfigError("[[documents.collection]] must be an array of tables")

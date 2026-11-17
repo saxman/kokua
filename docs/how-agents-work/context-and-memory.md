@@ -198,11 +198,13 @@ to disagree ([capability is declared](capability-is-declared.md)). And `cross_cu
 something an agent holds to manage itself rather than to do domain work.
 
 [`toolsets/documents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/documents.py) is
-the same five lines over AIMU's document store, and it is worth knowing why there are two. Memory holds
-short facts, retrieved by similarity. Documents hold whole texts under paths, and the folder is one you
-can drop files into yourself, which is why that toolset's guidance runs to four sentences telling the
-model to call `list_documents` before assuming the store is empty: asked about papers the user had just
-copied in, an earlier version reported an empty store while the files sat there.
+the same idea over AIMU's document stores, and it is worth knowing why there are two. Memory holds
+short facts, retrieved by similarity. Documents hold whole texts under paths, in folders you can drop
+files into yourself (Kokua's own, plus any [collection](../explanation/retrieval.md) you declare, such as a
+notes vault), which is why that toolset's guidance tells the model to call `list_documents` before
+assuming a document is missing: asked about papers the user had just copied in, an earlier version
+reported an empty store while the files sat there. Searching them is passage retrieval, with its own
+machinery and its own page, [Retrieval](../explanation/retrieval.md).
 
 **On disk.** Everything lives under `$KOKUA_HOME` (default `~/.kokua`), and every leaf is a derived
 property on the config rather than a new path function: `data/sessions.json`, `data/memory/`,
@@ -211,7 +213,8 @@ property on the config rather than a new path function: `data/sessions.json`, `d
 
 Kokua's README says that state is "plain files under `~/.kokua`, so you can read what it remembers while
 it is still running", and the transcript above is the honest reading of that. `sessions.json` is JSON.
-`documents/` is a folder of UTF-8 text files. `data/memory/` is not a plain file: it is a SQLite
+`documents/` is a folder of Markdown, text, and PDF files, and `index/` beside it is the search index
+built from them, a SQLite database you can delete and Kokua will rebuild. `data/memory/` is not a plain file: it is a SQLite
 database plus binary index directories, and `cat` on it prints `SQLite format 3` and then garbage.
 Local, inspectable, and yours, all three of which are the point, and `sqlite3` is the tool rather than
 `cat`. It does not mean readable in a text editor, and this page would rather say so than repeat the

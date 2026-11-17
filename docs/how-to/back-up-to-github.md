@@ -36,9 +36,14 @@ Everything else under `data/` is left out on purpose:
 | `data/downloads/` | generated artifacts such as rendered PDFs |
 | `data/images/` | generated and attached images, which are binary and bulky |
 | `data/pages/` | pages the `web` toolset's `fetch_page` stored, a cache of pages that are still on the web |
+| `data/index/` | the document search indexes, a cache rebuilt from the folders they index |
 | `data/mcp-oauth/` | the OAuth tokens Kokua holds for your MCP servers, which are credentials |
 | `data/backup/` | the working tree the backup itself pushes from |
 | `.git/` and `__pycache__/` inside any copied directory | tooling artifacts, not state to restore |
+
+A folder you declared as a [`[[documents.collection]]`](../reference/configuration.md#documentscollection)
+is not copied either. It lives outside `$KOKUA_HOME` and is yours, not Kokua's state, so back it up the
+way you already do (an Obsidian vault usually has its own sync).
 
 No credential is copied. Kokua keeps none in `config.toml` to begin with (your model API keys, your
 mail password, and the backup token itself are all environment variables, and an MCP server's

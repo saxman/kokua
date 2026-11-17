@@ -467,6 +467,10 @@ change. Full rationale, with the code that backs each claim, is in
    otherwise silent). A `Toolset` may also carry a `Workflow`, a named turn strategy: an agent gets the
    workflow's `/`-command exactly the way it gets the toolset's tools, by naming the toolset in
    `[agents.<name>.tools].available`. `planning` is the one toolset that does that and contributes no tools at all.
+   A `Toolset` may also declare *parts* (`parts` / `build_parts`), narrower grants its config derives:
+   `documents` has `<collection>` (read) and `<collection>_write` per `[[documents.collection]]`. `select`
+   resolves a part back into the one toolset, so residency is per toolset and an approval entry names the
+   toolset, never a part ([docs/explanation/retrieval.md](docs/explanation/retrieval.md) says why).
    Its corollary: **a capability is declared, never defaulted**, which in the terms of
    [docs/explanation/tool-access.md](docs/explanation/tool-access.md) is *availability is declared, never
    defaulted*: availability is one of three axes (what an agent may call, what is in its context, what
@@ -517,6 +521,8 @@ change. Full rationale, with the code that backs each claim, is in
    the scheduler (un)arming a task write has to be paired with.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
+   `index_dir` (`data/index`) is a cache of the user's document collections, which are their folders and
+   not Kokua's state, so the index lives here and never inside one.
    Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
    `data/`, because a task is a declaration a user should be able to write and comment.
 5. **A single user, one process, with concurrency rules written down.** The ten turn invariants live
@@ -599,7 +605,7 @@ src/kokua/
   scheduling/   recurrence (pure math), tasks (TaskService, over config.toml's [scheduling.task.*])
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
-  registry/     registry (Toolset, Setting, select, build_tools, register), context (LiveState,
+  registry/     registry (Toolset, Setting, select, with_parts, build_tools, register), context (LiveState,
                 ToolsetContext) -- the machinery, and no toolsets
   toolsets/     audio, compute, documents, fs, fs_write, memory, misc, skills, speech, time,
                 transcription, web
