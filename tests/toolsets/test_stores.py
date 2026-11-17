@@ -297,7 +297,7 @@ def test_close_stops_every_store(tmp_path, monkeypatch):
 
     state.close()
 
-    assert closed == ["kokua", "personal", "work"]
+    assert sorted(closed) == ["kokua", "personal", "work"]  # together, so in no fixed order
 
 
 def test_close_opens_nothing_when_no_store_was_built(tmp_path):
@@ -347,7 +347,6 @@ def test_one_embedding_client_is_shared_by_every_store(tmp_path, monkeypatch):
     _granted(state, "work")
 
     assert made == ["hf:example/model"]
-    assert state.embedding_client is not None
     state.close()
 
 

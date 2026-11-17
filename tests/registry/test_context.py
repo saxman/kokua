@@ -92,3 +92,50 @@ def test_context_names_the_agent_it_is_building_for(tmp_path):
     was built from, so the object could not answer even where it is present."""
     ctx = ToolsetContext(state=_state(tmp_path), agent=None, agent_name="researcher")
     assert ctx.agent_name == "researcher"
+
+
+class _SlowStore:
+    """A document store whose close joins a busy index worker, as AIMU's does for up to ten seconds."""
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self.closed = False
+
+    def close(self) -> None:
+        import time
+
+        time.sleep(self.seconds)
+        self.closed = True
+
+
+async def test_aclose_closes_document_stores_without_blocking_the_event_loop(tmp_path):
+    """In the web front end a LiveState lives per connection, so a reload during a first index build
+    closes stores on the server's one loop. Closing them there would stall every other connection."""
+    import asyncio
+    import time
+
+    state = _state(tmp_path)
+    stores = [_SlowStore(0.4), _SlowStore(0.4)]
+    state._document_stores = {"a": stores[0], "b": stores[1]}
+
+    started = time.monotonic()
+    closing = asyncio.create_task(state.aclose())
+    await asyncio.sleep(0.05)
+    assert time.monotonic() - started < 0.2, "the loop stalled while the stores closed"
+    assert not closing.done()
+    await closing
+    assert all(store.closed for store in stores)
+    assert time.monotonic() - started < 0.75, "the stores closed one after another rather than together"
+
+
+def test_close_closes_every_document_store_together(tmp_path):
+    import time
+
+    state = _state(tmp_path)
+    stores = [_SlowStore(0.3), _SlowStore(0.3), _SlowStore(0.3)]
+    state._document_stores = dict(zip("abc", stores))
+
+    started = time.monotonic()
+    state.close()
+    assert all(store.closed for store in stores)
+    assert time.monotonic() - started < 0.6

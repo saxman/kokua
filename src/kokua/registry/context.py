@@ -12,7 +12,9 @@ that can disagree with the declaration.
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, Optional
@@ -155,8 +157,7 @@ class LiveState:
     # store its map after one, handing every worker the pre-refresh skills until the next write.
     _skill_tools_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _document_stores: Optional[dict[str, DocumentStore]] = field(default=None, init=False, repr=False)
-    _embedding_client: Optional[EmbeddingClient] = field(default=None, init=False, repr=False)
-    # Guards building `_document_stores` and `_embedding_client`, for `_skill_tools_lock`'s reason: a
+    # Guards building `_document_stores`, for `_skill_tools_lock`'s reason: a
     # deferred documents toolset builds in a worker thread, and two first builds racing would open two
     # stores over one folder, each with an index writer of its own.
     _documents_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -181,14 +182,15 @@ class LiveState:
                 # The fallback covers a config built without ``resolve_config``, the only thing that seeds a
                 # section for every declared toolset, as `tasks` does for its own.
                 settings = self.config.toolset_settings.get(TOOLSET_NAME, {})
-                self._embedding_client = embedding_client_for(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+                # One client shared by every collection's index, so one model is loaded however many there are.
+                embedding_client = embedding_client_for(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
                 folders = [(BUILTIN_COLLECTION, self.config.documents_path)]
                 folders += [(collection.name, collection.path) for collection in self.config.document_collections]
                 self._document_stores = {
                     name: DocumentStore(
                         persist_path=str(path),
                         index_path=str(self.config.index_dir / name),
-                        embedding_client=self._embedding_client,
+                        embedding_client=embedding_client,
                         extensions=DOCUMENT_EXTENSIONS,
                     )
                     for name, path in folders
@@ -204,12 +206,6 @@ class LiveState:
     def document_store(self) -> DocumentStore:
         """Kokua's own collection, the folder the assistant saves documents in."""
         return self.document_stores()[BUILTIN_COLLECTION]
-
-    @property
-    def embedding_client(self) -> Optional[EmbeddingClient]:
-        """The one embedding client every collection's index shares, or None when search is keyword-only."""
-        self.document_stores()
-        return self._embedding_client
 
     @cached_property
     def all_skills(self) -> SkillManager:
@@ -352,15 +348,39 @@ class LiveState:
         Each document store's index runs a background worker, which is stopped and its database released
         (a store closed this way stays usable, and its next search reopens the index). Everything else
         here is either a plain object or holds no OS resource of its own.
+
+        Blocks until both are done. On an event loop, call :meth:`aclose` instead.
         """
+        self._close_skills_clients()
+        self._close_document_stores()
+
+    async def aclose(self) -> None:
+        """:meth:`close`, with the document stores closed off the event loop.
+
+        A store's close joins its index worker for as long as the file or batch it is on takes, up to
+        AIMU's ten-second limit, and a first build of a large vault keeps one busy. The web front end
+        holds a ``LiveState`` per connection on the server's one loop, so closing stores there on a
+        reload would stall every other connection for that long. The skills clients close here, on the
+        loop, as they always have: stopping one is quick.
+        """
+        self._close_skills_clients()
+        await asyncio.to_thread(self._close_document_stores)
+
+    def _close_skills_clients(self) -> None:
         with self._skill_tools_lock:
             clients, self._skills_clients = self._skills_clients, []
-        with self._documents_lock:
-            stores = list((self._document_stores or {}).values())
         for client in clients:
             client.close()
-        for store in stores:
-            store.close()
+
+    def _close_document_stores(self) -> None:
+        """Close every document store, each on a thread of its own, so the waits overlap rather than add."""
+        with self._documents_lock:
+            stores = list((self._document_stores or {}).values())
+        if not stores:
+            return
+        with ThreadPoolExecutor(max_workers=len(stores), thread_name_prefix="kokua-store-close") as pool:
+            # Consumed so a failing close raises here, after the pool has waited for every other one.
+            list(pool.map(lambda store: store.close(), stores))
 
     @cached_property
     def tasks(self) -> Any:
