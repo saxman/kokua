@@ -305,13 +305,23 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
 
 _COLLECTION_NAME = re.compile(r"[a-z][a-z0-9_-]*")
 _COLLECTION_KEYS = {"name", "path", "writable", "description"}
+#: Names a collection may not take, each with what it already means. ``core`` and ``all`` are
+#: ``registry.RESERVED_GATE_NAMESPACE`` and ``registry.ALL_DECLARATION``, spelled out here because
+#: ``config/`` imports nothing above it; ``tests/config/test_file.py`` pins the two against each other.
+RESERVED_COLLECTION_NAMES = {
+    BUILTIN_COLLECTION: "the built-in collection, Kokua's own documents folder",
+    "documents": "the toolset every collection belongs to",
+    "core": "the approval-list prefix for the tools no toolset provides",
+    "all": 'what available = "all" is written with',
+}
 
 
 def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
     """Validate the [[documents.collection]] array of tables into ``DocumentCollectionConfig`` entries.
 
-    Shape only: whether a folder exists, sits under the data directory, or collides with a toolset needs
-    the filesystem and the registry, so ``core.agents.validate_document_collections`` checks those. A name
+    Shape only: whether a folder exists or sits under the data directory needs the filesystem, and whether
+    a name collides with a toolset needs the registry, so ``core.agents`` checks those (in
+    ``validate_document_collections`` and ``build_registry``). A name
     is also a part of the ``documents`` toolset an agent lists in ``available``, and ``<name>_write`` is
     the part a writable collection adds, which is why a name may not itself end in ``_write``.
     """
@@ -332,10 +342,10 @@ def _parse_document_collections(value: Any) -> list[DocumentCollectionConfig]:
                 f"[[documents.collection]] {label}: a name may not end in '_write', which is the suffix of the "
                 "name that grants a writable collection read and write access. Rename it."
             )
-        if name == BUILTIN_COLLECTION or name == "documents":
+        if name in RESERVED_COLLECTION_NAMES:
             raise ConfigError(
-                f"[[documents.collection]] {label}: '{name}' is reserved ('{BUILTIN_COLLECTION}' is the built-in "
-                "collection and 'documents' the toolset). Choose another name."
+                f"[[documents.collection]] {label}: '{name}' is reserved: it is {RESERVED_COLLECTION_NAMES[name]}. "
+                "Choose another name."
             )
         if name in seen:
             raise ConfigError(f"[[documents.collection]] name {name!r} is declared twice. Names must be unique.")

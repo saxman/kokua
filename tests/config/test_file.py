@@ -1305,6 +1305,8 @@ def test_document_collections_parse():
         ('name = "work_write"\npath = "/x"', "_write"),
         ('name = "kokua"\npath = "/x"', "kokua"),
         ('name = "documents"\npath = "/x"', "documents"),
+        ('name = "core"\npath = "/x"', "'core' is reserved.*Choose another name"),
+        ('name = "all"\npath = "/x"', "'all' is reserved.*Choose another name"),
         ('name = "work"\npath = "/x"\ncolour = "red"', "colour"),
         ('path = "/x"', "#1"),
     ],
@@ -1312,6 +1314,13 @@ def test_document_collections_parse():
 def test_bad_collection_entries_are_refused(entry, message):
     with pytest.raises(settings.ConfigError, match=message):
         _load_text(f"[[documents.collection]]\n{entry}\n")
+
+
+def test_reserved_collection_names_include_the_registrys_reserved_names():
+    from kokua.config.file import RESERVED_COLLECTION_NAMES
+    from kokua.registry.registry import ALL_DECLARATION, RESERVED_GATE_NAMESPACE
+
+    assert {RESERVED_GATE_NAMESPACE, ALL_DECLARATION} <= set(RESERVED_COLLECTION_NAMES)
 
 
 def test_duplicate_collection_names_refused():

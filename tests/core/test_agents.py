@@ -637,9 +637,8 @@ def test_collection_paths_validated_at_startup(tmp_path):
     inside.mkdir()
     link = tmp_path / "link"
     link.symlink_to(folder)
-    registry = build_registry(AssistantConfig())
 
-    validate_document_collections(_collection_config(tmp_path, ("work", folder)), registry)
+    validate_document_collections(_collection_config(tmp_path, ("work", folder)))
     for collections, message in [
         ([("work", tmp_path / "missing")], "does not exist"),
         ([("work", a_file)], "not a folder"),
@@ -647,7 +646,7 @@ def test_collection_paths_validated_at_startup(tmp_path):
         ([("work", folder), ("other", link)], "both resolve"),
     ]:
         with pytest.raises(ConfigError, match=message) as error:
-            validate_document_collections(_collection_config(tmp_path, *collections), registry)
+            validate_document_collections(_collection_config(tmp_path, *collections))
         assert "'work'" in str(error.value) or "'other'" in str(error.value)
 
 
@@ -656,16 +655,28 @@ def test_nested_collections_are_allowed(tmp_path):
 
     (tmp_path / "vault" / "sub").mkdir(parents=True)
     config = _collection_config(tmp_path, ("outer", tmp_path / "vault"), ("inner", tmp_path / "vault" / "sub"))
-    validate_document_collections(config, build_registry(AssistantConfig()))
+    validate_document_collections(config)
 
 
-def test_collection_name_colliding_with_a_toolset_refused(tmp_path):
-    from kokua.core.agents import validate_document_collections
+@pytest.mark.parametrize("name, taken", [("web", "web"), ("ledger", "ledger_write")])
+def test_collection_name_colliding_with_a_toolset_is_refused_as_a_collection(tmp_path, monkeypatch, name, taken):
+    """The collision is the collection's to fix, so the refusal names the collection and says to rename
+    it, rather than speaking of a toolset's "part", a word the user never wrote."""
+    from kokua.core import agents
+    from kokua.registry import Toolset
 
+    discovered = agents.discover_toolsets()
+    plugin = Toolset(name="ledger_write", description="Ledgers.", build=lambda ctx: [])
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {**discovered, "ledger_write": plugin})
     (tmp_path / "vault").mkdir()
-    registry = build_registry(AssistantConfig())
-    with pytest.raises(ConfigError, match="web.*toolset|toolset.*web"):
-        validate_document_collections(_collection_config(tmp_path, ("web", tmp_path / "vault")), registry)
+    config = _collection_config(tmp_path, (name, tmp_path / "vault"))
+    with pytest.raises(ConfigError) as error:
+        build_registry(config)
+    message = str(error.value)
+    assert f"[[documents.collection]] {name!r}" in message
+    assert f"{taken!r} is already the name of a toolset" in message
+    assert "Rename the collection" in message
+    assert "part" not in message
 
 
 def test_collection_holding_the_data_directory_is_refused(tmp_path):
@@ -674,7 +685,7 @@ def test_collection_holding_the_data_directory_is_refused(tmp_path):
     (tmp_path / "data").mkdir()
     config = _collection_config(tmp_path, ("home", tmp_path))
     with pytest.raises(ConfigError, match="'home'.*data directory"):
-        validate_document_collections(config, build_registry(AssistantConfig()))
+        validate_document_collections(config)
 
 
 # --- Part names: an agent may name a toolset's parts instead of the toolset ----------------------

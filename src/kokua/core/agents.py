@@ -20,7 +20,7 @@ from aimu.tools.builtin import HISTORY_TOOL_NAME
 from aimu.tools.groups import CORE_TOOL_NAMES
 
 from kokua.config.file import ConfigError, check_resident_within_available
-from kokua.config.schema import ALL_TOOLSETS, BUILTIN_COLLECTION, DEFAULT_SYSTEM_MESSAGE, AssistantConfig
+from kokua.config.schema import ALL_TOOLSETS, DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
 from kokua.core.messaging import EVERYONE, USER, WORKER_SOURCE
 from kokua.core.metrics import record_event
@@ -321,7 +321,27 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_BUILTIN_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n in own_names]),
         (_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n not in own_names]),
     ]
-    return with_parts(register(sources), config)
+    registry = register(sources)
+    _check_collection_names(config, registry)
+    return with_parts(registry, config)
+
+
+def _check_collection_names(config: AssistantConfig, registry: ToolsetRegistry) -> None:
+    """Refuse a ``[[documents.collection]]`` whose name, or whose ``_write`` twin, is already a toolset.
+
+    ``with_parts`` would refuse it too, since each collection is a part of ``documents``, but in the
+    registry's words ("part 'web' ... Rename the part"), about a thing the user never wrote. Checked first
+    so the refusal names the collection and the edit to make. The twin is checked whether or not the
+    collection is writable, so declaring it writable later cannot turn a working config into a broken one.
+    """
+    for collection in config.document_collections:
+        for name in (collection.name, f"{collection.name}_write"):
+            if name in registry:
+                raise ConfigError(
+                    f"[[documents.collection]] {collection.name!r}: {name!r} is already the name of a toolset "
+                    f"({registry.providers.get(name, 'installed')}), and an agent names a collection in the same "
+                    "available list it names toolsets in. Rename the collection."
+                )
 
 
 #: Agent names the message bus has already spent. An agent's declared name becomes the address a
@@ -481,28 +501,19 @@ def validate_reviewers(config: AssistantConfig) -> None:
         _check_model(f"reviewers.{name}", reviewer.model)
 
 
-def validate_document_collections(config: AssistantConfig, registry: ToolsetRegistry) -> None:
-    """Refuse a ``[[documents.collection]]`` the filesystem or the registry cannot honor, at startup.
+def validate_document_collections(config: AssistantConfig) -> None:
+    """Refuse a ``[[documents.collection]]`` the filesystem cannot honor, at startup.
 
-    These checks live here rather than in the parser because they need the disk and the registry: a
+    These checks live here rather than in the parser because they need the disk: a
     folder that is missing, a file, or inside ``data_dir`` (where Kokua's own state lives, so indexing it
     would index the index and the sessions), two entries resolving to the same folder (one index, two
-    owners), and a name that is, or whose ``_write`` twin is, already a toolset (a collection must never
-    shadow a capability). A folder nested inside another is allowed: the overlap is deduplicated when
-    documents are indexed. Resolved paths are compared, so a symlink cannot smuggle a folder past a check.
+    owners). A name colliding with a toolset is refused earlier, by ``build_registry``. A folder nested
+    inside another is allowed: the overlap is deduplicated when documents are indexed. Resolved paths are
+    compared, so a symlink cannot smuggle a folder past a check.
     """
     data_dir = config.data_dir.resolve()
     resolved_owner: dict = {}
     for collection in config.document_collections:
-        for toolset_name in (collection.name, f"{collection.name}_write"):
-            if toolset_name in registry:
-                raise ConfigError(
-                    f"[[documents.collection]] '{collection.name}': '{toolset_name}' is already a toolset, and an "
-                    "agent names a collection the same way it names a toolset, as a part of the documents "
-                    "toolset. Rename the collection."
-                )
-        if collection.name == BUILTIN_COLLECTION:
-            raise ConfigError(f"[[documents.collection]] '{collection.name}': that name is the built-in collection.")
         if not collection.path.exists():
             raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} does not exist.")
         if not collection.path.is_dir():
@@ -539,7 +550,7 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
     validate_reviewers(config)
-    validate_document_collections(config, registry)
+    validate_document_collections(config)
     return registry
 
 
