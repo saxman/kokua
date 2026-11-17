@@ -1060,7 +1060,8 @@ description = "Stock quotes and fundamentals, and placing trades."
 ```
 
 Servers added at runtime with the `add_mcp_server` tool are appended here automatically, with a `name`
-derived from the host and a numeric suffix if that name is taken, so the file always loads. Nothing can
+derived from the host and a numeric suffix if that name is taken (by another server, or by any toolset,
+skill, or collection), so the file always loads. Nothing can
 use that server in the session that added it, since the toolset namespace and the agent tables are both
 read only at startup. **After a restart** it reaches every agent declaring `available = "all"`, and any
 other agent once you add its name to that agent's `available` list. A server added with a bearer token is

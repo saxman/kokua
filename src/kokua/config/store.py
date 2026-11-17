@@ -22,7 +22,7 @@ import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Sequence
+from typing import Awaitable, Callable, Collection, Optional, Sequence
 from urllib.parse import urlparse
 
 import tomlkit
@@ -149,18 +149,18 @@ def _server_array(doc: TOMLDocument):
     return servers
 
 
-def _unique_name(servers, url: str) -> str:
-    """A name derived from ``url``, disambiguated against every name already in ``servers``.
+def _unique_name(servers, url: str, taken: Collection[str]) -> str:
+    """A name derived from ``url``, disambiguated against every name already in ``servers`` and ``taken``.
 
     Appending a numeric suffix until the name is free (see ``disambiguate_name``) keeps a successful
     ``add_mcp_server`` call from producing a config the registry's collision check would later reject at
     boot, deferred past the point where the tool could still report the problem usefully.
     """
-    used = {entry.get("name") for entry in servers}
+    used = {entry.get("name") for entry in servers} | set(taken)
     return disambiguate_name(name_from_url(url), used)
 
 
-def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
+def add_mcp_server(path: Path, url: str, token_env: str | None = None, *, taken: Collection[str] = ()) -> None:
     """Append (or, by URL, replace) an ``[[mcp.server]]`` entry.
 
     A runtime-added server (OAuth or unauthenticated) is recorded with just its URL and a name derived
@@ -173,7 +173,9 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     Replacing an existing entry for the same URL keeps that entry's ``name`` rather than re-deriving
     one, since a human may have hand-edited it to match an ``[agents.*]`` reference that this write
     cannot see or repair. A brand-new entry gets a freshly derived name, disambiguated against every
-    name already on file so this call can never write a name collision the registry would reject later.
+    name already on file and every name in ``taken`` (the caller's registry: toolsets, skills, parts, and
+    the reserved names, which this layer cannot see), so this call can never write a name collision the
+    registry would reject later.
     """
     doc = _load(path)
     servers = _server_array(doc)
@@ -185,7 +187,7 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
             break
     table = tomlkit.table()
     table["url"] = url
-    table["name"] = existing_name or _unique_name(servers, url)
+    table["name"] = existing_name or _unique_name(servers, url, taken)
     if token_env is not None:
         table["token_env"] = token_env
     servers.append(table)

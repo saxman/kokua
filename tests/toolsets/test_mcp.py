@@ -4,6 +4,7 @@ from aimu import aio
 
 from kokua.toolsets.mcp import make_mcp_tools
 from kokua.mcp.auth import OAuthSettings
+from tests.helpers import core_table
 
 
 async def _noop_notify(message: str) -> None:
@@ -171,3 +172,45 @@ def test_the_toolset_builds_the_add_and_remove_tools(tmp_path):
     ctx = ToolsetContext(state=state, agent=object(), agent_name="assistant")
 
     assert {fn.__name__ for fn in TOOLSET.build(ctx)} == {"add_mcp_server", "remove_mcp_server"}
+
+
+async def test_a_server_added_at_runtime_is_named_clear_of_every_registry_name(monkeypatch, tmp_path):
+    """A URL-derived name lands in the registry at the next start, beside every toolset, skill, and
+    collection part. Disambiguated only against other servers, a server on host `notes` would claim the
+    name of the `notes` collection, and that next start would refuse the config."""
+    import dataclasses
+
+    from kokua.config import file as settings
+    from kokua.config.schema import AgentConfig, AssistantConfig, DocumentCollectionConfig
+    from kokua.core.agents import build_registry
+    from kokua.mcp import servers
+    from kokua.registry.context import LiveState, ToolsetContext
+    from kokua.toolsets.mcp import TOOLSET
+
+    class _Client:
+        async def as_tools(self):
+            return []
+
+    async def fake_connect(url, **kw):
+        return _Client(), "none"
+
+    monkeypatch.setattr(servers, "connect_mcp", fake_connect)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    config = AssistantConfig(
+        data_dir=tmp_path / "data",
+        config_path=config_path,
+        agents={"assistant": AgentConfig(available=["mcp", "notes"])},
+        entry_agent="assistant",
+        document_collections=[DocumentCollectionConfig("notes", vault)],
+    )
+    state = LiveState(config=config, registry=build_registry(config), for_each_agent=lambda fn: None)
+    add_mcp_server, _ = TOOLSET.build(ToolsetContext(state=state, agent=None, agent_name="assistant"))
+
+    await add_mcp_server(url="https://notes/mcp")
+
+    (server,) = settings.load(str(config_path), table=core_table())["mcp_servers"]
+    assert server.name == "notes-2"
+    build_registry(dataclasses.replace(config, mcp_servers=[server]))  # must not raise

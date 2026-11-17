@@ -839,9 +839,7 @@ def _embedding_config(tmp_path, model: str, available: list[str]) -> AssistantCo
 
 
 @pytest.mark.parametrize("available", [["documents"], ["kokua"], ["capabilities"]])
-def test_a_bad_embedding_model_fails_startup_when_documents_can_be_built(
-    tmp_path, real_embedding_factory, available
-):
+def test_a_bad_embedding_model_fails_startup_when_documents_can_be_built(tmp_path, real_embedding_factory, available):
     """A bad model string otherwise surfaces mid-conversation, as the first documents build's error.
     Building the client loads nothing, so checking it at startup costs nothing. An agent holding
     `capabilities` counts, since a worker it composes can be handed any collection."""

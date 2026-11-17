@@ -227,6 +227,14 @@ def with_parts(registry: ToolsetRegistry, config: "AssistantConfig") -> ToolsetR
     return ToolsetRegistry(registry, registry.providers, parts)
 
 
+def claimed_names(registry: Mapping[str, Toolset]) -> set[str]:
+    """Every name an agent's ``available`` list could mean something by: each toolset, each part, and the
+    two reserved names. A name minted at runtime for the next start (a server ``add_mcp_server`` records)
+    has to avoid all of them, or that start refuses the config.
+    """
+    return {*registry, *getattr(registry, "parts", {}), RESERVED_GATE_NAMESPACE, ALL_DECLARATION}
+
+
 def canonical_names(names: Sequence[str], registry: ToolsetRegistry) -> list[str]:
     """``names`` with each part name replaced by its toolset's name, deduplicated in order.
 

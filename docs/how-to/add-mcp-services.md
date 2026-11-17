@@ -198,7 +198,8 @@ Two consequences of the runtime path being real:
 
 - **Finishing a runtime add takes a restart, and for an agent with a list, an edit too.** Since every
   server needs a name, the write derives one from the server's host (`broker.example.com` becomes
-  `broker-example-com`, with a numeric suffix if that name is already taken), so the config it leaves
+  `broker-example-com`, with a numeric suffix if that name is already taken by a server, toolset, skill,
+  or collection), so the config it leaves
   behind always loads. Then:
   1. add that name (or rename it to something friendlier) to an agent's `available` list by hand, unless
      the agent you want declares `available = "all"`, which holds every configured server already.
