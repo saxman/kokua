@@ -39,6 +39,11 @@ not a document, reported as unreadable on every search, would crowd out the ones
 dot-directories (`.obsidian/`, `.trash/`, `.git/`) are skipped, and so is a symlink leading out of the
 folder.
 
+Collections may nest, with one exception: a read-only collection inside a writable one fails startup,
+naming both. Its files are the outer collection's files too, and the outer one can write them, so
+`writable = false` there would protect nothing while reading as though it did. A writable folder inside a
+read-only one, or a read-only one inside another read-only one, says exactly what it does.
+
 The model reaches every collection it holds through five tools AIMU's `make_collection_tools` builds:
 `list_documents`, `read_document`, `search_documents`, and, only when it may write somewhere,
 `save_document` and `edit_document`. A search covers every held collection at once, and each result

@@ -1217,6 +1217,9 @@ assistant may read.
   ```
 
   The gate decides by tool name, so it cannot tell a write to `kokua` from a write to a vault: both ask.
+- **A read-only collection nested inside a writable one fails startup**, naming both: the outer
+  collection can write every file in it, so its `writable = false` would protect nothing. Any other
+  nesting is allowed.
 - **Kokua's own document folder now ignores files outside `.md`, `.markdown`, `.txt`, and `.pdf`.**
   Every collection takes the same suffixes, because a vault holds canvases, attachments, and settings
   beside its notes, and a file that is not a document, reported unreadable on every search, crowds out

@@ -1589,9 +1589,7 @@ async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monk
 # is the whole toolset's, whichever grant happened to build it first.
 
 
-async def test_a_resident_read_only_part_on_a_worker_leaves_the_write_gate_resolvable_at_startup(
-    tmp_path, monkeypatch
-):
+async def test_a_resident_read_only_part_on_a_worker_leaves_the_write_gate_resolvable_at_startup(tmp_path, monkeypatch):
     from tests.fakes import install_binder
 
     install_binder(monkeypatch)

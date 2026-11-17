@@ -1462,11 +1462,14 @@ Approval entries name the toolset (`documents.edit_document`), however the agent
 - a `path` that is, is inside, or holds Kokua's data directory, since indexing it would index Kokua's own
   state;
 - two collections whose paths resolve to the same folder (symlinks are resolved first);
+- a read-only collection whose folder is inside a writable collection's, since its files could be written
+  through the outer one and `writable = false` would protect nothing;
 - `writable` or `description` of the wrong type, or any other key;
 - an agent declaring `<name>_write` for a collection that is not writable, with the error naming the
   `writable = true` to set.
 
-A folder nested inside another collection's is allowed. Startup-only, like `[[mcp.server]]`, because a new
+Any other nesting is allowed: a read-only folder inside a read-only one, or a writable folder inside
+either kind. Startup-only, like `[[mcp.server]]`, because a new
 collection is a new set of files the assistant may read; and refused by `update_config` for the same
 reason, whatever [`locked_config_keys`](#locked_config_keys) says.
 

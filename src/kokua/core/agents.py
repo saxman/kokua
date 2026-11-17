@@ -12,6 +12,7 @@ import difflib
 import functools
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Collection, Mapping, Optional, Sequence
 
 from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
@@ -507,9 +508,10 @@ def validate_document_collections(config: AssistantConfig) -> None:
     These checks live here rather than in the parser because they need the disk: a
     folder that is missing, a file, or inside ``data_dir`` (where Kokua's own state lives, so indexing it
     would index the index and the sessions), two entries resolving to the same folder (one index, two
-    owners). A name colliding with a toolset is refused earlier, by ``build_registry``. A folder nested
-    inside another is allowed: the overlap is deduplicated when documents are indexed. Resolved paths are
-    compared, so a symlink cannot smuggle a folder past a check.
+    owners), and a read-only folder inside a writable one (see ``_refuse_read_only_inside_writable``). A
+    name colliding with a toolset is refused earlier, by ``build_registry``. Any other nesting is allowed:
+    the overlap is deduplicated when documents are indexed. Resolved paths are compared, so a symlink
+    cannot smuggle a folder past a check.
     """
     data_dir = config.data_dir.resolve()
     resolved_owner: dict = {}
@@ -531,6 +533,30 @@ def validate_document_collections(config: AssistantConfig) -> None:
                 f"{resolved}. Declare the folder once."
             )
         resolved_owner[resolved] = collection.name
+    _refuse_read_only_inside_writable(config, {name: path for path, name in resolved_owner.items()})
+
+
+def _refuse_read_only_inside_writable(config: AssistantConfig, resolved: Mapping[str, Path]) -> None:
+    """Refuse a read-only collection whose folder sits inside a writable collection's.
+
+    Every file in it is also a file of the outer collection, which can write it, so its read-only setting
+    would protect nothing while reading as though it did: a control that does nothing, which fails startup
+    (principle 6) rather than reassuring in silence. The other nestings are honest and stay allowed: a
+    read-only folder inside a read-only one, and a writable folder inside anything, since writing through
+    the inner collection is exactly what it declares.
+    """
+    writable = [collection for collection in config.document_collections if collection.writable]
+    for inner in config.document_collections:
+        if inner.writable:
+            continue
+        for outer in writable:
+            if resolved[outer.name] in resolved[inner.name].parents:
+                raise ConfigError(
+                    f"[[documents.collection]] {inner.name!r} is read-only, but its folder is inside "
+                    f"{outer.name!r}, which is writable, so its files can be written through {outer.name!r} and "
+                    f"its read-only setting would do nothing. Set writable = true on {inner.name!r}, make "
+                    f"{outer.name!r} read-only, or point one of them at a folder that does not overlap the other."
+                )
 
 
 def validated_registry(config: AssistantConfig) -> ToolsetRegistry:

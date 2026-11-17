@@ -650,12 +650,36 @@ def test_collection_paths_validated_at_startup(tmp_path):
         assert "'work'" in str(error.value) or "'other'" in str(error.value)
 
 
-def test_nested_collections_are_allowed(tmp_path):
-    from kokua.core.agents import validate_document_collections
+def _nested_config(tmp_path, *, outer_writable, inner_writable):
+    from kokua.config.schema import DocumentCollectionConfig
 
     (tmp_path / "vault" / "sub").mkdir(parents=True)
-    config = _collection_config(tmp_path, ("outer", tmp_path / "vault"), ("inner", tmp_path / "vault" / "sub"))
-    validate_document_collections(config)
+    collections = [
+        DocumentCollectionConfig("outer", tmp_path / "vault", writable=outer_writable),
+        DocumentCollectionConfig("inner", tmp_path / "vault" / "sub", writable=inner_writable),
+    ]
+    return AssistantConfig(data_dir=tmp_path / "data", document_collections=collections)
+
+
+@pytest.mark.parametrize("outer_writable, inner_writable", [(False, False), (False, True), (True, True)])
+def test_nested_collections_are_allowed_where_each_ones_setting_holds(tmp_path, outer_writable, inner_writable):
+    from kokua.core.agents import validate_document_collections
+
+    validate_document_collections(
+        _nested_config(tmp_path, outer_writable=outer_writable, inner_writable=inner_writable)
+    )
+
+
+def test_a_read_only_collection_inside_a_writable_one_is_refused(tmp_path):
+    """Every file in it can be written through the outer collection, so its read-only setting would do
+    nothing, and a control that does nothing fails startup rather than reassuring in silence."""
+    from kokua.core.agents import validate_document_collections
+
+    with pytest.raises(ConfigError) as error:
+        validate_document_collections(_nested_config(tmp_path, outer_writable=True, inner_writable=False))
+    message = str(error.value)
+    assert "'inner'" in message and "'outer'" in message
+    assert "writable = true" in message
 
 
 @pytest.mark.parametrize("name, taken", [("web", "web"), ("ledger", "ledger_write")])
