@@ -1392,7 +1392,9 @@ rerank = false
 runs locally: nothing is fetched at startup, and the first search downloads the model (about 440 MB)
 while indexing begins in the background, so early searches say their results may be incomplete. Set it to
 `""` to search by keyword alone: no model, no download, and no vectors. A string AIMU cannot build as an
-embedding model fails when the documents toolset is first built, naming the value and both fixes. One
+embedding model fails startup, naming the value and both fixes, whenever an agent holds `documents`, one
+of its collections, or `capabilities` (which can compose a worker holding one); building the client loads
+no model, so the check costs nothing. One
 AIMU can build but not load (the download fails, say) leaves keyword search working, and each search says
 so in its result.
 Changing it re-embeds every collection on the next search.

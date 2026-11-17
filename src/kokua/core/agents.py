@@ -577,7 +577,33 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
     validate_agents(config, registry)
     validate_reviewers(config)
     validate_document_collections(config)
+    _check_embedding_model(config, registry)
     return registry
+
+
+#: The toolsets whose holder can build ``documents``: the toolset itself, and ``capabilities``, whose
+#: ``compose_subagent`` can hand a composed worker any collection.
+_BUILDS_DOCUMENTS = frozenset({"documents", "capabilities"})
+
+
+def _check_embedding_model(config: AssistantConfig, registry: ToolsetRegistry) -> None:
+    """Refuse a ``[documents].embedding_model`` AIMU cannot build, when anything could build documents.
+
+    Otherwise a bad string surfaces as the first documents build's error, mid-conversation. Building the
+    client loads no model (that waits for the first embed), so the check costs nothing. Skipped when no
+    agent can reach ``documents``, as the toolset's other settings are only read by a build.
+    """
+    from kokua.registry.context import configured_embedding_client
+
+    reached = {
+        name for agent in config.agents for name in canonical_names(available_for(config, registry, agent), registry)
+    }
+    if not reached & _BUILDS_DOCUMENTS:
+        return
+    try:
+        configured_embedding_client(config)
+    except ToolsetError as error:
+        raise ConfigError(str(error)) from error
 
 
 # Commands the serve loop owns and a workflow therefore cannot claim. Checked at startup, because a

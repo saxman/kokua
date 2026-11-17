@@ -70,6 +70,21 @@ def embedding_client_for(model: str) -> Optional[EmbeddingClient]:
         ) from error
 
 
+def configured_embedding_client(config: AssistantConfig) -> Optional[EmbeddingClient]:
+    """The client ``config``'s ``[documents].embedding_model`` names: what every collection's index shares.
+
+    Shared by the first documents build and the startup check (``core.agents.validated_registry``), so a
+    model string startup accepted is the one the build constructs. Goes through ``embedding_client_for``,
+    which the test suite stubs.
+    """
+    from kokua.toolsets.documents import DEFAULT_EMBEDDING_MODEL, TOOLSET_NAME
+
+    # The fallback covers a config built without ``resolve_config``, the only thing that seeds a section
+    # for every declared toolset, as `tasks` does for its own.
+    settings = config.toolset_settings.get(TOOLSET_NAME, {})
+    return embedding_client_for(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+
+
 @dataclass
 class LiveState:
     """Process-wide state shared by every agent's toolsets.
@@ -177,13 +192,8 @@ class LiveState:
         """
         with self._documents_lock:
             if self._document_stores is None:
-                from kokua.toolsets.documents import DEFAULT_EMBEDDING_MODEL, TOOLSET_NAME
-
-                # The fallback covers a config built without ``resolve_config``, the only thing that seeds a
-                # section for every declared toolset, as `tasks` does for its own.
-                settings = self.config.toolset_settings.get(TOOLSET_NAME, {})
                 # One client shared by every collection's index, so one model is loaded however many there are.
-                embedding_client = embedding_client_for(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+                embedding_client = configured_embedding_client(self.config)
                 folders = [(BUILTIN_COLLECTION, self.config.documents_path)]
                 folders += [(collection.name, collection.path) for collection in self.config.document_collections]
                 self._document_stores = {

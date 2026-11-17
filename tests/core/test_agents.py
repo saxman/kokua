@@ -824,3 +824,34 @@ def test_a_write_grant_on_a_read_only_collection_is_refused_at_startup_naming_th
     )
     with pytest.raises(ConfigError, match=r"set writable = true on the \[\[documents.collection\]\] named 'work'"):
         validated_registry(config)
+
+
+# --- [documents].embedding_model is checked at startup -----------------------------------------------
+
+
+def _embedding_config(tmp_path, model: str, available: list[str]) -> AssistantConfig:
+    return AssistantConfig(
+        data_dir=tmp_path,
+        agents={"assistant": AgentConfig(available=available)},
+        entry_agent="assistant",
+        toolset_settings={"documents": {"embedding_model": model, "rerank": False}},
+    )
+
+
+@pytest.mark.parametrize("available", [["documents"], ["kokua"], ["capabilities"]])
+def test_a_bad_embedding_model_fails_startup_when_documents_can_be_built(
+    tmp_path, real_embedding_factory, available
+):
+    """A bad model string otherwise surfaces mid-conversation, as the first documents build's error.
+    Building the client loads nothing, so checking it at startup costs nothing. An agent holding
+    `capabilities` counts, since a worker it composes can be handed any collection."""
+    from kokua.core.agents import validated_registry
+
+    with pytest.raises(ConfigError, match=r"\[documents\]\.embedding_model 'nonsense:model'"):
+        validated_registry(_embedding_config(tmp_path, "nonsense:model", available))
+
+
+def test_a_bad_embedding_model_is_not_checked_when_nothing_can_build_documents(tmp_path, real_embedding_factory):
+    from kokua.core.agents import validated_registry
+
+    validated_registry(_embedding_config(tmp_path, "nonsense:model", ["time"]))
