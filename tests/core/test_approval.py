@@ -1477,3 +1477,56 @@ async def test_startup_notices_each_shadowed_resident_tool(tmp_path, monkeypatch
         "explorer: read_file from 'files' is shadowed by 'fs' (the earlier resident toolset keeps the name)."
     ]
     assistant._state.close()
+
+
+# Parts: an agent granted a toolset by naming its parts is gated in that toolset's own vocabulary.
+
+
+def _parted_setup(tmp_path, monkeypatch, *, available, resident=None, built=True, **config_overrides):
+    """Approval policies over a registry holding the parted ``shelf`` toolset, granted as ``available``.
+    ``built`` records shelf's tools as a startup build would; otherwise it waits on a load."""
+    from types import SimpleNamespace
+
+    from kokua.config.schema import AgentConfig
+    from kokua.registry.context import LiveState
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    agents = {"assistant": AgentConfig(available=available, resident=resident, **config_overrides.pop("pair", {}))}
+    config_overrides = {"default_confirm": [], "default_review": [], **config_overrides}
+    config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent="assistant", **config_overrides)
+    state = LiveState(config=config, registry=build_registry(config))
+    state.tools_by_toolset = {"memory": {"remember"}}
+    if built:
+        state.tools_by_toolset["shelf"] = {"read_shelf", "edit_shelf"}
+    return resolve_approval_policies(config, state, SimpleNamespace(tools=[]))
+
+
+def test_a_declared_pair_gates_a_toolset_its_agent_holds_only_through_parts(tmp_path, monkeypatch):
+    policies = _parted_setup(
+        tmp_path, monkeypatch, available=["b"], pair={"confirm": ["shelf.edit_shelf"], "review": []}
+    )
+    assert policies.by_agent["assistant"].confirm == frozenset({"edit_shelf"})
+
+
+@pytest.mark.parametrize("entry", ["a.edit_shelf", "a"])
+def test_a_gate_entry_naming_a_part_is_refused_naming_the_toolset(tmp_path, monkeypatch, entry):
+    """A part changes which things a toolset's tools reach, never which tools it has, so a gate written
+    against a part would hold back exactly what the toolset's own entry does. One vocabulary, one name."""
+    expected = entry.replace("a", "shelf", 1)
+    with pytest.raises(ConfigError, match=rf"'{entry}' names 'a', a part of the 'shelf' toolset.*write '{expected}'"):
+        _parted_setup(tmp_path, monkeypatch, available=["a"], default_confirm=[entry])
+
+
+def test_an_entry_for_parts_still_deferred_waits_on_their_toolset(tmp_path, monkeypatch):
+    policies = _parted_setup(
+        tmp_path,
+        monkeypatch,
+        available=["memory", "a", "b"],
+        resident=["memory"],
+        built=False,
+        default_confirm=["shelf.edit_shelf"],
+    )
+    assert policies.default.pending_confirm == frozenset({"shelf.edit_shelf"})
+    updated = policies.with_built("shelf", frozenset({"read_shelf", "edit_shelf"}))
+    assert updated.default.confirm == frozenset({"edit_shelf"})

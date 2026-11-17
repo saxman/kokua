@@ -752,3 +752,43 @@ def test_the_summary_is_logged_whatever_the_level(monkeypatch, tmp_path, capsys,
         _start(monkeypatch, capsys, [])
 
     assert any(record.getMessage().startswith("assistant: ") for record in caplog.records)
+
+
+def _shelf_registry(monkeypatch, config):
+    from kokua.core.agents import build_registry
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    return build_registry(config)
+
+
+def test_agents_command_names_a_toolset_granted_by_parts_with_its_parts(monkeypatch):
+    """One toolset per entry, so the line reads as the toolsets an agent holds, and the parts it was
+    granted by stay visible beside it, since that is the scope it reaches."""
+    from kokua.cli import access_summary_lines, format_agent_access
+    from kokua.config.schema import AgentConfig
+
+    config = _config(
+        Path("/tmp"),
+        agents={"assistant": AgentConfig(available=["a", "time", "b"], resident=["a", "b"])},
+        default_confirm=[],
+        default_review=[],
+    )
+    registry = _shelf_registry(monkeypatch, config)
+
+    lines = format_agent_access(config, registry)
+    assert "  available: shelf (a, b), time" in lines
+    assert "  resident:  shelf (a, b)" in lines
+    assert access_summary_lines(config, registry)[0].startswith("assistant: 2 available, 1 resident, ")
+
+
+def test_list_toolsets_names_each_part_under_its_toolset(monkeypatch, capsys):
+    from kokua.cli import _print_toolsets
+    from kokua.config.schema import AssistantConfig
+
+    config = AssistantConfig()
+    _shelf_registry(monkeypatch, config)
+
+    _print_toolsets(config)
+
+    assert "  shelf: Shelves.\n    parts: a, b\n" in capsys.readouterr().out

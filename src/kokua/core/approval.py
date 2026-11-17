@@ -41,7 +41,7 @@ from kokua.core.agents import (
     resolve_built_entries,
     resolve_gate_entries,
 )
-from kokua.registry.registry import RESERVED_GATE_NAMESPACE
+from kokua.registry.registry import RESERVED_GATE_NAMESPACE, canonical_names
 
 if TYPE_CHECKING:
     from kokua.config.schema import AssistantConfig
@@ -150,9 +150,11 @@ def _vocabulary_for(
     """The toolsets ``name`` can reach, with their tools, plus the reserved ``core`` namespace.
 
     The entry agent also reaches every skill's toolset, because its ``SkillAgent`` holds every skill
-    whether or not it declares one.
+    whether or not it declares one. An agent granted a toolset through its parts reaches that toolset,
+    under its own name, since that is the name its tools were recorded under.
     """
-    reachable = set(available_for(config, state.registry, name)) | {RESERVED_GATE_NAMESPACE}
+    reachable = set(canonical_names(available_for(config, state.registry, name), state.registry))
+    reachable.add(RESERVED_GATE_NAMESPACE)
     if name == config.entry_agent:
         reachable |= {skill.name for skill in state.skill_manager.skills.values()}
     return {toolset: tools for toolset, tools in full.items() if toolset in reachable}

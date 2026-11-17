@@ -33,6 +33,7 @@ from kokua.registry.registry import (
     ToolsetError,
     ToolsetRegistry,
     build_tools,
+    canonical_names,
     entry_point_only_reason,
     register,
     select,
@@ -193,14 +194,18 @@ def resident_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name:
 
     Always in availability order, by filtering :func:`available_for` rather than returning the declared
     list, so the order a user wrote ``resident`` in never changes the order tools are presented in.
+
+    Toolset names, never part names: parts of one toolset build as that one toolset, so residency is
+    decided per toolset, and a resident part name stands for the toolset it resolves to.
     """
     agent = config.agents.get(agent_name)
     if agent is None:
         return []
-    available = available_for(config, registry, agent_name)
+    available = canonical_names(available_for(config, registry, agent_name), registry)
     if agent.resident is None:
         return available
-    return [entry for entry in available if entry in agent.resident]
+    resident = set(canonical_names(agent.resident, registry))
+    return [entry for entry in available if entry in resident]
 
 
 @dataclass(frozen=True)
@@ -255,11 +260,15 @@ def shadowed_tools(
 
 
 def deferred_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> list[str]:
-    """The toolsets ``agent_name`` can load but does not hold yet: its availability minus resident, in order."""
+    """The toolsets ``agent_name`` can load but does not hold yet: its availability minus resident, in order.
+
+    Toolset names, as :func:`resident_for` answers, since a deferred toolset loads under its own name.
+    """
     if agent_name not in config.agents:
         return []
     resident = set(resident_for(config, registry, agent_name))
-    return [entry for entry in available_for(config, registry, agent_name) if entry not in resident]
+    available = canonical_names(available_for(config, registry, agent_name), registry)
+    return [entry for entry in available if entry not in resident]
 
 
 def loadable_toolsets(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> list[str]:
@@ -368,6 +377,7 @@ def validate_agents(config: AssistantConfig, registry: ToolsetRegistry) -> None:
             select(available_for(config, registry, name), registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:
             raise ConfigError(str(e)) from e
+        _check_resident_parts(config, registry, name)
         _check_model(f"agents.{name}", agent.model)
         for target in agent.delegates_to:
             if target not in config.agents:
@@ -390,10 +400,13 @@ def _check_resident_within_all(config: AssistantConfig, registry: ToolsetRegistr
     check_resident_within_available(name, agent.resident, agent.available)
     expanded = available_for(config, registry, name)
     for entry in agent.resident:
-        if entry in expanded:
+        # A part is held when its toolset is; whether naming one here is meaningful is
+        # `_check_resident_parts`'s question.
+        toolset = canonical_names([entry], registry)[0]
+        if toolset in expanded:
             continue
         section = f"[agents.{name}.tools].resident"
-        if entry in registry:
+        if toolset in registry:
             raise ConfigError(
                 f"{section} names {entry!r}, {entry_point_only_reason(config.entry_agent)} "
                 'available = "all" leaves it out here, so drop it from resident.'
@@ -403,6 +416,41 @@ def _check_resident_within_all(config: AssistantConfig, registry: ToolsetRegistr
             f'{section} names {entry!r}, which is not an installed toolset, so available = "all" does not '
             f"hold it. Installed toolsets: {installed}."
         )
+
+
+def _check_resident_parts(config: AssistantConfig, registry: ToolsetRegistry, name: str) -> None:
+    """Refuse a ``resident`` list naming some of what grants a toolset and leaving the rest out.
+
+    Every part an agent names builds as one toolset, so the toolset is resident or deferred whole. A
+    resident list naming part ``a`` while ``available`` also grants part ``b``, or the whole toolset,
+    would otherwise make the rest resident too: a declaration that says less than it does, which is
+    refused here rather than honored in silence.
+    """
+    agent = config.agents[name]
+    if agent.resident is None:
+        return
+    available = available_for(config, registry, name)
+    section = f"[agents.{name}.tools].resident"
+    for entry in agent.resident:
+        if entry not in registry.parts:
+            continue
+        toolset = registry.parts[entry][0]
+        if toolset in agent.resident:
+            continue
+        grants = [granted for granted in available if canonical_names([granted], registry) == [toolset]]
+        missing = [granted for granted in grants if granted not in agent.resident]
+        if toolset in missing:
+            raise ConfigError(
+                f"{section} names {entry!r}, a part of toolset {toolset!r}, but this agent holds {toolset!r} "
+                f"whole, so all of it is resident or none of it is. Name {toolset!r} in resident instead."
+            )
+        if missing:
+            others = ", ".join(repr(granted) for granted in missing)
+            raise ConfigError(
+                f"{section} names {entry!r} but not {others}, which available also grants as parts of "
+                f"toolset {toolset!r}. A toolset builds once however many parts grant it, so it is resident "
+                "or deferred whole: name every one of them in resident, or none."
+            )
 
 
 def validate_reviewers(config: AssistantConfig) -> None:
@@ -571,7 +619,7 @@ def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegis
     that one checks every agent's tools (a toolset a worker holds is still declared) and looks at config
     sections rather than commands, and fires once at startup rather than on an incoming channel message.
     """
-    declared = set(available_for(config, registry, config.entry_agent))
+    declared = set(canonical_names(available_for(config, registry, config.entry_agent), registry))
     return {
         workflow.command: toolset_name
         for toolset_name, workflow in workflows_of(list(registry.values()))
@@ -601,7 +649,11 @@ def configured_but_undeclared(config: AssistantConfig, registry: ToolsetRegistry
     cannot tell "the user wrote this" from "Kokua defaulted it" -- exactly the distinction this warning
     needs, since a defaulted section nobody wrote is not a mistake worth reporting.
     """
-    declared = {toolset for name in config.agents for toolset in available_for(config, registry, name)}
+    declared = {
+        toolset
+        for name in config.agents
+        for toolset in canonical_names(available_for(config, registry, name), registry)
+    }
     return sorted(name for name in config.configured_sections if name not in declared)
 
 
@@ -1085,7 +1137,9 @@ def toolset_of(state: LiveState, agent_name: Optional[str], tool: str) -> Option
     shown bare rather than under a guess.
     """
     config, registry, recorded = state.config, state.registry, state.tools_by_toolset
-    declared = available_for(config, registry, agent_name) if agent_name in config.agents else []
+    declared = (
+        canonical_names(available_for(config, registry, agent_name), registry) if agent_name in config.agents else []
+    )
     for name in declared:
         if tool in recorded.get(name, ()):
             return name
@@ -1186,6 +1240,17 @@ def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: M
     parts = entry.split(_GATE_SEPARATOR)
     toolset, tool = (parts[0], _GATE_WILDCARD) if len(parts) == 1 else (parts[0], parts[1])
     if toolset not in vocabulary:
+        # A plain dict is still a valid registry here: only one built by `with_parts` carries part names.
+        part_names = getattr(registry, "parts", {})
+        if toolset in part_names:
+            owner = part_names[toolset][0]
+            # A part narrows what a toolset's tools reach, never which tools it has, so a gate written
+            # against one would hold back exactly what the toolset's own entry does.
+            suggestion = owner if len(parts) == 1 else f"{owner}{_GATE_SEPARATOR}{tool}"
+            return set(), (
+                f"{entry!r} names {toolset!r}, a part of the {owner!r} toolset. A gate names the toolset, "
+                f"however an agent was granted it: write {suggestion!r}"
+            )
         if len(parts) == 1:
             owners = sorted(name for name, tools in vocabulary.items() if toolset in tools)
             if owners:

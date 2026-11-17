@@ -338,3 +338,14 @@ def test_a_part_of_an_entry_point_only_toolset_is_refused_on_a_worker():
     registry = _parted(_shelf(entry_point_only=True))
     with pytest.raises(ToolsetError, match="'a'"):
         select(["a"], registry, agent="researcher", entry_point="assistant")
+
+
+def test_a_write_twin_of_a_part_says_the_part_is_read_only():
+    """A name one ``_write`` away from a part is almost always the writable grant of a read-only part, so
+    the refusal says that instead of listing every name the agent could have meant."""
+    registry = _parted(_shelf())
+    with pytest.raises(ToolsetError) as excinfo:
+        select(["a_write"], registry, agent="assistant", entry_point="assistant")
+    message = str(excinfo.value)
+    assert "'a_write' is not a part of toolset 'shelf': 'a' is, read-only" in message
+    assert "writable where 'a' is configured" in message

@@ -675,3 +675,100 @@ def test_collection_holding_the_data_directory_is_refused(tmp_path):
     config = _collection_config(tmp_path, ("home", tmp_path))
     with pytest.raises(ConfigError, match="'home'.*data directory"):
         validate_document_collections(config, build_registry(AssistantConfig()))
+
+
+# --- Part names: an agent may name a toolset's parts instead of the toolset ----------------------
+
+
+def _shelf_config(monkeypatch, tmp_path=None, **agents):
+    """A config whose agents are ``agents``, over a registry holding the parted ``shelf`` toolset."""
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    first = next(iter(agents))
+    location = {} if tmp_path is None else {"data_dir": tmp_path}
+    config = AssistantConfig(agents=dict(agents), entry_agent=first, **location)
+    return config, build_registry(config)
+
+
+def test_a_resident_part_name_makes_its_toolset_resident(monkeypatch):
+    """Residency is per toolset: what an agent loads later is one toolset, whichever parts granted it, so
+    a resident part name is answered with the toolset it resolves to."""
+    from kokua.core.agents import deferred_for, resident_for, split_by_residency
+    from kokua.registry.registry import select
+
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["a", "time"], resident=["a"]))
+    assert resident_for(config, registry, "a") == ["shelf"]
+    assert deferred_for(config, registry, "a") == ["time"]
+    toolsets = select(["a", "time"], registry, agent="a", entry_point="a")
+    resident, deferred = split_by_residency(config, registry, "a", toolsets)
+    assert [t.name for t in resident] == ["shelf"]
+    assert [t.name for t in deferred] == ["time"]
+
+
+def test_parts_with_no_resident_list_are_all_resident(monkeypatch):
+    from kokua.core.agents import deferred_for, resident_for
+
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["a", "b"]))
+    assert resident_for(config, registry, "a") == ["shelf"]
+    assert deferred_for(config, registry, "a") == []
+
+
+def test_deferred_parts_defer_their_one_toolset(monkeypatch):
+    from kokua.core.agents import deferred_for, loadable_toolsets
+
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["time", "a", "b"], resident=["time"]))
+    assert deferred_for(config, registry, "a") == ["shelf"]
+    assert loadable_toolsets(config, registry, "a") == ["shelf"]
+
+
+def test_a_resident_list_naming_only_some_of_a_toolsets_parts_is_refused(monkeypatch):
+    """Two parts of one toolset build as one toolset, so one cannot be resident while the other waits.
+    Making both resident would hold back nothing the declaration asked to defer, silently."""
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["a", "b"], resident=["a"]))
+    with pytest.raises(ConfigError, match=r"resident names 'a' but not 'b'.*'shelf'"):
+        validate_agents(config, registry)
+
+
+def test_a_resident_part_of_a_toolset_held_whole_is_refused(monkeypatch):
+    """With ``"all"`` the toolset is held whole, so a part name in ``resident`` would make every part
+    resident while saying one."""
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=ALL_TOOLSETS, resident=["a"]))
+    with pytest.raises(ConfigError, match=r"resident names 'a'.*holds 'shelf' whole.*Name 'shelf' in resident instead"):
+        validate_agents(config, registry)
+
+
+def test_every_part_resident_passes_validation(monkeypatch):
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["a", "b", "time"], resident=["a", "b"]))
+    validate_agents(config, registry)
+
+
+def test_a_configured_section_counts_as_declared_through_a_part(monkeypatch):
+    from kokua.core.agents import configured_but_undeclared
+
+    config, registry = _shelf_config(monkeypatch, a=AgentConfig(available=["a"]))
+    config.configured_sections = ("shelf",)
+    assert configured_but_undeclared(config, registry) == []
+
+
+def test_a_workflow_command_is_declared_through_a_part(monkeypatch):
+    from types import SimpleNamespace
+
+    from kokua.core.agents import undeclared_workflow_commands
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch, workflow=SimpleNamespace(name="shelf", command="shelve"))
+    config = AssistantConfig(agents={"a": AgentConfig(available=["a"])}, entry_agent="a")
+    assert "shelve" not in undeclared_workflow_commands(config, build_registry(config))
+
+
+def test_toolset_of_answers_a_part_holder_from_its_own_toolset(tmp_path, monkeypatch):
+    """``time`` ranks ahead of a plugin in trust order, so only searching the agent's own declaration,
+    read as the toolset its part resolves to, names ``shelf``."""
+    from kokua.core.agents import toolset_of
+    from kokua.registry.context import LiveState
+
+    config, registry = _shelf_config(monkeypatch, tmp_path, a=AgentConfig(available=["a"]))
+    state = LiveState(config=config, registry=registry)
+    state.tools_by_toolset = {"time": {"read_shelf"}, "shelf": {"read_shelf"}}
+    assert toolset_of(state, "a", "read_shelf") == "shelf"

@@ -265,8 +265,7 @@ def select(
         toolset_name, part = parts[name] if name in parts else (name, None)
         toolset = registry.get(toolset_name)
         if toolset is None:
-            available = ", ".join(sorted([*registry, *parts])) or "(none)"
-            raise ToolsetError(f"agent {agent!r} declares unknown toolset {name!r}. Available toolsets: {available}.")
+            raise ToolsetError(_unknown_name(name, registry, parts, agent))
         if toolset.entry_point_only and agent != entry_point:
             raise ToolsetError(f"agent {agent!r} declares toolset {name!r}, {entry_point_only_reason(entry_point)}")
         if toolset_name not in granted:
@@ -277,6 +276,26 @@ def select(
         elif granted[toolset_name] is not None:
             granted[toolset_name].add(part)
     return [_bound(registry[name], granted[name]) for name in order]
+
+
+def _unknown_name(
+    name: str, registry: Mapping[str, Toolset], parts: Mapping[str, tuple[str, Hashable]], agent: str
+) -> str:
+    """Why ``agent`` cannot declare ``name``, which is neither a toolset nor a part.
+
+    A name one ``_write`` away from a part is almost always the writable grant of a part its config left
+    read-only, and the fix is in that config rather than in the list of names, so it gets its own sentence.
+    """
+    read_only = name.removesuffix("_write")
+    if read_only != name and read_only in parts:
+        owner = parts[read_only][0]
+        return (
+            f"agent {agent!r} declares {name!r}, but {name!r} is not a part of toolset {owner!r}: "
+            f"{read_only!r} is, read-only. Declare it writable where {read_only!r} is configured, or "
+            f"declare {read_only!r} instead."
+        )
+    available = ", ".join(sorted([*registry, *parts])) or "(none)"
+    return f"agent {agent!r} declares unknown toolset {name!r}. Available toolsets: {available}."
 
 
 def _bound(toolset: Toolset, parts: set[Hashable] | None) -> Toolset:

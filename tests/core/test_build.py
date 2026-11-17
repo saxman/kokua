@@ -1950,3 +1950,45 @@ async def test_a_worker_rebuild_that_raises_reaches_the_model_after_the_write(tm
         assert "The write happened, but workers were not given the change: spec build failed" in result
     finally:
         assistant._state.close()
+
+
+# --- Parts: a toolset granted by naming its parts ----------------------------------------------
+
+
+def _shelf_agent(tmp_path, monkeypatch, builds: list, **declaration):
+    from kokua.config.schema import AssistantConfig
+    from kokua.core.build import wire_agent
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch, builds)
+    config = AssistantConfig(
+        data_dir=tmp_path, agents={"assistant": AgentConfig(**declaration)}, entry_agent="assistant"
+    )
+    state = _live_state(config)
+    return state, wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+
+
+def test_an_agent_declaring_a_part_holds_the_toolset_scoped_to_it(tmp_path, monkeypatch):
+    builds: list = []
+    state, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["a"])
+    assert "shelf" in state.tools_by_toolset
+    assert {"read_shelf", "edit_shelf"} <= {fn.__name__ for fn in agent.tools}
+    assert builds == [frozenset({"a"})]
+
+
+def test_a_resident_part_name_builds_its_toolset_at_wiring(tmp_path, monkeypatch):
+    builds: list = []
+    _, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["a", "time"], resident=["a"])
+    assert "read_shelf" in {fn.__name__ for fn in agent.tools}
+    assert "get_current_date_and_time" not in {fn.__name__ for fn in agent.tools}
+    assert builds == [frozenset({"a"})]
+
+
+async def test_deferred_parts_load_as_one_scoped_toolset(tmp_path, monkeypatch):
+    builds: list = []
+    _, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["time", "a", "b"], resident=["time"])
+    assert builds == []
+    assert (await agent.load_tool_group("shelf")).startswith("Loaded 'shelf':")
+    assert builds == [frozenset({"a", "b"})]
+    read_shelf = next(fn for fn in agent._effective_tools(None) if fn.__name__ == "read_shelf")
+    assert read_shelf() == "a, b"

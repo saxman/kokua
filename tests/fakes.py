@@ -120,3 +120,49 @@ class _RequestsToolOnce(MockAsyncModelClient):
             return ""
         self.messages.append({"role": "assistant", "content": "ok"})
         return "ok"
+
+
+def shelf_toolset(builds: list | None = None, **kwargs):
+    """A toolset granted whole as ``shelf`` or narrower as its parts ``a`` and ``b``, standing in for any
+    capability whose parts the config derives. Its two tools, ``read_shelf`` and ``edit_shelf``, answer
+    with the parts their build was handed, and ``builds`` records each build's parts (the whole build
+    records both), so a test can tell which grant reached the agent."""
+    from aimu.tools import tool
+
+    from kokua.registry.registry import Toolset
+
+    builds = builds if builds is not None else []
+
+    def build_parts(ctx, parts):
+        builds.append(frozenset(parts))
+        scope = ", ".join(sorted(parts))
+
+        @tool
+        def read_shelf() -> str:
+            """Read the shelves this grant covers."""
+            return scope
+
+        @tool
+        def edit_shelf() -> str:
+            """Edit the shelves this grant covers."""
+            return scope
+
+        return [read_shelf, edit_shelf]
+
+    defaults = dict(parts=lambda config: {"a": "a", "b": "b"}, build_parts=build_parts)
+    return Toolset(
+        name="shelf",
+        description="Shelves.",
+        build=lambda ctx: build_parts(ctx, {"a", "b"}),
+        **{**defaults, **kwargs},
+    )
+
+
+def install_shelf(monkeypatch, builds: list | None = None, **kwargs):
+    """Register :func:`shelf_toolset` beside every installed toolset, as a third-party plugin would arrive."""
+    from kokua.core import agents
+
+    discovered = agents.discover_toolsets()
+    shelf = shelf_toolset(builds, **kwargs)
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {**discovered, "shelf": shelf})
+    return shelf

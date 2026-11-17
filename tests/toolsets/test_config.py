@@ -33,12 +33,17 @@ def _tools(tmp_path, apply_hot=None, config=None, registry=None, table=None):
     async def _noop(section, key, value):
         return None
 
+    from kokua.registry.registry import ToolsetRegistry
+
     path = tmp_path / "config.toml"
+    # A bare mapping becomes the registry type the live one is, which is also what carries part names.
+    if not isinstance(registry, ToolsetRegistry):
+        registry = ToolsetRegistry(registry or {}, {})
     read_config, update_config = config_tools.make_config_tools(
         apply_hot or _noop,
         table if table is not None else core_table(),
         config=config if config is not None else _config(tmp_path),
-        registry=registry if registry is not None else {},
+        registry=registry,
     )
     return path, read_config, update_config
 
