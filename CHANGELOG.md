@@ -1229,8 +1229,7 @@ assistant may read.
   rename it to a listed suffix, or export it, to bring it back. Saving under any other suffix is refused.
   PDFs are searchable and read-only.
 - **`[documents]` has two keys**, `embedding_model` and `rerank` (a cross-encoder pass over the fused
-  results, default `false`), both startup-only. An `embedding_model` AIMU cannot build fails startup
-  whenever an agent can reach `documents`, rather than surfacing as the first documents build's error. **`documents.embedding_model` is locked by default**:
+  results, default `false`), both startup-only. **`documents.embedding_model` is locked by default**:
   a remote embedding model reads every passage of every collection while indexing, so `update_config`
   refuses it, for the reason it refuses `compute.command_env_passthrough`. A `config.toml` scaffolded
   earlier writes its lock list out in full, so add `"documents.embedding_model"` to
