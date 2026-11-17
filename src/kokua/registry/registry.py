@@ -8,10 +8,11 @@ name is a startup error rather than a silent shadowing, since the loser would va
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Optional, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Callable, Hashable, Iterable, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:
+    from kokua.config.schema import AssistantConfig
     from kokua.registry.context import ToolsetContext
     from kokua.workflows import Workflow
 
@@ -77,6 +78,12 @@ class Toolset:
     ``config.toolset_settings[<name>]``: a workflow reads them as attributes through
     ``WorkflowContext.settings``, and ``build`` reads them from ``ctx.config.toolset_settings[<name>]``,
     which is complete by then because every declared default is seeded at startup.
+
+    ``parts`` lets one capability be granted at narrower scopes than the whole: it maps names the
+    config derives (one document collection's ``work`` and ``work_write``, say) to the part each grants,
+    and an agent may name those in its ``available`` list instead of the toolset. ``select`` resolves
+    them back into this one toolset with ``build_parts`` bound to the parts named, so a narrow grant
+    still builds one toolset under one name, and one approval vocabulary covers it however it was granted.
     """
 
     name: str
@@ -87,6 +94,8 @@ class Toolset:
     entry_point_only: bool = False
     workflow: Optional["Workflow"] = None
     settings: tuple[Setting, ...] = ()
+    parts: Optional[Callable[["AssistantConfig"], Mapping[str, Hashable]]] = None
+    build_parts: Optional[Callable[["ToolsetContext", frozenset[Hashable]], list]] = None
 
 
 class ToolsetRegistry(dict):
@@ -97,11 +106,21 @@ class ToolsetRegistry(dict):
     come from provenance rather than from anything a ``Toolset`` itself carries: which names are skills
     (``core.agents.without_skill_names``), what order ``available = "all"`` lists toolsets in
     (``core.agents.TRUST_ORDER``), and how ``--list-toolsets`` groups them.
+
+    ``parts`` maps each part name a toolset declared (see ``Toolset.parts``) to ``(toolset name, part)``.
+    It is empty until :func:`with_parts` fills it, because part names come from the config and
+    registration does not read one.
     """
 
-    def __init__(self, toolsets: Mapping[str, Toolset], providers: Mapping[str, str]):
+    def __init__(
+        self,
+        toolsets: Mapping[str, Toolset],
+        providers: Mapping[str, str],
+        parts: Mapping[str, tuple[str, Hashable]] | None = None,
+    ):
         super().__init__(toolsets)
         self.providers: dict[str, str] = dict(providers)
+        self.parts: dict[str, tuple[str, Hashable]] = dict(parts or {})
 
 
 #: The approval-entry prefix (``confirm`` and ``review``) for the tools no toolset builds: ``spawn_subagent``, attached
@@ -163,6 +182,54 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
     return ToolsetRegistry(registry, provider)
 
 
+def with_parts(registry: ToolsetRegistry, config: "AssistantConfig") -> ToolsetRegistry:
+    """``registry`` with every toolset's part names resolved against ``config``.
+
+    A part name shares the namespace an agent's ``available`` list is written in, so it is refused on
+    the same terms a toolset name is: equal to a toolset, to another part, or to a reserved name, it
+    would make some declaration mean two things, and the loser would vanish with no signal.
+    """
+    parts: dict[str, tuple[str, Hashable]] = {}
+    for toolset in registry.values():
+        if (toolset.parts is None) != (toolset.build_parts is None):
+            raise ToolsetError(
+                f"toolset {toolset.name!r} declares only one of parts and build_parts. Declare both: parts "
+                "names what an agent may be granted, and build_parts builds the tools for that grant."
+            )
+        if toolset.parts is None:
+            continue
+        for part_name, part in toolset.parts(config).items():
+            if part_name in (RESERVED_GATE_NAMESPACE, ALL_DECLARATION):
+                raise ToolsetError(f"toolset {toolset.name!r} declares part {part_name!r}, which is reserved.")
+            if part_name in registry:
+                raise ToolsetError(
+                    f"toolset {toolset.name!r} declares part {part_name!r}, which is also the name of the "
+                    f"toolset {part_name!r}. Rename the part: an agent names either without saying which it means."
+                )
+            if part_name in parts:
+                raise ToolsetError(
+                    f"part {part_name!r} is declared by both toolset {parts[part_name][0]!r} and toolset "
+                    f"{toolset.name!r}. Rename one: an agent names a part without saying whose it is."
+                )
+            parts[part_name] = (toolset.name, part)
+    return ToolsetRegistry(registry, registry.providers, parts)
+
+
+def canonical_names(names: Sequence[str], registry: ToolsetRegistry) -> list[str]:
+    """``names`` with each part name replaced by its toolset's name, deduplicated in order.
+
+    For the callers that ask which toolsets an agent holds rather than at what scope. A name that is
+    neither a part nor a toolset passes through unchanged, since validating names is ``select``'s job.
+    The caller expands ``available = "all"`` first: the sentinel raises if iterated.
+    """
+    canonical: list[str] = []
+    for name in names:
+        toolset_name = registry.parts[name][0] if name in registry.parts else name
+        if toolset_name not in canonical:
+            canonical.append(toolset_name)
+    return canonical
+
+
 def entry_point_only_reason(entry_point: str) -> str:
     """Why an ``entry_point_only`` toolset is refused on any other agent, as the end of a sentence.
 
@@ -184,21 +251,40 @@ def select(
     An unresolvable name raises rather than dropping. Dropping is what the previous per-role
     ``groups``/``tool_packs`` lists did, and a typo silently produced a smaller toolset with nothing to
     say so.
+
+    A part name (see ``Toolset.parts``) resolves to its toolset, at the position of that toolset's first
+    mention. Naming the toolset whole anywhere in ``names`` grants it whole, since the whole already
+    holds every part; otherwise every part named is collected into one copy whose ``build`` is
+    ``build_parts`` bound to them.
     """
-    selected: list[Toolset] = []
-    seen: set[str] = set()
+    # A plain dict is still a valid registry here: only one built by `with_parts` carries part names.
+    parts: Mapping[str, tuple[str, Hashable]] = getattr(registry, "parts", {})
+    order: list[str] = []
+    granted: dict[str, set[Hashable] | None] = {}  # None is a whole grant
     for name in names:
-        if name in seen:
-            continue
-        toolset = registry.get(name)
+        toolset_name, part = parts[name] if name in parts else (name, None)
+        toolset = registry.get(toolset_name)
         if toolset is None:
-            available = ", ".join(sorted(registry)) or "(none)"
+            available = ", ".join(sorted([*registry, *parts])) or "(none)"
             raise ToolsetError(f"agent {agent!r} declares unknown toolset {name!r}. Available toolsets: {available}.")
         if toolset.entry_point_only and agent != entry_point:
             raise ToolsetError(f"agent {agent!r} declares toolset {name!r}, {entry_point_only_reason(entry_point)}")
-        seen.add(name)
-        selected.append(toolset)
-    return selected
+        if toolset_name not in granted:
+            order.append(toolset_name)
+            granted[toolset_name] = set()
+        if name not in parts:
+            granted[toolset_name] = None
+        elif granted[toolset_name] is not None:
+            granted[toolset_name].add(part)
+    return [_bound(registry[name], granted[name]) for name in order]
+
+
+def _bound(toolset: Toolset, parts: set[Hashable] | None) -> Toolset:
+    """``toolset`` as granted: itself when whole, else a copy building only ``parts``."""
+    if parts is None:
+        return toolset
+    build_parts, frozen = toolset.build_parts, frozenset(parts)
+    return replace(toolset, build=lambda ctx: build_parts(ctx, frozen))
 
 
 def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:

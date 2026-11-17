@@ -46,6 +46,46 @@ def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
     assert registry.providers["weather"] == "plugin"
 
 
+def _shelf_plugin(monkeypatch):
+    """A third-party toolset declaring parts ``a`` and ``b``, so a test can follow part names through
+    the registry as it is built and rebuilt."""
+    from kokua.core import agents
+    from kokua.registry.registry import Toolset
+
+    shelf = Toolset(
+        name="shelf",
+        description="Shelves.",
+        build=lambda ctx: [],
+        parts=lambda config: {"a": "a", "b": "b"},
+        build_parts=lambda ctx, parts: [],
+    )
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"shelf": shelf})
+
+
+def test_build_registry_resolves_part_names(monkeypatch):
+    _shelf_plugin(monkeypatch)
+    registry = build_registry(AssistantConfig())
+    assert registry.parts == {"a": ("shelf", "a"), "b": ("shelf", "b")}
+
+
+def test_a_skill_refresh_keeps_part_names_and_refuses_a_skill_claiming_one(monkeypatch):
+    """Skills are re-read mid-session by rebuilding the registry, and that rebuild has to carry the part
+    names over, or a narrow grant would turn into an unknown-toolset error the first time the assistant
+    wrote a skill. A skill named for a part is refused exactly as one named for a toolset is."""
+    from kokua.core.agents import with_skill_toolsets
+    from kokua.registry.registry import Toolset
+
+    _shelf_plugin(monkeypatch)
+    config = AssistantConfig()
+    registry = build_registry(config)
+    refreshed = with_skill_toolsets(registry, [], config)
+    assert refreshed.parts == registry.parts
+
+    colliding = Toolset(name="a", description="A skill.", build=lambda ctx: [])
+    with pytest.raises(ToolsetError, match="'a'"):
+        with_skill_toolsets(registry, [colliding], config)
+
+
 def test_a_third_party_shadowing_a_shipped_name_is_rejected(monkeypatch):
     """Every toolset arrives through one entry-point group now, so a third party's package registering a
     name Kokua ships is a collision inside that group. The two are still told apart by which

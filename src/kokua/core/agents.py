@@ -36,6 +36,7 @@ from kokua.registry.registry import (
     entry_point_only_reason,
     register,
     select,
+    with_parts,
     workflows_of,
 )
 from kokua.workflows import Workflow
@@ -119,7 +120,9 @@ def skill_toolsets(config: AssistantConfig) -> list[Toolset]:
     ]
 
 
-def with_skill_toolsets(registry: ToolsetRegistry, toolsets: Sequence[Toolset]) -> ToolsetRegistry:
+def with_skill_toolsets(
+    registry: ToolsetRegistry, toolsets: Sequence[Toolset], config: AssistantConfig
+) -> ToolsetRegistry:
     """``registry`` with every skill entry replaced by ``toolsets`` and every other entry kept as it is.
 
     Skills are the one source that changes mid-session through a tool the assistant holds, so they are
@@ -127,15 +130,18 @@ def with_skill_toolsets(registry: ToolsetRegistry, toolsets: Sequence[Toolset]) 
     entries in particular stay the ones read from config at startup, so a server added at runtime still
     reaches an ``"all"`` agent only after a restart, exactly as it did before skills could refresh.
 
-    Raises ``ToolsetError`` (from ``register``) when a skill now on disk collides with another toolset's
-    name, leaving the caller's registry as it was.
+    Part names are resolved again against ``config``, as :func:`build_registry` does, so they survive
+    the rebuild and a skill named for one collides with it.
+
+    Raises ``ToolsetError`` (from ``register`` or ``with_parts``) when a skill now on disk collides with
+    another toolset's name or a part name, leaving the caller's registry as it was.
     """
     kept: dict[str, list[Toolset]] = {}
     for name, toolset in registry.items():
         label = registry.providers[name]
         if label != _SKILL_PROVIDER:
             kept.setdefault(label, []).append(toolset)
-    return register([*kept.items(), (_SKILL_PROVIDER, list(toolsets))])
+    return with_parts(register([*kept.items(), (_SKILL_PROVIDER, list(toolsets))]), config)
 
 
 def is_skill(name: str, registry: ToolsetRegistry) -> bool:
@@ -294,6 +300,9 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     keeps the ``build`` its author wrote, whichever route it came by, because a build failure is
     a bug in whoever wrote the toolset and a warning in a log file is not how a person finds out an agent
     lost a capability.
+
+    Part names (``Toolset.parts``) are resolved last, because they come from this config and must not
+    collide with any name the sources above registered.
     """
     discovered = discover_toolsets()
     own_names = own_distribution_toolset_names()
@@ -303,7 +312,7 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_BUILTIN_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n in own_names]),
         (_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n not in own_names]),
     ]
-    return register(sources)
+    return with_parts(register(sources), config)
 
 
 #: Agent names the message bus has already spent. An agent's declared name becomes the address a
