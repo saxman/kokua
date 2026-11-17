@@ -38,6 +38,7 @@ from kokua.core.build import (
     model_record,
 )
 from kokua.config import AssistantConfig
+from kokua.config.schema import BUILTIN_COLLECTION
 from kokua.core import conversation_commands
 from kokua.core.auto_approval import resolve_auto_approval
 from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
@@ -334,7 +335,7 @@ class Assistant:
         self._loop = asyncio.get_running_loop()
         # Imported here, not at module level, for the cycle `create` documents above.
         from kokua.core.agents import configured_but_undeclared, shadowed_tools
-        from kokua.core.approval import resolve_approval_policies
+        from kokua.core.approval import DOCUMENT_WRITE_ENTRIES, resolve_approval_policies, ungated_document_writes
 
         config, state = self._config, self._state
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
@@ -381,6 +382,21 @@ class Assistant:
                 )
             except Exception:
                 logger.warning("Could not raise the shadowed-tool notice for %s.", shadow, exc_info=True)
+
+        # Guarded per notice for the shadow notices' reason. The lines are spelled out because the usual
+        # way here is an [assistant.tools] table older than document gates, which only an edit fixes.
+        lines = "\n".join(f'    "{entry}",' for entry in DOCUMENT_WRITE_ENTRIES)
+        for ungated in ungated_document_writes(config, state.registry):
+            agents = ", ".join(repr(agent) for agent in ungated.agents)
+            collections = ", ".join(repr(collection) for collection in ungated.collections)
+            try:
+                await self._ui.alert(
+                    f"Document writes are not gated for {agents}: each can write the writable collection(s) "
+                    f"{collections} without asking, since {ungated.source} names neither document writer. "
+                    f"To be asked first, add these lines to {ungated.source}.confirm:\n{lines}"
+                )
+            except Exception:
+                logger.warning("Could not raise the ungated-document-writes notice for %s.", ungated, exc_info=True)
 
         state.tasks.arm_all()
 
@@ -432,11 +448,12 @@ class Assistant:
 
     @property
     def _document_store(self):
-        """The shared document store, or None when no agent declared the documents toolset.
+        """Kokua's own document collection's store, or None until some agent's documents toolset builds.
 
-        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
-        not force it into existence."""
-        return self._state.__dict__.get("document_store") if self._state else None
+        Read through ``LiveState.built_document_stores`` rather than ``document_store``, so merely asking
+        whether a store exists does not force every collection's store into existence."""
+        stores = self._state.built_document_stores if self._state else None
+        return stores[BUILTIN_COLLECTION] if stores else None
 
     def history_view(self) -> tuple[list[dict], dict]:
         """The active conversation's messages (OpenAI-format) and metadata (e.g. the ``subagent``
@@ -807,7 +824,7 @@ class Assistant:
                 except Exception:
                     logger.debug("Error closing MCP client", exc_info=True)
             if self._state is not None:
-                self._state.close()
+                await self._state.aclose()
             self._store.close()
 
     async def _serve_channel(self) -> None:

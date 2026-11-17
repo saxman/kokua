@@ -33,13 +33,13 @@ it is rebuilt.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+from typing import Callable, Collection, Optional
 
 from aimu.tools import tool
 
 from kokua.mcp import servers
 from kokua.mcp.servers import AlreadyConnected, BearerTokenRequired, ConnectFailed, NotConnected
-from kokua.registry.registry import Toolset
+from kokua.registry.registry import Toolset, claimed_names
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,13 @@ def make_mcp_tools(
     oauth,
     config_path,
     refresh_workers: Optional[Callable] = None,
+    taken_names: Callable[[], Collection[str]] = lambda: (),
 ) -> list[Callable]:
-    """Build the runtime add/remove tools over the live connection list and the agent fan-out."""
+    """Build the runtime add/remove tools over the live connection list and the agent fan-out.
+
+    ``taken_names`` is asked at each add, since a skill written mid-session joins the registry after this
+    was built.
+    """
 
     @tool
     async def add_mcp_server(url: str, bearer_token: Optional[str] = None) -> str:
@@ -123,6 +128,7 @@ def make_mcp_tools(
                 config_path=config_path,
                 for_each_agent=for_each_agent,
                 refresh_workers=refresh_workers,
+                taken_names=taken_names(),
             )
         except AlreadyConnected:
             return f"Already connected to {url}. Use remove_mcp_server first if you need to reconnect it."
@@ -175,6 +181,7 @@ def _build(ctx) -> list:
         oauth=ctx.state.oauth,
         config_path=ctx.config.config_path,
         refresh_workers=ctx.state.refresh_workers,
+        taken_names=lambda: claimed_names(ctx.state.registry),
     )
 
 

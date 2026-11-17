@@ -4,7 +4,15 @@ import pytest
 
 from kokua.config.schema import AssistantConfig
 from kokua.registry.context import LiveState, ToolsetContext
-from kokua.registry.registry import Toolset, ToolsetError, build_tools, register, select
+from kokua.registry.registry import (
+    Toolset,
+    ToolsetError,
+    build_tools,
+    canonical_names,
+    register,
+    select,
+    with_parts,
+)
 
 
 def _toolset(name: str, *, tools=(), **kwargs) -> Toolset:
@@ -235,3 +243,117 @@ def test_a_toolset_declares_no_settings_by_default():
     from kokua.registry.registry import Toolset
 
     assert Toolset(name="plain", description="P.", build=lambda ctx: []).settings == ()
+
+
+def _shelf(seen: list | None = None, **kwargs) -> Toolset:
+    """A toolset granted whole as ``shelf`` or narrower as its parts ``a`` and ``b``. ``seen`` records
+    each build: ``"whole"`` for the unbound build, otherwise the parts the bound build was handed."""
+    seen = seen if seen is not None else []
+    defaults = dict(
+        parts=lambda config: {"a": "a", "b": "b"},
+        build_parts=lambda ctx, parts: seen.append(parts) or [],
+    )
+    return Toolset(
+        name="shelf",
+        description="shelf description",
+        build=lambda ctx: seen.append("whole") or [],
+        **{**defaults, **kwargs},
+    )
+
+
+def _parted(*toolsets: Toolset) -> dict:
+    return with_parts(register([("core subsystem", list(toolsets))]), AssistantConfig())
+
+
+def _ctx() -> ToolsetContext:
+    return ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None, agent_name="assistant")
+
+
+def test_parts_select_one_bound_toolset():
+    """Two parts of one toolset are one toolset, so one build runs and the approval vocabulary recorded
+    under its name is the same one a whole grant would record."""
+    seen: list = []
+    registry = _parted(_toolset("other"), _shelf(seen))
+    assert registry.parts == {"a": ("shelf", "a"), "b": ("shelf", "b")}
+    selected = select(["a", "other", "b"], registry, agent="assistant", entry_point="assistant")
+    assert [t.name for t in selected] == ["shelf", "other"]
+    assert selected[0].description == "shelf description"
+    selected[0].build(_ctx())
+    assert seen == [frozenset({"a", "b"})]
+
+
+def test_whole_name_wins_over_parts():
+    seen: list = []
+    registry = _parted(_shelf(seen))
+    selected = select(["a", "shelf"], registry, agent="assistant", entry_point="assistant")
+    assert [t.name for t in selected] == ["shelf"]
+    selected[0].build(_ctx())
+    assert seen == ["whole"]
+
+
+def test_part_name_collision_refused():
+    with pytest.raises(ToolsetError) as excinfo:
+        _parted(_toolset("web"), _shelf(parts=lambda config: {"web": "web"}))
+    message = str(excinfo.value)
+    assert "web" in message
+    assert "shelf" in message
+
+
+def test_part_names_reserved_or_repeated_are_refused():
+    for reserved in ("core", "all"):
+        with pytest.raises(ToolsetError, match=repr(reserved)):
+            _parted(_shelf(parts=lambda config, name=reserved: {name: name}))
+    second = Toolset(
+        name="rack",
+        description="rack description",
+        build=lambda ctx: [],
+        parts=lambda config: {"a": "a"},
+        build_parts=lambda ctx, parts: [],
+    )
+    with pytest.raises(ToolsetError, match="'a'.*shelf.*rack|'a'.*rack.*shelf"):
+        _parted(_shelf(), second)
+
+
+def test_unknown_name_error_lists_parts():
+    registry = _parted(_toolset("other"), _shelf())
+    with pytest.raises(ToolsetError) as excinfo:
+        select(["c"], registry, agent="assistant", entry_point="assistant")
+    assert "a, b, other, shelf" in str(excinfo.value)
+
+
+def test_canonical_names():
+    registry = _parted(_shelf())
+    assert canonical_names(["a", "x", "b"], registry) == ["shelf", "x"]
+    assert canonical_names(["shelf", "a"], registry) == ["shelf"]
+
+
+def test_parts_without_build_parts_refused():
+    with pytest.raises(ToolsetError, match="shelf"):
+        _parted(_shelf(build_parts=None))
+    with pytest.raises(ToolsetError, match="shelf"):
+        _parted(_shelf(parts=None))
+
+
+def test_a_part_of_an_entry_point_only_toolset_is_refused_on_a_worker():
+    registry = _parted(_shelf(entry_point_only=True))
+    with pytest.raises(ToolsetError, match="'a'"):
+        select(["a"], registry, agent="researcher", entry_point="assistant")
+
+
+def test_a_write_twin_of_a_part_says_the_part_is_read_only():
+    """A name one ``_write`` away from a part is almost always the writable grant of a read-only part, so
+    the refusal says that instead of listing every name the agent could have meant."""
+    registry = _parted(_shelf())
+    with pytest.raises(ToolsetError) as excinfo:
+        select(["a_write"], registry, agent="assistant", entry_point="assistant")
+    message = str(excinfo.value)
+    assert "'a_write' is not a part of toolset 'shelf': 'a' is, read-only" in message
+    assert "writable where 'a' is configured" in message
+
+
+def test_a_stray_brace_in_a_plugins_remedy_cannot_break_the_refusal():
+    """The remedy is a plugin author's text, read on an error path: only ``{part}`` is substituted, so a
+    brace meant literally reaches the user rather than raising in place of the refusal."""
+    registry = _parted(_shelf(writable_part_remedy="set {writable: true} on shelf '{part}'"))
+    with pytest.raises(ToolsetError, match=r"set \{writable: true\} on shelf 'a'"):
+        select(["a_write"], registry, agent="assistant", entry_point="assistant")

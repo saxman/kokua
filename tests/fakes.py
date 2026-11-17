@@ -120,3 +120,90 @@ class _RequestsToolOnce(MockAsyncModelClient):
             return ""
         self.messages.append({"role": "assistant", "content": "ok"})
         return "ok"
+
+
+def shelf_toolset(builds: list | None = None, **kwargs):
+    """A toolset granted whole as ``shelf`` or narrower as its parts ``a`` and ``b``, standing in for any
+    capability whose parts the config derives. Its two tools, ``read_shelf`` and ``edit_shelf``, answer
+    with the parts their build was handed, and ``builds`` records each build's parts (the whole build
+    records both), so a test can tell which grant reached the agent."""
+    from aimu.tools import tool
+
+    from kokua.registry.registry import Toolset
+
+    builds = builds if builds is not None else []
+
+    def build_parts(ctx, parts):
+        builds.append(frozenset(parts))
+        scope = ", ".join(sorted(parts))
+
+        @tool
+        def read_shelf() -> str:
+            """Read the shelves this grant covers."""
+            return scope
+
+        @tool
+        def edit_shelf() -> str:
+            """Edit the shelves this grant covers."""
+            return scope
+
+        return [read_shelf, edit_shelf]
+
+    defaults = dict(parts=lambda config: {"a": "a", "b": "b"}, build_parts=build_parts)
+    return Toolset(
+        name="shelf",
+        description="Shelves.",
+        build=lambda ctx: build_parts(ctx, {"a", "b"}),
+        **{**defaults, **kwargs},
+    )
+
+
+def install_shelf(monkeypatch, builds: list | None = None, **kwargs):
+    """Register :func:`shelf_toolset` beside every installed toolset, as a third-party plugin would arrive."""
+    from kokua.core import agents
+
+    discovered = agents.discover_toolsets()
+    shelf = shelf_toolset(builds, **kwargs)
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {**discovered, "shelf": shelf})
+    return shelf
+
+
+def binder_toolset():
+    """A toolset whose read-only part truly lacks its write tool, the shape ``documents`` has: ``notes``
+    grants ``read_binder`` alone, and ``notes_write`` (or the whole ``binder``) adds ``write_binder``. A
+    gate on ``binder.write_binder`` has to resolve however narrowly the toolset was first built."""
+    from aimu.tools import tool
+
+    from kokua.registry.registry import Toolset
+
+    def build_parts(ctx, parts):
+        @tool
+        def read_binder() -> str:
+            """Read the binder's notes."""
+            return "notes"
+
+        @tool
+        def write_binder() -> str:
+            """Write to the binder's notes."""
+            return "written"
+
+        writable = any(can_write for _, can_write in parts)
+        return [read_binder, write_binder] if writable else [read_binder]
+
+    return Toolset(
+        name="binder",
+        description="Binders.",
+        build=lambda ctx: build_parts(ctx, {("notes", True)}),
+        parts=lambda config: {"notes": ("notes", False), "notes_write": ("notes", True)},
+        build_parts=build_parts,
+    )
+
+
+def install_binder(monkeypatch):
+    """Register :func:`binder_toolset` beside every installed toolset, as a third-party plugin would arrive."""
+    from kokua.core import agents
+
+    discovered = agents.discover_toolsets()
+    binder = binder_toolset()
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {**discovered, "binder": binder})
+    return binder

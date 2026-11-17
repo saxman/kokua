@@ -12,19 +12,22 @@ that can disagree with the declaration.
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, Optional
 
 from aimu.aio import Scheduler
 from aimu.memory import DocumentStore, SemanticMemoryStore
+from aimu.models import EmbeddingClient
 from aimu.skills import SkillManager
 
-from kokua.config.schema import ALL_TOOLSETS, AssistantConfig
+from kokua.config.schema import ALL_TOOLSETS, BUILTIN_COLLECTION, AssistantConfig
 from kokua.mcp.auth import OAuthSettings
 from kokua.config.table import SettingsTable
-from kokua.registry.registry import ToolsetRegistry
+from kokua.registry.registry import ToolsetError, ToolsetRegistry
 
 # The toolset that grants author_skill / add_skill_script. Declaring it opts an agent out of catalogue
 # scoping, since an author has to see the skill it just wrote (see `skill_manager`).
@@ -39,6 +42,34 @@ if TYPE_CHECKING:
     # holds the real unconditional import that keeps this annotation honest -- it is only ever imported
     # lazily, after preflight has already run.
     from aimu.aio.tools.builtin import SubagentObserver
+
+
+#: The file suffixes that are documents, in every collection. A vault keeps more than notes (Obsidian puts
+#: canvases, attachments, and its own settings beside them), and a file that is not a document, listed and
+#: reported unreadable on every search, crowds out the ones that are. Kokua's own folder takes the same set,
+#: so a document saved there and one in a vault are the same kind of thing.
+DOCUMENT_EXTENSIONS = (".md", ".markdown", ".txt", ".pdf")
+
+
+def embedding_client_for(model: str) -> Optional[EmbeddingClient]:
+    """The client ``[documents].embedding_model`` names, or None for an empty one: keyword search alone.
+
+    The one place that setting becomes a model, which is why the test suite stubs it (see
+    ``tests/conftest.py``): no test may download one. Building the client loads no model weights, but it does import AIMU's
+    provider for the model, and for ``hf:`` that is sentence_transformers and torch: seconds on every
+    startup. That is why the client is built at the first documents build, never at startup. A Hugging Face
+    model downloads on its first embed, which happens in an index's background thread after the first
+    search, and a model that fails to load then leaves keyword search working and says so in the results.
+    """
+    if not model:
+        return None
+    try:
+        return EmbeddingClient(model)
+    except (ValueError, ImportError) as error:
+        raise ToolsetError(
+            f"[documents].embedding_model {model!r} is not an embedding model AIMU can build ({error}). "
+            'Name one such as "hf:BAAI/bge-base-en-v1.5", or set it to "" to search by keyword alone.'
+        ) from error
 
 
 @dataclass
@@ -127,14 +158,56 @@ class LiveState:
     # refresh runs on the event loop, and without it a build that read the skills before a refresh could
     # store its map after one, handing every worker the pre-refresh skills until the next write.
     _skill_tools_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _document_stores: Optional[dict[str, DocumentStore]] = field(default=None, init=False, repr=False)
+    # Guards building `_document_stores`, for `_skill_tools_lock`'s reason: a
+    # deferred documents toolset builds in a worker thread, and two first builds racing would open two
+    # stores over one folder, each with an index writer of its own.
+    _documents_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @cached_property
     def memory_store(self) -> SemanticMemoryStore:
         return SemanticMemoryStore(persist_path=str(self.config.memory_path))
 
-    @cached_property
+    def document_stores(self) -> Mapping[str, DocumentStore]:
+        """Every document collection's store by name: Kokua's own first, then each declared one in order.
+
+        Built together on the first call, which is the first build of a documents toolset, and shared by
+        every agent after it, whatever part of them each was granted: one store per folder, so one index
+        per folder. Building a store opens no index and embeds nothing; both wait for the first search.
+
+        The order is the order ``list_documents`` lists collections in, and breaks ties in search.
+        """
+        with self._documents_lock:
+            if self._document_stores is None:
+                from kokua.toolsets.documents import DEFAULT_EMBEDDING_MODEL, TOOLSET_NAME
+
+                # The fallback covers a config built without ``resolve_config``, the only thing that seeds a
+                # section for every declared toolset, as `tasks` does for its own.
+                settings = self.config.toolset_settings.get(TOOLSET_NAME, {})
+                # One client shared by every collection's index, so one model is loaded however many there are.
+                embedding_client = embedding_client_for(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+                folders = [(BUILTIN_COLLECTION, self.config.documents_path)]
+                folders += [(collection.name, collection.path) for collection in self.config.document_collections]
+                self._document_stores = {
+                    name: DocumentStore(
+                        persist_path=str(path),
+                        index_path=str(self.config.index_dir / name),
+                        embedding_client=embedding_client,
+                        extensions=DOCUMENT_EXTENSIONS,
+                    )
+                    for name, path in folders
+                }
+            return self._document_stores
+
+    @property
+    def built_document_stores(self) -> Optional[Mapping[str, DocumentStore]]:
+        """The document stores if a documents toolset has built them, else None, without building them."""
+        return self._document_stores
+
+    @property
     def document_store(self) -> DocumentStore:
-        return DocumentStore(persist_path=str(self.config.documents_path))
+        """Kokua's own collection, the folder the assistant saves documents in."""
+        return self.document_stores()[BUILTIN_COLLECTION]
 
     @cached_property
     def all_skills(self) -> SkillManager:
@@ -272,14 +345,44 @@ class LiveState:
     def close(self) -> None:
         """Release what this state owns that outlives garbage collection. Idempotent.
 
-        Only the skills MCP clients need it: each owns a blocking portal on a background thread, and a
+        Two things need it. Each skills MCP client owns a blocking portal on a background thread, and a
         portal released during interpreter finalization cannot be stopped, so the process never exits.
-        Everything else here is either a plain object or holds no OS resource of its own.
+        Each document store's index runs a background worker, which is stopped and its database released
+        (a store closed this way stays usable, and its next search reopens the index). Everything else
+        here is either a plain object or holds no OS resource of its own.
+
+        Blocks until both are done. On an event loop, call :meth:`aclose` instead.
         """
+        self._close_skills_clients()
+        self._close_document_stores()
+
+    async def aclose(self) -> None:
+        """:meth:`close`, with the document stores closed off the event loop.
+
+        A store's close joins its index worker for as long as the file or batch it is on takes, up to
+        AIMU's ten-second limit, and a first build of a large vault keeps one busy. The web front end
+        holds a ``LiveState`` per connection on the server's one loop, so closing stores there on a
+        reload would stall every other connection for that long. The skills clients close here, on the
+        loop, as they always have: stopping one is quick.
+        """
+        self._close_skills_clients()
+        await asyncio.to_thread(self._close_document_stores)
+
+    def _close_skills_clients(self) -> None:
         with self._skill_tools_lock:
             clients, self._skills_clients = self._skills_clients, []
         for client in clients:
             client.close()
+
+    def _close_document_stores(self) -> None:
+        """Close every document store, each on a thread of its own, so the waits overlap rather than add."""
+        with self._documents_lock:
+            stores = list((self._document_stores or {}).values())
+        if not stores:
+            return
+        with ThreadPoolExecutor(max_workers=len(stores), thread_name_prefix="kokua-store-close") as pool:
+            # Consumed so a failing close raises here, after the pool has waited for every other one.
+            list(pool.map(lambda store: store.close(), stores))
 
     @cached_property
     def tasks(self) -> Any:

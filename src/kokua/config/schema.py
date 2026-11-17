@@ -38,6 +38,9 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     # decides which environment variables a run_command child can see; the assistant naming its own
     # API key here would hand a shell child the credential the allowlist exists to keep out of reach.
     "compute.command_env_passthrough",
+    # names the model that embeds every passage of every document collection, so pointing it at a remote
+    # endpoint would send the user's whole vault there on the next restart's indexing.
+    "documents.embedding_model",
 )
 
 
@@ -166,6 +169,29 @@ class ResolvedReviewer:
     system_message: str
 
 
+#: The collection every install has: the documents the assistant itself saves under ``documents_path``.
+#: Reserved so a declared ``[[documents.collection]]`` cannot take the name of the built-in one.
+BUILTIN_COLLECTION = "kokua"
+
+
+@dataclass
+class DocumentCollectionConfig:
+    """A folder of the user's own documents (an Obsidian vault, a paper folder) the assistant may search.
+
+    ``name`` enters the toolset namespace as parts of the ``documents`` toolset (``<name>`` reads it,
+    ``<name>_write`` reads and writes it), so an agent declares a collection as it declares any other
+    capability. ``writable`` is false unless declared, because a folder the user keeps outside Kokua is
+    theirs to protect: reading it is the default and writing it is a separate, explicit grant.
+    ``description`` is shown beside the name in ``list_documents``, where the model decides which
+    collection a question belongs to.
+    """
+
+    name: str
+    path: Path
+    writable: bool = False
+    description: Optional[str] = None
+
+
 @dataclass
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
@@ -223,6 +249,9 @@ class AssistantConfig:
     configured_sections: tuple[str, ...] = ()
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    # Folders of the user's own documents, declared as [[documents.collection]]; paths are only
+    # expanded here, and checked against the filesystem at startup by core.agents.
+    document_collections: list[DocumentCollectionConfig] = field(default_factory=list)
     # Where an MCP server's OAuth approval is sent back to. The defaults are FastMCP's own (loopback,
     # a fresh port per process) and assume the browser runs on the same machine as Kokua; set both
     # when it does not, and see kokua.mcp.auth.OAuthSettings for why the port is worth pinning either
@@ -289,6 +318,8 @@ class AssistantConfig:
             "compute.run_command",
             "fs_write",
             "config.update_config",
+            "documents.save_document",
+            "documents.edit_document",
         ]
     )
     # Tools no reviewer may ever approve, whatever a review list names, in the same
@@ -500,6 +531,12 @@ class AssistantConfig:
         return self.data_dir / "documents"
 
     @property
+    def index_dir(self) -> Path:
+        """Each document collection's search index, at ``<name>/``. A cache derived from the folder it
+        indexes, so it lives here and never inside a collection, where a vault would sync and show it."""
+        return self.data_dir / "index"
+
+    @property
     def pages_path(self) -> Path:
         """Pages the `web` toolset's `fetch_page` stored, as plain files. Never pruned automatically."""
         return self.data_dir / "pages"
@@ -507,8 +544,8 @@ class AssistantConfig:
     @property
     def downloads_path(self) -> Path:
         """Generated artifacts (PDFs, exported conversation Markdown) the web UI serves at /download.
-        Kept out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at
-        startup, which a binary PDF would not survive."""
+        Kept out of ``documents_path`` because every PDF and Markdown file there is indexed and searched
+        as a document in the built-in collection, and these are Kokua's output, not the user's documents."""
         return self.data_dir / "downloads"
 
     @property
@@ -516,15 +553,15 @@ class AssistantConfig:
         """Uploaded and generated images the web UI serves at /images. Sessions store only a
         ``/images/<name>`` reference into this folder (never inline base64), so ``sessions.json`` stays
         small; the bytes are re-read here and base64-inlined only when a turn is sent to the model. Kept
-        out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
+        out of ``documents_path``, which holds documents only."""
         return self.data_dir / "images"
 
     @property
     def payloads_path(self) -> Path:
         """Oversized sub-agent tool responses the web UI serves at /payloads. Sessions store a short
         ``/payloads/<name>`` reference plus a preview, never the whole response, so ``sessions.json``
-        stays small; see ``payloads.py``. Kept out of ``documents_path`` because the DocumentStore
-        scans that folder as UTF-8 text at startup and these are not documents the user wrote."""
+        stays small; see ``payloads.py``. Kept out of ``documents_path``, which holds documents only, and
+        these are not documents the user wrote."""
         return self.data_dir / "payloads"
 
     @property

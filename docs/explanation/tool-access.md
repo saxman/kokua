@@ -17,7 +17,8 @@ default for the approval half. The whole reference is
 
 ```toml
 [assistant.tools]
-confirm = ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config"]  # asks you
+confirm = ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config",
+           "documents.save_document", "documents.edit_document"]                     # asks you
 review = ["compute.run_command", "compute.execute_python", "fs_write"]              # asks a reviewer, then you
 
 [agents.researcher.tools]
@@ -65,6 +66,32 @@ declared. Kokua instead split the group by reach into two toolsets, `fs` (reads)
 (writes), so "read a file and do not write one" is something an agent's list can say. The shipped
 `introspector` holds `fs` for exactly that reason.
 
+### Parts: one toolset, granted narrower
+
+Some capabilities cannot be split by hand into toolsets ahead of time, because their shape comes from your
+config. Document collections are the case: each `[[documents.collection]]` is a folder, and "read the
+work vault, and no other" has to be sayable in a list. A toolset may therefore declare **parts**, names
+derived from the config that each grant some of it (`Toolset.parts`, with `build_parts` building the tools
+for a set of them). `documents` declares two per collection, `work` (read it) and `work_write` (read and
+write it, only when the collection is `writable`), so:
+
+```toml
+[agents.researcher.tools]
+available = ["web", "work", "time"]   # searches and reads the work vault, writes nothing
+```
+
+A part is a narrower availability, not a new capability. `select` resolves every part an agent names back
+into the one toolset, built only over those parts, so the researcher above holds `list_documents`,
+`read_document`, and `search_documents` bound to one folder, and no write tool at all. Naming the toolset
+and a part grants the whole. A part grant does not limit an agent that also holds `capabilities`, since
+`compose_subagent` draws from the whole registry and can hand a composed worker any part, or the toolset
+whole. Part names share the namespace toolset names live in, so a part, a toolset, a
+skill, and an MCP server can never be one name, and `kokua --list-toolsets` and `list_capabilities` print
+each toolset's parts beneath it. Why parts rather than a toolset per collection, which the `fs` /
+`fs_write` precedent might suggest, is argued in [Retrieval](retrieval.md#granting-collections-parts-of-one-toolset):
+tools of one name from two toolsets lose to first-wins deduplication, and the approval vocabulary would
+fork.
+
 One name inside the approval lists, `core`, is reserved for the tools no toolset provides:
 `spawn_subagent` and `activate_skill`, plus `available_tools` and `load_tools` once any agent defers a
 toolset (see [Residency](#residency-what-is-in-context-and-what-loads-on-demand)), and `get_message` once
@@ -90,6 +117,12 @@ workers are declared. A `resident` entry that `available` does not hold is a sta
 resident toolset is one the agent already holds. The order you write `resident` in changes nothing:
 tools are presented in `available` order either way (for `available = "all"`, in trust order). `kokua agents` prints each agent's resident list,
 or "every available toolset" when it declares none.
+
+A toolset granted in [parts](#parts-one-toolset-granted-narrower) builds once, however many parts grant
+it, so it is resident or deferred whole. `resident` may name its parts, but it must then name every part
+`available` grants for that toolset; naming `work` while `available` also grants `personal`, or
+`documents` whole, is a startup error (`_check_resident_parts` in `core/agents.py`), since honoring it
+would make more resident than the list says.
 
 Note what residency cannot do: widen anything. A deferred toolset is one the agent's own `available`
 list already names, so loading it is the model choosing *when* to pay for a capability the host granted,
@@ -131,8 +164,9 @@ the result says so.
 
 A resident toolset is built when the agent is wired. A deferred one is built when it is loaded, through
 the same `build_tools` call, in a worker thread so the event loop keeps serving other conversations
-meanwhile. So whatever building a toolset does (opening the document store, for `documents`) is paid
-only by an agent that loads it.
+meanwhile. So whatever building a toolset does (opening each collection's document store, for
+`documents`) is paid only by an agent that loads it. A store's search index waits longer still, for the
+first search ([Retrieval](retrieval.md#the-first-build-and-saying-when-results-are-partial)).
 
 A build that fails, fails at load. The model reads AIMU's `Could not load '<name>': <error>` as the
 tool's result, you get an alert naming the toolset and the agent, and the toolset stays loadable, so a
@@ -216,7 +250,7 @@ and `messaging` resident, the toolsets it reaches for on most turns, and loads `
 `mcp`, `scheduling`, and `benchmark` on demand. Measured as the JSON of every tool spec the model is
 sent, its tool block went from 30,560 bytes for all 37 tools to 16,244 bytes for nineteen (seventeen
 resident, plus the two loaders): 46.8% smaller, on every round of every turn that loads nothing. The
-approval gate covers the same seven tools it did. What it costs is a round: a turn that needs a deferred
+approval gate covers the same tools whether they are resident or deferred. What it costs is a round: a turn that needs a deferred
 toolset spends one model call on `load_tools` before it can use it. Each model call in the web UI still
 shows its `N tools` count, which is residency as the model experienced it.
 
@@ -399,6 +433,19 @@ A tool in neither list runs. Entries use one vocabulary, the one `available` use
 two. The shipped default names `fs_write` bare so a writer AIMU adds to that group later is gated on
 arrival, and names `compute.execute_python` explicitly because `compute` also holds `calculate`.
 
+An entry names the toolset, never a [part](#parts-one-toolset-granted-narrower).
+`documents.edit_document` gates every document edit, for an agent holding `documents` whole and for one
+holding only `work_write`, because both agents' tools were built by the one `documents` toolset and
+recorded under its name. What is recorded is what the *whole* toolset builds, not what one grant built
+(`build_tools` builds the whole beside a part grant, through `Toolset.whole`), so a gate on
+`documents.edit_document` still resolves when the only agent to build `documents` so far holds one
+read-only collection and no write tool at all. `work_write.edit_document` is refused at startup with the
+entry to write instead: a part narrows which folders a toolset's tools reach and may leave its write tools
+out, but it never adds a tool the toolset lacks, so a gate on a part could only ever hold back what the
+toolset's own entry does. The cost is that the gate cannot tell a
+write to one collection from a write to another, which is why the shipped default asks before every
+document write.
+
 The same name is what you watch. Every tool call Kokua shows (a card, a terminal line, an approval
 prompt, a reload, an export) reads `toolset.tool`, so the entry you would write to gate a call is printed
 on the call itself. The toolset is the one that gave *the calling agent* that tool, which matters when
@@ -473,7 +520,9 @@ is not a skill the entry agent already holds) is the one exception to "at startu
 [What a load checks](#what-a-load-checks-approval-before-any-tool-is-callable)).
 
 With auto-approval off, `review` entries prompt you exactly as `confirm` ones do: turning it off never
-ungates a call. Unattended turns still auto-deny every gated call, whichever list holds it.
+ungates a call. Unattended turns still auto-deny every gated call, whichever list holds it, and the
+denial tells the model why (nobody is there to approve it, so carry on and report what it would have
+done), so a scheduled run does not retry a refused call or leave it out of its report.
 
 ## Where the old keys went
 

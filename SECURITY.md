@@ -73,6 +73,12 @@ These are not vulnerabilities. They are the program working as documented.
   and [README.md](README.md#security) describes it crossing conversations. Hardening against it is
   welcome as an ordinary issue. It becomes a security report only when it *defeats* a barrier above,
   rather than persuading you to open one.
+- **Document text steered out through a tool that reaches the network.** A document collection puts
+  your notes in front of the model, and a passage (or a fetched page) can carry instructions to send them
+  somewhere: a URL passed to `get_web_content`, an email, an MCP tool, a worker holding `web`. Those
+  calls are ungated by default, so this is injection persuading an ungated tool, not defeating a
+  barrier. [Retrieval](docs/explanation/retrieval.md#privacy) says how to narrow it: grant collections
+  only where they are needed, and gate the network routes on an agent that holds a private one.
 - **Anything requiring an attacker who can already edit `config.toml` or run code as your user.** That
   file is the trust root: it decides which agents exist and what each one may call. Someone who can
   write it has already won, and no check inside Kokua can change that.

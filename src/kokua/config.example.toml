@@ -44,6 +44,8 @@ confirm = [
     "skills.add_skill_script",
     "mcp.add_mcp_server",
     "config.update_config",
+    "documents.save_document",
+    "documents.edit_document",
 ]
 # Ask a reviewer first (see [security.auto_approval]), then you. With auto-approval off, these ask you.
 review = [
@@ -69,6 +71,7 @@ locked_config_keys = [
     "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
+    "documents.embedding_model",
 ]
 
 # Lets the [reviewers.*] named here approve a `review` call in your place. A convenience, not a boundary:
@@ -252,3 +255,16 @@ level = "INFO"                 # DEBUG, INFO, WARNING, or ERROR, for <data_dir>/
 
 [compute]
 # command_env_passthrough = "SSH_AUTH_SOCK, GH_TOKEN"   # extra env vars a run_command child may see
+
+# How the documents toolset searches Kokua's own folder (data/documents) and the collections below.
+[documents]
+# embedding_model = "hf:BAAI/bge-base-en-v1.5"   # local; ~440 MB downloads on first search; "" for keyword only
+# rerank = false               # rerank results with a cross-encoder: slower, sometimes better
+
+# A folder of your own documents, such as an Obsidian vault. In an agent's `available`, "personal" reads it,
+# "personal_write" reads and writes it (writable ones only), and "documents" grants every collection.
+# [[documents.collection]]
+# name = "personal"
+# path = "~/Obsidian/Personal"
+# writable = false             # true allows save_document and edit_document here
+# description = "Personal research notes and papers."

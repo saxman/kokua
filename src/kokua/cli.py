@@ -39,7 +39,7 @@ from kokua.config.store import disambiguate_name, name_from_url
 
 # Safe at module level, unlike kokua.core.agents below: `from . import plugins` above already imports
 # kokua.toolsets, and registry.py itself imports no AIMU surface the preflight checks.
-from kokua.registry.registry import ToolsetError, ToolsetRegistry
+from kokua.registry.registry import ToolsetError, ToolsetRegistry, canonical_names
 from .logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -350,7 +350,8 @@ def _install_skills(args: argparse.Namespace) -> int:
 
 
 def _print_toolsets(config: AssistantConfig) -> None:
-    """Print every name an ``[agents.*]`` table may put in ``tools``, grouped by what provides it.
+    """Print every name an ``[agents.*]`` table may put in ``tools``, grouped by what provides it, with a
+    toolset's parts (the narrower grants its config derives) beneath it.
 
     Grouped by provider because the single namespace deliberately hides provenance from the agent: a
     config says ``web``, not ``aimu:web``, so this command is the one place a user can learn that ``web``
@@ -374,11 +375,17 @@ def _print_toolsets(config: AssistantConfig) -> None:
     for name in registry:
         by_provider.setdefault(registry.providers[name], []).append(name)
 
+    parts_of: dict[str, list[str]] = {}
+    for part, (toolset, _) in registry.parts.items():
+        parts_of.setdefault(toolset, []).append(part)
+
     print("Toolsets available to this install. Name any of these in an [agents.<name>.tools].available list.\n")
     for provider, names in by_provider.items():
         print(f"{provider}:")
         for name in sorted(names):
             print(f"  {name}: {registry[name].description}")
+            if name in parts_of:
+                print(f"    parts: {', '.join(sorted(parts_of[name]))}")
         print()
 
 
@@ -388,6 +395,9 @@ def format_agent_access(config: AssistantConfig, registry: ToolsetRegistry) -> l
     Reads declarations only. Nothing is built, so this runs with the model server down and shows what the
     config says rather than what a live agent holds. An agent declaring no ``resident`` list holds every
     available toolset from its first turn, and the line says that instead of repeating the list.
+
+    Each entry is one toolset, because that is what an agent holds; one granted through its parts carries
+    them in parentheses, since they are the scope it reaches.
     """
 
     # Deferred for the reason `_print_toolsets` defers its import.
@@ -399,10 +409,13 @@ def format_agent_access(config: AssistantConfig, registry: ToolsetRegistry) -> l
     lines: list[str] = []
     for name, agent in config.agents.items():
         confirm, review, source = config.approval_entries_for(name)
+        labels = _granted_labels(available_for(config, registry, name), registry)
         resident = (
-            entries(resident_for(config, registry, name)) if agent.resident is not None else "every available toolset"
+            entries([labels[toolset] for toolset in resident_for(config, registry, name)])
+            if agent.resident is not None
+            else "every available toolset"
         )
-        toolsets = available_for(config, registry, name)
+        toolsets = list(labels.values())
         available = entries(toolsets)
         if agent.available is ALL_TOOLSETS:
             available = f"all ({len(toolsets)}): {available}"
@@ -419,6 +432,21 @@ def format_agent_access(config: AssistantConfig, registry: ToolsetRegistry) -> l
     return lines
 
 
+def _granted_labels(declared: list[str], registry: ToolsetRegistry) -> dict[str, str]:
+    """Each toolset ``declared`` grants, in order, mapped to how ``kokua agents`` names it: bare when the
+    toolset is named whole (the whole holds every part), else with the parts that granted it."""
+    granted: dict[str, list[str]] = {}
+    for entry in declared:
+        toolset = registry.parts[entry][0] if entry in registry.parts else entry
+        granted.setdefault(toolset, [])
+        if entry in registry.parts:
+            granted[toolset].append(entry)
+    return {
+        toolset: f"{toolset} ({', '.join(parts)})" if parts and toolset not in declared else toolset
+        for toolset, parts in granted.items()
+    }
+
+
 def access_summary_lines(config: AssistantConfig, registry: ToolsetRegistry) -> list[str]:
     """One line per declared agent, in entries rather than resolved tool names.
 
@@ -431,7 +459,7 @@ def access_summary_lines(config: AssistantConfig, registry: ToolsetRegistry) -> 
     lines = []
     for name, agent in config.agents.items():
         confirm, review, source = config.approval_entries_for(name)
-        available = str(len(available_for(config, registry, name)))
+        available = str(len(canonical_names(available_for(config, registry, name), registry)))
         if agent.available is ALL_TOOLSETS:
             available = f"all ({available})"
         resident = len(resident_for(config, registry, name))

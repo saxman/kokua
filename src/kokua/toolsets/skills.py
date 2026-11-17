@@ -68,7 +68,7 @@ GUIDANCE = (
 
 
 def _claimed_by(name: str, state: "LiveState") -> Optional[str]:
-    """What already holds ``name`` as a toolset, or None when a skill may take it.
+    """What already holds ``name`` as a toolset or a toolset's part, or None when a skill may take it.
 
     Two sources, because the live registry is not everything the next start registers: a server
     ``add_mcp_server`` connected this session is written to ``config.toml`` and never reaches the registry
@@ -84,6 +84,8 @@ def _claimed_by(name: str, state: "LiveState") -> Optional[str]:
         return "reserved"
     if name in state.registry and not is_skill(name, state.registry):
         return state.registry.providers[name]
+    if name in state.registry.parts:
+        return f"a part of toolset {state.registry.parts[name][0]!r}"
     try:
         persisted = config_store.mcp_server_names(state.config.config_path)
     except (ConfigError, OSError, ValueError) as error:

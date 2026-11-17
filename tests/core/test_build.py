@@ -305,7 +305,7 @@ ENTRY_AGENT_TOOLS = {
 # asserted separately from the rest below.
 STORE_TOOLS = {
     "aimu make_memory_tools": {"store_memory", "search_memories", "list_memories"},
-    "aimu make_document_tools": {
+    "aimu make_collection_tools": {
         "save_document",
         "read_document",
         "edit_document",
@@ -316,7 +316,7 @@ STORE_TOOLS = {
 # The sources above whose toolsets the shipped entry agent defers: absent from its tools until it loads
 # them, and present in the inventory because they are still part of what it can reach.
 DEFERRED_SOURCES = {
-    "aimu make_document_tools",
+    "aimu make_collection_tools",
     "kokua toolsets/mcp.py",
     "kokua toolsets/scheduling.py",
     "kokua toolsets/benchmark.py",
@@ -665,7 +665,7 @@ def test_memory_stores_are_not_built_until_a_toolset_asks(tmp_path):
     just because a LiveState exists."""
     state = LiveState(config=_config(tmp_path))
     assert "memory_store" not in state.__dict__
-    assert "document_store" not in state.__dict__
+    assert state.built_document_stores is None
 
 
 async def test_no_store_declaration_omits_the_tools_and_the_stores(tmp_path):
@@ -685,7 +685,10 @@ async def test_document_tools_round_trip(tmp_path):
     """The document tools are wired to a working DocumentStore (pure-Python, hermetic)."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     tools = {fn.__name__: fn for fn in await _loaded_tools(assistant, "documents")}
-    assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
+    assert (
+        tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers")
+        == "Saved /notes/standup.md in the 'kokua' collection."
+    )
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 
@@ -1950,3 +1953,47 @@ async def test_a_worker_rebuild_that_raises_reaches_the_model_after_the_write(tm
         assert "The write happened, but workers were not given the change: spec build failed" in result
     finally:
         assistant._state.close()
+
+
+# --- Parts: a toolset granted by naming its parts ----------------------------------------------
+
+
+def _shelf_agent(tmp_path, monkeypatch, builds: list, **declaration):
+    from kokua.config.schema import AssistantConfig
+    from kokua.core.build import wire_agent
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch, builds)
+    config = AssistantConfig(
+        data_dir=tmp_path, agents={"assistant": AgentConfig(**declaration)}, entry_agent="assistant"
+    )
+    state = _live_state(config)
+    return state, wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+
+
+def test_an_agent_declaring_a_part_holds_the_toolset_scoped_to_it(tmp_path, monkeypatch):
+    builds: list = []
+    state, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["a"])
+    assert "shelf" in state.tools_by_toolset
+    assert {"read_shelf", "edit_shelf"} <= {fn.__name__ for fn in agent.tools}
+    # The grant's build, then the whole one that names what a gate on `shelf` may hold back.
+    assert builds == [frozenset({"a"}), frozenset({"a", "b"})]
+    assert next(fn for fn in agent.tools if fn.__name__ == "read_shelf")() == "a"
+
+
+def test_a_resident_part_name_builds_its_toolset_at_wiring(tmp_path, monkeypatch):
+    builds: list = []
+    _, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["a", "time"], resident=["a"])
+    assert "read_shelf" in {fn.__name__ for fn in agent.tools}
+    assert "get_current_date_and_time" not in {fn.__name__ for fn in agent.tools}
+    assert builds[0] == frozenset({"a"})
+
+
+async def test_deferred_parts_load_as_one_scoped_toolset(tmp_path, monkeypatch):
+    builds: list = []
+    _, agent = _shelf_agent(tmp_path, monkeypatch, builds, available=["time", "a", "b"], resident=["time"])
+    assert builds == []
+    assert (await agent.load_tool_group("shelf")).startswith("Loaded 'shelf':")
+    assert builds[0] == frozenset({"a", "b"})
+    read_shelf = next(fn for fn in agent._effective_tools(None) if fn.__name__ == "read_shelf")
+    assert read_shelf() == "a, b"

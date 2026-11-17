@@ -7,11 +7,13 @@ import asyncio
 import pytest
 
 from aimu.aio.channels.base import Channel, ChannelMessage
+from aimu.tools import Denied
 
 from kokua.config import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig, ReviewerConfig
 from kokua.core.agents import build_registry
 from kokua.core.assistant import Assistant
+from kokua.core.interaction import UNATTENDED_DENIAL
 from tests.channels import AlertCapturingChannel, FakeChannel, _config
 from tests.fakes import _RequestsToolOnce
 from tests.helpers import MockAsyncModelClient
@@ -517,7 +519,7 @@ async def test_proactive_auto_deny_stays_silent(tmp_path):
     await assistant.start()
     token = proactive_turn.set(True)
     try:
-        assert await assistant._gate_for("assistant")("execute_python", {}) is False
+        assert await assistant._gate_for("assistant")("execute_python", {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
     assert channel.alerts == []
@@ -714,24 +716,35 @@ async def test_the_shipped_example_resolves_to_todays_gate(tmp_path):
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     await assistant.start()
 
-    # `skills` and `mcp` are deferred by the shipped entry agent, so the two entries naming their tools
-    # wait for the build instead of resolving at startup.
+    # `skills`, `mcp`, and `documents` are deferred by the shipped entry agent, so the entries naming
+    # their tools wait for the build instead of resolving at startup.
     at_startup = assistant._human.policies.default
     assert at_startup.confirm == {"update_config"}
     assert at_startup.review == {"execute_python", "run_command", "write_file", "edit_file"}
-    assert at_startup.pending_confirm == {"skills.add_skill_script", "mcp.add_mcp_server"}
+    assert at_startup.pending_confirm == {
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+        "documents.save_document",
+        "documents.edit_document",
+    }
     assert at_startup.pending_review == frozenset()
     assert len(at_startup.gated) == 5
 
-    for toolset in ("skills", "mcp"):
+    for toolset in ("skills", "mcp", "documents"):
         await assistant._agent.load_tool_group(toolset)
 
-    # The union is what the old six-entry gate held, so neither the split nor residency changed which
-    # calls are held: two of them resolve on load instead of at startup.
+    # The old six-entry gate plus the two document writes, which reach folders the user keeps outside
+    # Kokua: neither the split nor residency changed which calls are held, only when an entry resolves.
     after_load = assistant._human.policies.default
     assert after_load.pending_confirm == frozenset()
     # A pending confirm entry must land in confirm, not review: review is the half a model can approve.
-    assert after_load.confirm == {"add_skill_script", "add_mcp_server", "update_config"}
+    assert after_load.confirm == {
+        "add_skill_script",
+        "add_mcp_server",
+        "update_config",
+        "save_document",
+        "edit_document",
+    }
     assert after_load.review == {"execute_python", "run_command", "write_file", "edit_file"}
     assert after_load.gated == {
         "add_skill_script",
@@ -741,6 +754,8 @@ async def test_the_shipped_example_resolves_to_todays_gate(tmp_path):
         "write_file",
         "edit_file",
         "update_config",
+        "save_document",
+        "edit_document",
     }
     assistant._state.close()
 
@@ -950,7 +965,7 @@ async def test_an_unattended_turn_denies_a_workers_gated_call(tmp_path):
     await assistant.start()
     token = proactive_turn.set(True)
     try:
-        assert await assistant._human.approve("coder", "run_command", {}) is False
+        assert await assistant._human.approve("coder", "run_command", {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
     assert channel.alerts == []
@@ -1255,7 +1270,7 @@ async def _gated_unattended(assistant, agent: str, tool: str) -> bool:
 
     token = proactive_turn.set(True)
     try:
-        return await assistant._human.approve(agent, tool, {}) is False
+        return await assistant._human.approve(agent, tool, {}) == Denied(UNATTENDED_DENIAL)
     finally:
         proactive_turn.reset(token)
 
@@ -1477,3 +1492,348 @@ async def test_startup_notices_each_shadowed_resident_tool(tmp_path, monkeypatch
         "explorer: read_file from 'files' is shadowed by 'fs' (the earlier resident toolset keeps the name)."
     ]
     assistant._state.close()
+
+
+# Parts: an agent granted a toolset by naming its parts is gated in that toolset's own vocabulary.
+
+
+def _parted_setup(tmp_path, monkeypatch, *, available, resident=None, built=True, **config_overrides):
+    """Approval policies over a registry holding the parted ``shelf`` toolset, granted as ``available``.
+    ``built`` records shelf's tools as a startup build would; otherwise it waits on a load."""
+    from types import SimpleNamespace
+
+    from kokua.config.schema import AgentConfig
+    from kokua.registry.context import LiveState
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    agents = {"assistant": AgentConfig(available=available, resident=resident, **config_overrides.pop("pair", {}))}
+    config_overrides = {"default_confirm": [], "default_review": [], **config_overrides}
+    config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent="assistant", **config_overrides)
+    state = LiveState(config=config, registry=build_registry(config))
+    state.tools_by_toolset = {"memory": {"remember"}}
+    if built:
+        state.tools_by_toolset["shelf"] = {"read_shelf", "edit_shelf"}
+    return resolve_approval_policies(config, state, SimpleNamespace(tools=[]))
+
+
+def test_a_declared_pair_gates_a_toolset_its_agent_holds_only_through_parts(tmp_path, monkeypatch):
+    policies = _parted_setup(
+        tmp_path, monkeypatch, available=["b"], pair={"confirm": ["shelf.edit_shelf"], "review": []}
+    )
+    assert policies.by_agent["assistant"].confirm == frozenset({"edit_shelf"})
+
+
+@pytest.mark.parametrize("entry", ["a.edit_shelf", "a"])
+def test_a_gate_entry_naming_a_part_is_refused_naming_the_toolset(tmp_path, monkeypatch, entry):
+    """A part changes which things a toolset's tools reach, never which tools it has, so a gate written
+    against a part would hold back exactly what the toolset's own entry does. One vocabulary, one name."""
+    expected = entry.replace("a", "shelf", 1)
+    with pytest.raises(ConfigError, match=rf"'{entry}' names 'a', a part of the 'shelf' toolset.*write '{expected}'"):
+        _parted_setup(tmp_path, monkeypatch, available=["a"], default_confirm=[entry])
+
+
+def test_an_entry_for_parts_still_deferred_waits_on_their_toolset(tmp_path, monkeypatch):
+    policies = _parted_setup(
+        tmp_path,
+        monkeypatch,
+        available=["memory", "a", "b"],
+        resident=["memory"],
+        built=False,
+        default_confirm=["shelf.edit_shelf"],
+    )
+    assert policies.default.pending_confirm == frozenset({"shelf.edit_shelf"})
+    updated = policies.with_built("shelf", frozenset({"read_shelf", "edit_shelf"}))
+    assert updated.default.confirm == frozenset({"edit_shelf"})
+
+
+@pytest.mark.parametrize("tier", ["default", "own pair"])
+async def test_a_gate_on_a_deferred_part_grant_prompts_end_to_end(tmp_path, monkeypatch, tier):
+    """The whole chain a part grant's gate rides on: the bound toolset builds under its toolset's name, so
+    the build hook resolves the waiting entry, and the call then prompts. A bound copy that lost its name
+    would leave the entry pending forever and the tool ungated, with every policy-level test still green."""
+    from kokua.channels.web import streaming_conversation
+    from kokua.config.schema import AgentConfig
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    entry = ["shelf.edit_shelf"]
+    pair = {"confirm": entry, "review": []} if tier == "own pair" else {}
+    agents = {"assistant": AgentConfig(available=["time", "b"], resident=["time"], **pair)}
+    default_confirm = entry if tier == "default" else []
+    channel = FakeChannel()
+    config = _config(tmp_path, agents=agents, default_confirm=default_confirm, default_review=[])
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+    policy = assistant._human.policies.for_agent("assistant")
+    assert policy.pending_confirm == frozenset(entry)
+    assert "edit_shelf" not in policy.confirm
+
+    assert (await assistant._agent.load_tool_group("shelf")).startswith("Loaded 'shelf':")
+    assert "edit_shelf" in assistant._human.policies.for_agent("assistant").confirm
+
+    token = streaming_conversation.set(assistant._active_id)
+    task = asyncio.create_task(assistant._human.approve("assistant", "edit_shelf", {}))
+    try:
+        async with asyncio.timeout(2):
+            while not assistant._human.approval.pending:
+                await asyncio.sleep(0.001)
+        assert any("shelf.edit_shelf" in str(sent) for sent in channel.sent)
+        assistant._human.approval.resolve(False)
+        assert await task is False
+    finally:
+        task.cancel()
+        streaming_conversation.reset(token)
+        assistant._state.close()
+
+
+# A read-only part can build fewer tools than its toolset has. A gate names the toolset, so its vocabulary
+# is the whole toolset's, whichever grant happened to build it first.
+
+
+async def test_a_resident_read_only_part_on_a_worker_leaves_the_write_gate_resolvable_at_startup(tmp_path, monkeypatch):
+    from tests.fakes import install_binder
+
+    install_binder(monkeypatch)
+    agents = {
+        "assistant": AgentConfig(available=["time", "binder"], resident=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(description="Reads notes.", available=["notes"]),
+    }
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert assistant._human.policies.default.confirm == frozenset({"write_binder"})
+    finally:
+        assistant._state.close()
+
+
+async def test_a_deferred_read_only_part_loads_with_the_write_gate_pending(tmp_path, monkeypatch):
+    from tests.fakes import install_binder
+
+    install_binder(monkeypatch)
+    agents = {"assistant": AgentConfig(available=["time", "notes"], resident=["time"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert assistant._human.policies.default.pending_confirm == frozenset({"binder.write_binder"})
+        assert (await assistant._agent.load_tool_group("binder")).startswith("Loaded 'binder':")
+        assert "write_binder" not in {fn.__name__ for fn in assistant._agent._effective_tools(None)}
+        assert assistant._human.policies.default.confirm == frozenset({"write_binder"})
+    finally:
+        assistant._state.close()
+
+
+async def test_a_worker_composed_with_a_read_only_part_leaves_the_write_gate_resolvable(tmp_path, monkeypatch):
+    import kokua.core.agents  # noqa: F401  (bind the real spawn factory before the patch below)
+    from kokua.registry.context import ToolsetContext
+    from kokua.toolsets.capabilities import make_capability_tools
+    from tests.fakes import install_binder
+
+    class _Spawn:
+        def __call__(self, model, **kwargs):
+            async def spawn_subagent(agent_type: str, task: str, ctx=None) -> str:
+                return "ran"
+
+            return spawn_subagent
+
+    monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", _Spawn())
+    install_binder(monkeypatch)
+    agents = {"assistant": AgentConfig(available=["time", "binder", "capabilities"], resident=["time", "capabilities"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["binder.write_binder"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        compose = next(
+            fn
+            for fn in make_capability_tools(
+                ToolsetContext(state=assistant._state, agent=object(), agent_name="assistant")
+            )
+            if fn.__name__ == "compose_subagent"
+        )
+        result = await compose("reader", "Read the notes.", ["notes"], "Read notes.")
+        assert result == "ran"
+        assert "write_binder" in assistant._human.policies.for_agent("composed:reader").confirm
+    finally:
+        assistant._state.close()
+
+
+async def test_a_worker_holding_one_read_only_collection_starts_beside_the_shipped_document_gates(tmp_path):
+    """The real documents toolset: a vault worker granted read-only access builds `documents` without its
+    write tools at startup, and the shipped gates on those tools must still resolve."""
+    agents = {
+        "assistant": AgentConfig(available=["time", "documents"], resident=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(description="Reads the vault.", available=["notes"]),
+    }
+    config, _ = _vault_config(
+        tmp_path, agents, default_confirm=["documents.save_document", "documents.edit_document"], default_review=[]
+    )
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+        assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+    finally:
+        assistant._state.close()
+
+
+def _vault_config(tmp_path, agents, **overrides):
+    """A config with one writable vault, `notes`, holding one note, for gating the real documents toolset."""
+    from kokua.config.schema import DocumentCollectionConfig
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "idea.md").write_text("# Idea\n\nA first draft.\n")
+    collections = [DocumentCollectionConfig("notes", vault, writable=True)]
+    return _config(tmp_path / "home", agents=agents, document_collections=collections, **overrides), vault
+
+
+async def test_a_gate_on_document_edits_prompts_for_an_agent_granted_only_a_collection(tmp_path):
+    """The shipped entry gates `documents.edit_document`, and an agent holding only `notes_write` reaches
+    that tool through a part. The entry names the toolset, so it has to hold however the agent was
+    granted it, deferred or not."""
+    from kokua.channels.web import streaming_conversation
+
+    agents = {"assistant": AgentConfig(available=["time", "notes_write"], resident=["time"])}
+    config, vault = _vault_config(
+        tmp_path, agents, default_confirm=["documents.save_document", "documents.edit_document"], default_review=[]
+    )
+    channel = FakeChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+    assert "documents.edit_document" in assistant._human.policies.default.pending_confirm
+
+    assert (await assistant._agent.load_tool_group("documents")).startswith("Loaded 'documents':")
+    assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        arguments = {"path": "/idea.md", "old_str": "first", "new_str": "second", "collection": "notes"}
+        task = asyncio.create_task(assistant._human.approve("assistant", "edit_document", arguments))
+        async with asyncio.timeout(2):
+            while not assistant._human.approval.pending:
+                await asyncio.sleep(0.001)
+        assert any("documents.edit_document" in str(sent) for sent in channel.sent)
+        assistant._human.approval.resolve(False)
+        assert await task is False
+    finally:
+        streaming_conversation.reset(token)
+        assistant._state.close()
+    assert "first draft" in (vault / "idea.md").read_text()
+
+
+async def test_an_unattended_turn_document_write_is_refused_and_told_why(tmp_path):
+    """A scheduled task has nobody to approve a vault edit, so the gate refuses it, and the refusal says
+    why: a bare "not approved" invites the model to try the same call again, and leaves it nothing to put
+    in the report the user reads afterwards."""
+    agents = {"assistant": AgentConfig(available=["notes_write"])}
+    config, vault = _vault_config(tmp_path, agents, default_confirm=["documents.edit_document"], default_review=[])
+    arguments = {"path": "/idea.md", "old_str": "first", "new_str": "second", "collection": "notes"}
+    client = _RequestsToolOnce("edit_document", arguments)
+    assistant = await Assistant.create(config, FakeChannel(), client=client)
+    await assistant.start()
+    try:
+        await asyncio.wait_for(assistant._proactive("tidy the vault"), timeout=2.0)
+    finally:
+        assistant._state.close()
+
+    (refusal,) = [m["content"] for m in client.messages if m.get("role") == "tool"]
+    assert refusal.startswith("Tool 'edit_document' was not approved: ")
+    assert "unattended" in refusal
+    assert "first draft" in (vault / "idea.md").read_text()
+
+
+# --- An install whose own policy leaves vault writes ungated is told so -----------------------------
+
+
+def _ungated_notices(channel) -> list[str]:
+    return [text for text, *_ in channel.alerts if "writable collection" in text]
+
+
+async def test_a_writable_vault_reachable_with_no_document_gate_raises_a_notice_naming_the_lines(tmp_path):
+    """An `[assistant.tools]` table written before document gates existed lacks both entries, so declaring
+    a collection writable would let every edit through unasked. The user's own policy wins, so this is a
+    notice rather than an error, and it says exactly what to add."""
+    agents = {"assistant": AgentConfig(available=["time", "notes_write"])}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    (notice,) = _ungated_notices(channel)
+    assert "'assistant'" in notice and "'notes'" in notice
+    assert "[assistant.tools].confirm" in notice
+    assert '"documents.save_document"' in notice and '"documents.edit_document"' in notice
+
+
+async def test_an_agents_own_pair_without_document_gates_is_named_in_the_notice(tmp_path):
+    agents = {"assistant": AgentConfig(available=["documents"], confirm=[], review=[])}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=["documents"], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    (notice,) = _ungated_notices(channel)
+    assert "[agents.assistant.tools].confirm" in notice
+
+
+@pytest.mark.parametrize(
+    "available, confirm, review",
+    [
+        (["time", "notes_write"], ["documents.edit_document"], []),  # one writer gated: the user chose that
+        (["time", "notes_write"], [], ["documents"]),  # a review entry still stops the call
+        (["time", "notes"], [], []),  # read-only grant: nothing to write with
+        (["time"], [], []),  # no grant at all
+    ],
+)
+async def test_no_notice_when_the_vault_is_gated_or_unreachable(tmp_path, available, confirm, review):
+    agents = {"assistant": AgentConfig(available=available)}
+    config, _ = _vault_config(tmp_path, agents, default_confirm=confirm, default_review=review)
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    try:
+        await assistant.start()
+    finally:
+        assistant._state.close()
+    assert _ungated_notices(channel) == []
+
+
+# --- The code default gates document writes --------------------------------------------------------
+
+
+async def test_a_config_with_no_assistant_tools_table_gates_document_writes(tmp_path):
+    """A table-less config gets the code default, which asks before every document write as the shipped
+    example does. The shipped entry agent defers `documents`, so the entries wait for its build and
+    resolve there."""
+    config = _config(tmp_path)  # no default_confirm override: AssistantConfig's own default
+    assert {"documents.save_document", "documents.edit_document"} <= set(config.default_confirm)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    default = assistant._human.policies.default
+    assert {"documents.save_document", "documents.edit_document"} <= default.pending_confirm
+
+    await assistant._agent.load_tool_group("documents")
+    assert {"save_document", "edit_document"} <= assistant._human.policies.default.confirm
+
+
+async def test_the_code_default_treats_an_undeclared_documents_toolset_like_every_other_default(tmp_path):
+    """No default entry is excused for naming a toolset nobody declares: a table-less config whose agents
+    leave out `documents` fails startup naming it, exactly as one leaving out `compute` already did. The
+    fix the error gives is the one every default entry has, declare the toolset or write the table."""
+    agents = {"assistant": AgentConfig(available=["skills", "mcp", "config", "compute", "fs_write", "time"])}
+    assistant = await Assistant.create(_config(tmp_path, agents=agents), FakeChannel(), client=MockAsyncModelClient([]))
+    with pytest.raises(ConfigError, match=r"'documents\.save_document' names the 'documents' toolset, which no agent"):
+        await assistant.start()
+
+
+async def test_a_declared_pair_without_document_entries_starts_with_no_agent_declaring_documents(tmp_path):
+    """Writing the table is how a config whose agents hold no documents opts out of those gates."""
+    agents = {"assistant": AgentConfig(available=["config", "time"])}
+    config = _config(tmp_path, agents=agents, default_confirm=["config.update_config"], default_review=[])
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+    assert assistant._human.policies.default.confirm == {"update_config"}

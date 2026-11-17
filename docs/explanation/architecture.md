@@ -82,7 +82,7 @@ src/kokua/
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
   frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
   registry/      the machinery a toolset is built against, and no toolsets
-    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
+    registry.py    the Toolset and Setting dataclasses, `register`, `with_parts`, `select`, `build_tools`
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
   toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
                  named for the toolset it declares, each exporting a module-level TOOLSET, and each
@@ -535,11 +535,20 @@ and step 6 its *approval* axis:
    agent's `spawn_subagent`. That is why a skill reaches an `"all"` worker on its next spawn while a server
    `add_mcp_server` connected waits for a restart. A `Toolset` is a frozen dataclass:
    `name`, `description`, `build`, `guidance`, `cross_cutting`, `entry_point_only`, `workflow`,
-   `settings`.
+   `settings`, and three fields for a toolset granted in narrower *parts*: `parts` (the config to the
+   names it can be granted as), `build_parts` (the tools for a set of them), and `writable_part_remedy`
+   (what to change when an agent names a `<part>_write` that does not exist). `registry.with_parts` runs
+   last, because part names come from the config: it resolves every toolset's parts into
+   `ToolsetRegistry.parts` and refuses one colliding with a toolset, another part, `core`, or `all`.
+   `documents` is the one toolset with parts, one or two per document collection (see
+   [Retrieval](retrieval.md#granting-collections-parts-of-one-toolset)).
 2. **Validate.** `agents.validate_agents` runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
-   `skills` on a worker, or an `"all"` agent's `resident` entry outside the expansion fails with nothing
-   written and nothing connected.
+   `skills` on a worker, an `"all"` agent's `resident` entry outside the expansion, or a `resident` list
+   naming some of a toolset's parts and not the rest (`_check_resident_parts`) fails with nothing
+   written and nothing connected. `agents.validate_document_collections` checks each
+   `[[documents.collection]]` against the disk and the registry in the same pass: the folder exists, is
+   not the data directory or inside or around it, is not declared twice, and its name is no toolset's.
 3. **Select.** The names come from `agents.available_for(config, registry, agent)`, the one reader of an
    agent's availability: its list as written, or for `available = "all"` every registered toolset sorted
    by `TRUST_ORDER` (registration order kept within a provider), minus `entry_point_only` toolsets on any
@@ -547,7 +556,12 @@ and step 6 its *approval* axis:
    iterated, so a reader that forgot to expand it fails loudly instead of walking the letters of `"all"`.
    `registry.select(names, registry, agent=, entry_point=)` returns those toolsets in that
    order, deduplicated, raising on an unknown name (with the available ones listed) or an
-   `entry_point_only` toolset declared elsewhere. It never drops: dropping is what the previous per-role
+   `entry_point_only` toolset declared elsewhere. A part name resolves to its toolset at that toolset's
+   first mention, and every part named is collected into one copy whose `build` is `build_parts` bound to
+   them; naming the toolset itself anywhere grants it whole. Every later step, residency and approval
+   included, therefore sees the toolset's own name (`registry.canonical_names` is how a caller asking
+   *which* toolsets an agent holds, rather than at what scope, gets it), so a narrow grant builds one
+   toolset and is gated by one vocabulary. It never drops: dropping is what the previous per-role
    lists did, and a typo silently produced a smaller toolset. For the entry agent, skill names are held
    back first (`agents.without_skill_names`), since its `SkillAgent` already advertises every skill.
 4. **Split by residency.** `agents.split_by_residency` divides the selection into what the agent holds
@@ -576,9 +590,12 @@ and step 6 its *approval* axis:
    a toolset scopes itself to its own holder (`benchmark` asks the config what `agent_name` runs on).
    At wiring this runs over the resident toolsets only; a deferred one reaches the same function later,
    through its group. `build` must create only closures, never process state: every shared singleton
-   (the memory store, the document store, the `SkillManager`, the `TaskService`) is a lazy property on
-   `LiveState`, so two agents declaring one toolset share one rather than constructing two, and the two
+   (the memory store, each document collection's store, the `SkillManager`, the `TaskService`) is lazy on
+   `LiveState`, so two agents declaring one toolset share one rather than constructing two, and the
    stores are opened only because some agent declared them (and, for a deferred toolset, loaded it). The
+   document stores are built together on the first documents build, whatever parts that agent was
+   granted, so an agent holding one collection and another holding all of them share one index per
+   folder. The
    `SkillManager` and the `TaskService` are the exceptions to that
    last half, and not by accident: every agent is a `SkillAgent` and so takes the manager regardless, and
    `tasks.arm_all()` has to fire a persisted scheduled task whether or not any agent can talk about
@@ -706,7 +723,7 @@ loads it:
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` | resident |
 | `send_message`, `list_agents` | `toolsets/messaging.py` | `messaging` | resident |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` | always held |
-| `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` | deferred |
+| `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | AIMU `make_collection_tools`, over every collection's store (`LiveState.document_stores`) | `documents` | deferred |
 | `author_skill`, `update_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_update_tool` / `make_skill_script_tool`, wrapped by `toolsets/skills.py` to refresh the registry after each write and refuse a taken name | `skills` (entry agent only) | deferred |
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` | deferred |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` | deferred |
@@ -1540,7 +1557,10 @@ built out of bounded parts.
 
 Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;
 `data/` holds only content: `sessions.json`, `skills/`, `memory/`, `documents/`, `downloads/`,
-`images/`, `payloads/`. Scheduled tasks are the one declared, user-editable exception to that split:
+`images/`, `payloads/`, and `index/`, one search index per document collection. The index is the one
+leaf that is a cache rather than content: derived from a collection's folder, rebuilt if deleted, and
+kept here rather than in the folder so nothing Kokua derives ever lands in your vault (see
+[Retrieval](retrieval.md#the-index-is-a-cache-and-never-lives-in-a-vault)). Scheduled tasks are the one declared, user-editable exception to that split:
 they live in `config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
 
 ## Images

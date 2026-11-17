@@ -12,6 +12,7 @@ import difflib
 import functools
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Collection, Mapping, Optional, Sequence
 
 from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
@@ -33,9 +34,11 @@ from kokua.registry.registry import (
     ToolsetError,
     ToolsetRegistry,
     build_tools,
+    canonical_names,
     entry_point_only_reason,
     register,
     select,
+    with_parts,
     workflows_of,
 )
 from kokua.workflows import Workflow
@@ -119,7 +122,9 @@ def skill_toolsets(config: AssistantConfig) -> list[Toolset]:
     ]
 
 
-def with_skill_toolsets(registry: ToolsetRegistry, toolsets: Sequence[Toolset]) -> ToolsetRegistry:
+def with_skill_toolsets(
+    registry: ToolsetRegistry, toolsets: Sequence[Toolset], config: AssistantConfig
+) -> ToolsetRegistry:
     """``registry`` with every skill entry replaced by ``toolsets`` and every other entry kept as it is.
 
     Skills are the one source that changes mid-session through a tool the assistant holds, so they are
@@ -127,15 +132,18 @@ def with_skill_toolsets(registry: ToolsetRegistry, toolsets: Sequence[Toolset]) 
     entries in particular stay the ones read from config at startup, so a server added at runtime still
     reaches an ``"all"`` agent only after a restart, exactly as it did before skills could refresh.
 
-    Raises ``ToolsetError`` (from ``register``) when a skill now on disk collides with another toolset's
-    name, leaving the caller's registry as it was.
+    Part names are resolved again against ``config``, as :func:`build_registry` does, so they survive
+    the rebuild and a skill named for one collides with it.
+
+    Raises ``ToolsetError`` (from ``register`` or ``with_parts``) when a skill now on disk collides with
+    another toolset's name or a part name, leaving the caller's registry as it was.
     """
     kept: dict[str, list[Toolset]] = {}
     for name, toolset in registry.items():
         label = registry.providers[name]
         if label != _SKILL_PROVIDER:
             kept.setdefault(label, []).append(toolset)
-    return register([*kept.items(), (_SKILL_PROVIDER, list(toolsets))])
+    return with_parts(register([*kept.items(), (_SKILL_PROVIDER, list(toolsets))]), config)
 
 
 def is_skill(name: str, registry: ToolsetRegistry) -> bool:
@@ -187,14 +195,18 @@ def resident_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name:
 
     Always in availability order, by filtering :func:`available_for` rather than returning the declared
     list, so the order a user wrote ``resident`` in never changes the order tools are presented in.
+
+    Toolset names, never part names: parts of one toolset build as that one toolset, so residency is
+    decided per toolset, and a resident part name stands for the toolset it resolves to.
     """
     agent = config.agents.get(agent_name)
     if agent is None:
         return []
-    available = available_for(config, registry, agent_name)
+    available = canonical_names(available_for(config, registry, agent_name), registry)
     if agent.resident is None:
         return available
-    return [entry for entry in available if entry in agent.resident]
+    resident = set(canonical_names(agent.resident, registry))
+    return [entry for entry in available if entry in resident]
 
 
 @dataclass(frozen=True)
@@ -249,11 +261,15 @@ def shadowed_tools(
 
 
 def deferred_for(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> list[str]:
-    """The toolsets ``agent_name`` can load but does not hold yet: its availability minus resident, in order."""
+    """The toolsets ``agent_name`` can load but does not hold yet: its availability minus resident, in order.
+
+    Toolset names, as :func:`resident_for` answers, since a deferred toolset loads under its own name.
+    """
     if agent_name not in config.agents:
         return []
     resident = set(resident_for(config, registry, agent_name))
-    return [entry for entry in available_for(config, registry, agent_name) if entry not in resident]
+    available = canonical_names(available_for(config, registry, agent_name), registry)
+    return [entry for entry in available if entry not in resident]
 
 
 def loadable_toolsets(config: AssistantConfig, registry: ToolsetRegistry, agent_name: str) -> list[str]:
@@ -294,6 +310,9 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     keeps the ``build`` its author wrote, whichever route it came by, because a build failure is
     a bug in whoever wrote the toolset and a warning in a log file is not how a person finds out an agent
     lost a capability.
+
+    Part names (``Toolset.parts``) are resolved last, because they come from this config and must not
+    collide with any name the sources above registered.
     """
     discovered = discover_toolsets()
     own_names = own_distribution_toolset_names()
@@ -303,7 +322,27 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_BUILTIN_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n in own_names]),
         (_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n not in own_names]),
     ]
-    return register(sources)
+    registry = register(sources)
+    _check_collection_names(config, registry)
+    return with_parts(registry, config)
+
+
+def _check_collection_names(config: AssistantConfig, registry: ToolsetRegistry) -> None:
+    """Refuse a ``[[documents.collection]]`` whose name, or whose ``_write`` twin, is already a toolset.
+
+    ``with_parts`` would refuse it too, since each collection is a part of ``documents``, but in the
+    registry's words ("part 'web' ... Rename the part"), about a thing the user never wrote. Checked first
+    so the refusal names the collection and the edit to make. The twin is checked whether or not the
+    collection is writable, so declaring it writable later cannot turn a working config into a broken one.
+    """
+    for collection in config.document_collections:
+        for name in (collection.name, f"{collection.name}_write"):
+            if name in registry:
+                raise ConfigError(
+                    f"[[documents.collection]] {collection.name!r}: {name!r} is already the name of a toolset "
+                    f"({registry.providers.get(name, 'installed')}), and an agent names a collection in the same "
+                    "available list it names toolsets in. Rename the collection."
+                )
 
 
 #: Agent names the message bus has already spent. An agent's declared name becomes the address a
@@ -359,6 +398,7 @@ def validate_agents(config: AssistantConfig, registry: ToolsetRegistry) -> None:
             select(available_for(config, registry, name), registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:
             raise ConfigError(str(e)) from e
+        _check_resident_parts(config, registry, name)
         _check_model(f"agents.{name}", agent.model)
         for target in agent.delegates_to:
             if target not in config.agents:
@@ -381,10 +421,13 @@ def _check_resident_within_all(config: AssistantConfig, registry: ToolsetRegistr
     check_resident_within_available(name, agent.resident, agent.available)
     expanded = available_for(config, registry, name)
     for entry in agent.resident:
-        if entry in expanded:
+        # A part is held when its toolset is; whether naming one here is meaningful is
+        # `_check_resident_parts`'s question.
+        toolset = canonical_names([entry], registry)[0]
+        if toolset in expanded:
             continue
         section = f"[agents.{name}.tools].resident"
-        if entry in registry:
+        if toolset in registry:
             raise ConfigError(
                 f"{section} names {entry!r}, {entry_point_only_reason(config.entry_agent)} "
                 'available = "all" leaves it out here, so drop it from resident.'
@@ -394,6 +437,41 @@ def _check_resident_within_all(config: AssistantConfig, registry: ToolsetRegistr
             f'{section} names {entry!r}, which is not an installed toolset, so available = "all" does not '
             f"hold it. Installed toolsets: {installed}."
         )
+
+
+def _check_resident_parts(config: AssistantConfig, registry: ToolsetRegistry, name: str) -> None:
+    """Refuse a ``resident`` list naming some of what grants a toolset and leaving the rest out.
+
+    Every part an agent names builds as one toolset, so the toolset is resident or deferred whole. A
+    resident list naming part ``a`` while ``available`` also grants part ``b``, or the whole toolset,
+    would otherwise make the rest resident too: a declaration that says less than it does, which is
+    refused here rather than honored in silence.
+    """
+    agent = config.agents[name]
+    if agent.resident is None:
+        return
+    available = available_for(config, registry, name)
+    section = f"[agents.{name}.tools].resident"
+    for entry in agent.resident:
+        if entry not in registry.parts:
+            continue
+        toolset = registry.parts[entry][0]
+        if toolset in agent.resident:
+            continue
+        grants = [granted for granted in available if canonical_names([granted], registry) == [toolset]]
+        missing = [granted for granted in grants if granted not in agent.resident]
+        if toolset in missing:
+            raise ConfigError(
+                f"{section} names {entry!r}, a part of toolset {toolset!r}, but this agent holds {toolset!r} "
+                f"whole, so all of it is resident or none of it is. Name {toolset!r} in resident instead."
+            )
+        if missing:
+            others = ", ".join(repr(granted) for granted in missing)
+            raise ConfigError(
+                f"{section} names {entry!r} but not {others}, which available also grants as parts of "
+                f"toolset {toolset!r}. A toolset builds once however many parts grant it, so it is resident "
+                "or deferred whole: name every one of them in resident, or none."
+            )
 
 
 def validate_reviewers(config: AssistantConfig) -> None:
@@ -424,6 +502,63 @@ def validate_reviewers(config: AssistantConfig) -> None:
         _check_model(f"reviewers.{name}", reviewer.model)
 
 
+def validate_document_collections(config: AssistantConfig) -> None:
+    """Refuse a ``[[documents.collection]]`` the filesystem cannot honor, at startup.
+
+    These checks live here rather than in the parser because they need the disk: a
+    folder that is missing, a file, or inside ``data_dir`` (where Kokua's own state lives, so indexing it
+    would index the index and the sessions), two entries resolving to the same folder (one index, two
+    owners), and a read-only folder inside a writable one (see ``_refuse_read_only_inside_writable``). A
+    name colliding with a toolset is refused earlier, by ``build_registry``. Any other nesting is allowed:
+    the overlap is deduplicated when documents are indexed. Resolved paths are compared, so a symlink
+    cannot smuggle a folder past a check.
+    """
+    data_dir = config.data_dir.resolve()
+    resolved_owner: dict = {}
+    for collection in config.document_collections:
+        if not collection.path.exists():
+            raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} does not exist.")
+        if not collection.path.is_dir():
+            raise ConfigError(f"[[documents.collection]] '{collection.name}': {collection.path} is not a folder.")
+        resolved = collection.path.resolve()
+        if resolved == data_dir or data_dir in resolved.parents or resolved in data_dir.parents:
+            raise ConfigError(
+                f"[[documents.collection]] '{collection.name}': {collection.path} is, is inside, or holds "
+                f"Kokua's data directory ({data_dir}), which holds its own state (sessions, the index), so "
+                "indexing it would index that state. Point it at a folder that does not overlap it."
+            )
+        if resolved in resolved_owner:
+            raise ConfigError(
+                f"[[documents.collection]] '{collection.name}' and '{resolved_owner[resolved]}' both resolve to "
+                f"{resolved}. Declare the folder once."
+            )
+        resolved_owner[resolved] = collection.name
+    _refuse_read_only_inside_writable(config, {name: path for path, name in resolved_owner.items()})
+
+
+def _refuse_read_only_inside_writable(config: AssistantConfig, resolved: Mapping[str, Path]) -> None:
+    """Refuse a read-only collection whose folder sits inside a writable collection's.
+
+    Every file in it is also a file of the outer collection, which can write it, so its read-only setting
+    would protect nothing while reading as though it did: a control that does nothing, which fails startup
+    (principle 6) rather than reassuring in silence. The other nestings are honest and stay allowed: a
+    read-only folder inside a read-only one, and a writable folder inside anything, since writing through
+    the inner collection is exactly what it declares.
+    """
+    writable = [collection for collection in config.document_collections if collection.writable]
+    for inner in config.document_collections:
+        if inner.writable:
+            continue
+        for outer in writable:
+            if resolved[outer.name] in resolved[inner.name].parents:
+                raise ConfigError(
+                    f"[[documents.collection]] {inner.name!r} is read-only, but its folder is inside "
+                    f"{outer.name!r}, which is writable, so its files can be written through {outer.name!r} and "
+                    f"its read-only setting would do nothing. Set writable = true on {inner.name!r}, make "
+                    f"{outer.name!r} read-only, or point one of them at a folder that does not overlap the other."
+                )
+
+
 def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
     """The registry ``config`` resolves against, with its agents and reviewers already checked against it.
 
@@ -441,6 +576,7 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
     validate_reviewers(config)
+    validate_document_collections(config)
     return registry
 
 
@@ -521,7 +657,7 @@ def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegis
     that one checks every agent's tools (a toolset a worker holds is still declared) and looks at config
     sections rather than commands, and fires once at startup rather than on an incoming channel message.
     """
-    declared = set(available_for(config, registry, config.entry_agent))
+    declared = set(canonical_names(available_for(config, registry, config.entry_agent), registry))
     return {
         workflow.command: toolset_name
         for toolset_name, workflow in workflows_of(list(registry.values()))
@@ -551,7 +687,11 @@ def configured_but_undeclared(config: AssistantConfig, registry: ToolsetRegistry
     cannot tell "the user wrote this" from "Kokua defaulted it" -- exactly the distinction this warning
     needs, since a defaulted section nobody wrote is not a mistake worth reporting.
     """
-    declared = {toolset for name in config.agents for toolset in available_for(config, registry, name)}
+    declared = {
+        toolset
+        for name in config.agents
+        for toolset in canonical_names(available_for(config, registry, name), registry)
+    }
     return sorted(name for name in config.configured_sections if name not in declared)
 
 
@@ -1035,7 +1175,9 @@ def toolset_of(state: LiveState, agent_name: Optional[str], tool: str) -> Option
     shown bare rather than under a guess.
     """
     config, registry, recorded = state.config, state.registry, state.tools_by_toolset
-    declared = available_for(config, registry, agent_name) if agent_name in config.agents else []
+    declared = (
+        canonical_names(available_for(config, registry, agent_name), registry) if agent_name in config.agents else []
+    )
     for name in declared:
         if tool in recorded.get(name, ()):
             return name
@@ -1136,6 +1278,17 @@ def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: M
     parts = entry.split(_GATE_SEPARATOR)
     toolset, tool = (parts[0], _GATE_WILDCARD) if len(parts) == 1 else (parts[0], parts[1])
     if toolset not in vocabulary:
+        # A plain dict is still a valid registry here: only one built by `with_parts` carries part names.
+        part_names = getattr(registry, "parts", {})
+        if toolset in part_names:
+            owner = part_names[toolset][0]
+            # A part narrows what a toolset's tools reach, never which tools it has, so a gate written
+            # against one would hold back exactly what the toolset's own entry does.
+            suggestion = owner if len(parts) == 1 else f"{owner}{_GATE_SEPARATOR}{tool}"
+            return set(), (
+                f"{entry!r} names {toolset!r}, a part of the {owner!r} toolset. A gate names the toolset, "
+                f"however an agent was granted it: write {suggestion!r}"
+            )
         if len(parts) == 1:
             owners = sorted(name for name, tools in vocabulary.items() if toolset in tools)
             if owners:

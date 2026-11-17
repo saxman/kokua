@@ -703,3 +703,28 @@ def test_the_guidance_gives_both_reasons_to_compose():
         "`spawn_subagent` roles already covers it. If none does, call `list_capabilities` to find the capability "
         "names, then `compose_subagent` to build a sub-agent holding exactly those and give it the task."
     )
+
+
+def _parted_registry():
+    from kokua.registry.registry import with_parts
+    from tests.fakes import shelf_toolset
+
+    return with_parts(register([("plugin", [_toolset("web"), shelf_toolset()])]), AssistantConfig())
+
+
+def test_the_catalogue_lists_a_toolsets_parts_beneath_it():
+    """A model composing a sub-agent can only name what it can discover, and a part is the narrower
+    grant: listing parts under their toolset is what lets it hand a worker less than the whole."""
+    lines = _catalogue(_parted_registry(), "").splitlines()
+    assert lines == [
+        "shelf [plugin]: Shelves.",
+        "  parts: a, b (name one instead of 'shelf' to grant only that part)",
+        "web [plugin]: web description",
+    ]
+
+
+def test_the_catalogue_filter_matches_a_part_name():
+    assert _catalogue(_parted_registry(), "a").splitlines() == [
+        "shelf [plugin]: Shelves.",
+        "  parts: a, b (name one instead of 'shelf' to grant only that part)",
+    ]

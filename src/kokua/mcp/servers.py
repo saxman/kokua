@@ -17,7 +17,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Collection, Optional
 
 from aimu import aio
 
@@ -250,13 +250,15 @@ async def add_server(
     config_path: Path,
     for_each_agent: ForEachAgent,
     refresh_workers: Optional[Callable] = None,
+    taken_names: Collection[str] = (),
 ) -> ServerAdded:
     """Connect a remote MCP server at runtime and record it.
 
     Nothing is mounted on any live agent: an agent's own tool list was built once, and this only records
     the connection. ``refresh_workers``, fanned out over ``for_each_agent``, rebuilds each agent's
     ``spawn_subagent`` so a worker declaring this server resolves it. A reconnectable server (see
-    :data:`RECONNECTABLE`) is written to config.toml so it returns on the next start.
+    :data:`RECONNECTABLE`) is written to config.toml so it returns on the next start, under a name clear
+    of ``taken_names`` (every name the registry holds), since the next start registers it beside them.
 
     Raises :class:`AlreadyConnected`, :class:`BearerTokenRequired`, or :class:`ConnectFailed`.
     """
@@ -273,7 +275,7 @@ async def add_server(
         for_each_agent(refresh_workers)  # rebuild spawn_subagent so a worker declaring it resolves it
     persisted = auth_mode in RECONNECTABLE
     if persisted:
-        config_store.add_mcp_server(config_path, url)
+        config_store.add_mcp_server(config_path, url, taken=taken_names)
     return ServerAdded(url=url, tool_names=added, auth_mode=auth_mode, persisted=persisted)
 
 

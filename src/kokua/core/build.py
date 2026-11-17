@@ -495,7 +495,7 @@ def refresh_skills(state: LiveState, *, tools_changed: bool) -> None:
     # runs through kokua.core.agents.
     from kokua.core.agents import skill_toolsets, with_skill_toolsets
 
-    registry = with_skill_toolsets(state.registry, skill_toolsets(state.config))
+    registry = with_skill_toolsets(state.registry, skill_toolsets(state.config), state.config)
     # A plain assignment, with no lock, and safe beside readers already running. The only builds off the
     # event loop thread are deferred groups loading in a worker thread, and each holds the `Toolset` it
     # was wired with rather than looking its name up again. Everything that does look names up (a spec

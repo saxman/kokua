@@ -71,7 +71,7 @@ What the AIMU-provided toolsets hold:
 | `time` | `get_current_date_and_time`, `convert_time` | not implicit; declare it |
 | `misc` | `echo` | |
 | `memory` | `store_memory`, `search_memories`, `list_memories` | one store shared by every agent that declares it |
-| `documents` | `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | likewise. `read_document` windows a long document; change one with `edit_document`, since `save_document` replaces the whole thing and refuses to replace one it has not shown the model in full |
+| `documents` | `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | likewise, over Kokua's own folder and every [`[[documents.collection]]`](../reference/configuration.md#documentscollection) you declare; name one collection (`work`, or `work_write` to write it) instead of `documents` to grant only that one, and see [Retrieval](../explanation/retrieval.md) for how search ranks passages. `read_document` windows a long document; change one with `edit_document`, since `save_document` replaces the whole thing and refuses to replace one it has not shown the model in full. Both writers ask first in the shipped config |
 | `skills` | `author_skill`, `add_skill_script` | entry agent only; see [Add a skill](add-skills.md) |
 | `audio` | `generate_audio` | needs `$AIMU_AUDIO_MODEL` |
 | `speech` | `generate_speech` | needs `$AIMU_SPEECH_MODEL` |

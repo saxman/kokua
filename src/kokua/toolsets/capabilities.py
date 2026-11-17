@@ -154,7 +154,8 @@ def _compose_spec(
 
 def _catalogue(registry: Mapping[str, Toolset], filter_text: str) -> str:
     """One line per registry entry except this toolset's own, sorted by name: name, provider,
-    description.
+    description. A toolset granted in parts gets a second line naming them, since a part is a name
+    ``compose_subagent`` accepts and a model can only pass the names it has been shown.
 
     ``providers`` is read defensively because ``LiveState.registry`` is typed as a plain dict and a
     state built by hand may carry one; a missing provider map should degrade to an unlabeled line
@@ -163,13 +164,19 @@ def _catalogue(registry: Mapping[str, Toolset], filter_text: str) -> str:
     rejection.
     """
     providers = getattr(registry, "providers", {})
+    parts_of: dict[str, list[str]] = {}
+    for part, (owner, _) in getattr(registry, "parts", {}).items():
+        parts_of.setdefault(owner, []).append(part)
     needle = filter_text.strip().lower()
-    lines = [
-        f"{name} [{providers.get(name, 'unknown')}]: {registry[name].description}"
-        for name in sorted(registry)
-        if name != TOOLSET_NAME
-        and (not needle or needle in name.lower() or needle in registry[name].description.lower())
-    ]
+    lines = []
+    for name in sorted(registry):
+        parts = sorted(parts_of.get(name, []))
+        searched = [name, registry[name].description, *parts]
+        if name == TOOLSET_NAME or (needle and not any(needle in text.lower() for text in searched)):
+            continue
+        lines.append(f"{name} [{providers.get(name, 'unknown')}]: {registry[name].description}")
+        if parts:
+            lines.append(f"  parts: {', '.join(parts)} (name one instead of {name!r} to grant only that part)")
     if not lines:
         return f"No capability matches {filter_text!r}. Call list_capabilities with no filter to see them all."
     return "\n".join(lines)
@@ -195,7 +202,8 @@ def _make_list_tool(state: "LiveState") -> Callable:
         """List every capability installed on this machine other than this one, whether or not you
         currently hold it.
 
-        Each line is a capability name, the kind of provider it came from, and what it does. Use this
+        Each line is a capability name, the kind of provider it came from, and what it does. A
+        capability that can be granted in narrower parts lists them on the line beneath it. Use this
         when a task needs something none of your own tools and none of your named sub-agent roles
         cover, or when its output would flood your context, then pass the names you need to
         compose_subagent.
@@ -241,6 +249,7 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
                 card, e.g. "quote-checker".
             task: The complete, self-contained task for it to carry out.
             tools: The capability names to give it, from list_capabilities, e.g. ["web", "compute"].
+                A part listed beneath a capability grants only that part of it.
             instructions: Its standing instructions: its role, and how to report back.
         """
         label = name.strip() or DEFAULT_SUBAGENT_NAME

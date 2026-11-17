@@ -33,12 +33,17 @@ def _tools(tmp_path, apply_hot=None, config=None, registry=None, table=None):
     async def _noop(section, key, value):
         return None
 
+    from kokua.registry.registry import ToolsetRegistry
+
     path = tmp_path / "config.toml"
+    # A bare mapping becomes the registry type the live one is, which is also what carries part names.
+    if not isinstance(registry, ToolsetRegistry):
+        registry = ToolsetRegistry(registry or {}, {})
     read_config, update_config = config_tools.make_config_tools(
         apply_hot or _noop,
         table if table is not None else core_table(),
         config=config if config is not None else _config(tmp_path),
-        registry=registry if registry is not None else {},
+        registry=registry,
     )
     return path, read_config, update_config
 
@@ -247,6 +252,17 @@ async def test_update_config_refusal_names_the_pattern_that_matched(tmp_path):
     _, _, update_config = _tools(tmp_path, config=_config(tmp_path, locked_config_keys=["email.*"]))
     result = await update_config("email", "to", "someone@example.com")
     assert "email.*" in result
+    assert "locked_config_keys" in result
+
+
+async def test_update_config_refuses_the_embedding_model_by_default(tmp_path):
+    """The embedding model reads every passage of every document collection, so a write pointing it at a
+    remote endpoint would send the user's vaults there at the next restart. Locked by default, like
+    `compute.command_env_passthrough`, and the refusal names the pattern."""
+    path, _, update_config = _tools(tmp_path)
+    result = await update_config("documents", "embedding_model", "openai:text-embedding-3-small")
+    assert not path.exists()
+    assert "documents.embedding_model" in result
     assert "locked_config_keys" in result
 
 

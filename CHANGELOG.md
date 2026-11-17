@@ -1178,6 +1178,73 @@ written in as content. `toolsets/documents.py` names `edit_document` in its guid
 the refusal to do the teaching, because a refusal arrives only after the model has spent a turn deciding,
 and it tells the model that `read_document` windows at all, which nothing else would.
 
+**Document collections: your own folders, searched by passage.** `[[documents.collection]]` declares a
+folder (an Obsidian vault, a folder of papers) with a `name`, a `path`, `writable` (default `false`), and
+an optional `description` the model reads beside the name in `list_documents`. Kokua's own
+`data/documents` is the built-in collection `kokua`, always writable. One `search_documents` call ranks
+passages across every collection an agent holds and cites each by collection, file, and heading or PDF
+page: Markdown is chunked by heading and PDFs by page, ranked by SQLite FTS5's BM25 and by a local
+embedding model, the two fused by reciprocal rank fusion. The index lives under `data/index/<name>/`,
+never in the folder; a metadata walk before each search picks up files edited elsewhere, a background
+thread finishes a large first build, and a search during one says its results may be incomplete. The
+tools are AIMU's `make_collection_tools`, under the names `make_document_tools` used, so existing agents
+and approval entries keep working. [Retrieval](https://saxman.info/kokua/explanation/retrieval/) explains
+the machinery, and the [configuration reference](https://saxman.info/kokua/reference/configuration/#documentscollection)
+lists what startup checks. Like `[[mcp.server]]`, collections are startup-only, and `update_config`
+refuses `documents.collection` whatever the lock list says, since a collection names folders the
+assistant may read.
+
+- **An agent can be granted one collection.** In `available`, `"documents"` grants every collection at
+  its declared access, `"work"` reads the `work` collection only, and `"work_write"` reads and writes it
+  (only for a `writable = true` collection; naming it otherwise fails startup saying what to set). An
+  agent holding only read-only collections has no write tool at all. These names are *parts* of the one
+  `documents` toolset, so approval entries still name `documents.<tool>`; an entry naming a part is
+  refused with the entry to write instead, and a `resident` list must name all of a toolset's parts that
+  `available` grants, or none.
+- **Two changes on a default install.** The first document search downloads the embedding model,
+  `hf:BAAI/bge-base-en-v1.5` (about 440 MB), and builds the index; set `[documents] embedding_model = ""`
+  to search by keyword alone, with no download. And saving or editing a document now asks first in the
+  shipped config, which adds `documents.save_document` and `documents.edit_document` to
+  `[assistant.tools].confirm`, and in the code default a config with no such table gets. Like every
+  default entry, the code default's two fail startup naming the gate when no agent declares
+  `documents`; write an `[assistant.tools]` table for such a config. **An existing install keeps
+  writing documents ungated** if its `config.toml` has its own `[assistant.tools]` table, and startup
+  says so with a notice once a `writable = true` collection is reachable by an agent whose policy names
+  neither document writer (a notice, not an error: your own policy wins). Add these two lines to its
+  `confirm`:
+
+  ```toml
+      "documents.save_document",
+      "documents.edit_document",
+  ```
+
+  The gate decides by tool name, so it cannot tell a write to `kokua` from a write to a vault: both ask.
+- **A read-only collection nested inside a writable one fails startup**, naming both: the outer
+  collection can write every file in it, so its `writable = false` would protect nothing. Any other
+  nesting is allowed.
+- **Kokua's own document folder now ignores files outside `.md`, `.markdown`, `.txt`, and `.pdf`.**
+  Every collection takes the same suffixes, because a vault holds canvases, attachments, and settings
+  beside its notes, and a file that is not a document, reported unreadable on every search, crowds out
+  the ones that are. A file of another kind already in `data/documents` is no longer listed or searched;
+  rename it to a listed suffix, or export it, to bring it back. Saving under any other suffix is refused.
+  PDFs are searchable and read-only.
+- **`[documents]` has two keys**, `embedding_model` and `rerank` (a cross-encoder pass over the fused
+  results, default `false`), both startup-only. **`documents.embedding_model` is locked by default**:
+  a remote embedding model reads every passage of every collection while indexing, so `update_config`
+  refuses it, for the reason it refuses `compute.command_env_passthrough`. A `config.toml` scaffolded
+  earlier writes its lock list out in full, so add `"documents.embedding_model"` to
+  `[security].locked_config_keys` by hand.
+- **A server `add_mcp_server` records is named clear of every registry name**, not only other servers',
+  so a server on a host named like a collection, a skill, or a toolset gets a numeric suffix instead of a
+  name the next start would refuse.
+- **For plugin authors: `Toolset.parts`, `build_parts`, and `writable_part_remedy`.** A toolset can be
+  granted narrower than whole. `parts` maps the config to the names an agent may declare and what each
+  grants, `build_parts` builds the tools for the parts named, and `writable_part_remedy` is the sentence
+  telling a user how to make a `<part>_write` exist (only `{part}` is substituted). `select` collects
+  every part an agent names into one copy of the toolset, whose gate vocabulary is still what the whole
+  toolset builds, `registry.with_parts` refuses a part name that collides with any other name,
+  and `kokua --list-toolsets`, `kokua agents`, and `list_capabilities` show the parts.
+
 **The `compute` toolset now carries a shell tool, `run_command`, alongside `calculate` and
 `execute_python`.** It runs a command line through `/bin/sh -c` and returns the exit code with stdout
 and stderr labelled separately; a nonzero exit comes back as output rather than an error, since `pytest`
@@ -2052,10 +2119,10 @@ notice on startup.
   agent capability boundaries, the web front end's download and image routes, the `[email].to`
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).
-- **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
-  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
-  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, `fs_write`, and
-  `config.update_config`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
+- **Tool approval.** Configured risky tools require confirmation before each call (terminal `y/N`, web
+  Allow/Deny), built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
+  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, `fs_write`,
+  `config.update_config`, `documents.save_document`, and `documents.edit_document`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
   are currently viewing. **That question is asked again at every point the answer can have gone stale**,
@@ -2071,6 +2138,11 @@ notice on startup.
   calling a gated tool every firing would otherwise raise a card every firing. Parking a backgrounded
   call for the user to answer later, instead of denying it, is
   [#7](https://github.com/saxman/kokua/issues/7).
+  **An unattended turn's denial tells the model why**, for every gated tool: the tool result says nobody
+  is there to approve the call, that it did not run, not to retry it, and to say in the report what it
+  would have done, so the user can do it. It no longer adds "or approve it next time": nothing ever
+  approves an unattended call, so that promise was false. Before, the model saw only that the call was not approved, which reads like a call
+  worth retrying and left the report the user reads afterwards with nothing to say about it.
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other. **A prompt's controls are retired when its question closes**, which is

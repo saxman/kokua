@@ -175,3 +175,42 @@ async def test_run_starts_an_assistant_that_was_never_started(tmp_path):
     await asyncio.wait_for(assistant.run(), timeout=5.0)
 
     assert assistant._registry.live_agents() != []
+
+
+def test_booting_the_shipped_config_imports_neither_torch_nor_sentence_transformers(tmp_path):
+    """Constructing an `hf:` embedding client imports AIMU's HF provider, which imports torch: seconds
+    added to every startup. Startup must not build the client, so a bad `[documents].embedding_model`
+    is the first documents build's error instead. Run in a subprocess, so an import made earlier in this
+    process cannot mask a regression; it uses the real `embedding_client_for`, not the suite's stub."""
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    home = tmp_path / "home"
+    home.mkdir()
+    script = textwrap.dedent(
+        """
+        import asyncio, sys
+        from kokua import cli
+        from kokua.config import file as settings
+        from tests.channels import FakeChannel
+
+        (cli.settings.resolve_path(None)[0]).write_text(settings.example_text(), encoding="utf-8")
+        config = cli.resolve_config(cli.build_arg_parser().parse_args([]))
+        from kokua.core.assistant import Assistant
+
+        asyncio.run(Assistant.create(config, FakeChannel()))
+        heavy = sorted(m for m in ("torch", "sentence_transformers") if m in sys.modules)
+        print("HEAVY:" + ",".join(heavy))
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "KOKUA_HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "HEAVY:"

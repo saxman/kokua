@@ -87,6 +87,21 @@ async def test_author_skill_refuses_a_reserved_name_and_writes_nothing(tmp_path)
         assert not (config.skills_dir / name).exists()
 
 
+async def test_author_skill_refuses_a_part_name_and_writes_nothing(tmp_path, monkeypatch):
+    """A part name is declared in the same ``available`` list a skill's name would be, so a skill holding
+    one would stop the next start on the collision, exactly as one named for a toolset would."""
+    from tests.fakes import install_shelf
+
+    install_shelf(monkeypatch)
+    config = _skills_config(tmp_path)
+    author_skill = _tools(config)["author_skill"]
+
+    result = await author_skill(name="a", description="d", body="b")
+
+    assert result.startswith("Nothing was written: 'a' is already a toolset name (a part of toolset 'shelf')")
+    assert not (config.skills_dir / "a").exists()
+
+
 async def test_author_skill_refuses_the_name_of_a_server_added_this_session(tmp_path, monkeypatch):
     """The live registry never learns a server ``add_mcp_server`` persisted, but the next start registers
     it, so the name is read from the file, disambiguated suffix and all."""

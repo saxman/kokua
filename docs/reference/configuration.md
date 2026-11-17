@@ -30,6 +30,7 @@ Two rules run through the whole file and explain most of what follows:
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
   [`[capabilities]`](#capabilities) · [`[github_backup]`](#github_backup) · [`[compute]`](#compute) ·
+  [`[documents]`](#documents) · [`[[documents.collection]]`](#documentscollection) ·
   [toolset sections in general](#toolset-sections)
 - [Environment variables](#environment-variables)
 - [Command-line flags](#command-line-flags)
@@ -96,6 +97,7 @@ locked_config_keys = [
     "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
+    "documents.embedding_model",
 ]
 ```
 
@@ -134,6 +136,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `reviewers.*` | changes the error message only. `update_config` refuses `[reviewers.*]` whatever the list says, for the reason it is listed here: a reviewer's prompt and model decide how the assistant's own work is judged, including (with [`[security.auto_approval]`](#securityauto_approval) on) whether a gated call reaches you at all. Hand-edit to change one. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 | `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
+| `documents.embedding_model` | lets the assistant point the model that embeds your document collections at a remote endpoint, which would receive every passage of every collection at the next restart's indexing |
 
 A flat agent key (`model`, `thinking`, `system_message`, `description`, `delegates_to`) is
 checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
@@ -156,7 +159,9 @@ there. That is deliberate, for the reason `[assistant].model` is unlocked: the k
 no write escalates the session doing the writing, and what it moves is cost rather than reach.
 
 `[[mcp.server]]` is not in the list and is not writable by `update_config` either way; it is appended by
-`add_mcp_server`, which connects the server as well as recording it.
+`add_mcp_server`, which connects the server as well as recording it. `[[documents.collection]]` is not in
+the list either, and `update_config` refuses it whatever the list says: a collection names a folder on disk
+the assistant may read, so declaring one is a hand-edit.
 
 ## Which keys apply live
 
@@ -167,7 +172,7 @@ immediately. Everything else is **startup-only**: change it, then restart.
 | --- | --- |
 | `[assistant].generate_titles`, `[assistant].capture_requests` | the rest of `[assistant]`, including `[assistant.generation]`, and `[planning].review_rounds` |
 | `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | |
-| `[capabilities].max_depth` | all of `[agents.*]` (including each `[agents.<name>.tools]`), `[assistant.tools]`, and `[reviewers.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]` (including `[security.auto_approval]`), `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
+| `[capabilities].max_depth` | all of `[agents.*]` (including each `[agents.<name>.tools]`), `[assistant.tools]`, and `[reviewers.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]` (including `[security.auto_approval]`), `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]`, `[documents]` (including `[[documents.collection]]`) |
 | `[scheduling].max_task_conversations` | |
 
 The model, the reasoning effort, and the tool-loop cap read like runtime settings and are not. Nothing
@@ -412,20 +417,35 @@ worker (see [`[capabilities]`](#capabilities)) always uses it. Startup-only, and
 
 ```toml
 [assistant.tools]
-confirm = ["skills.add_skill_script", "mcp.add_mcp_server", "config.update_config"]
+confirm = [
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+    "config.update_config",
+    "documents.save_document",
+    "documents.edit_document",
+]
 review = ["compute.run_command", "compute.execute_python", "fs_write"]
 ```
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `confirm` | list of strings | six entries, see below | calls that ask you |
+| `confirm` | list of strings | eight entries, see below | calls that ask you |
 | `review` | list of strings | `[]` | calls that ask a reviewer first, then you |
 
-The block above is what `config.example.toml` ships. A config that sets neither key gets the schema
-default instead: all six tools the old `confirm_tools` gated (those three plus `compute.execute_python`,
-`compute.run_command`, and `fs_write`) in `confirm`, and an empty `review`, so it gates exactly what it
-always did. Enabling auto-approval on that default is a startup error until you move entries into
-`review`, since a reviewer with nothing to answer for would do nothing.
+The block above is what `config.example.toml` ships. A config that sets neither key gets the code
+default instead: the same eight tools, all in `confirm` (the five above plus `compute.execute_python`,
+`compute.run_command`, and `fs_write`), and an empty `review`. Enabling auto-approval on that default is
+a startup error until you move entries into `review`, since a reviewer with nothing to answer for would
+do nothing.
+
+The default is checked like an entry you wrote, so it only fits a config whose agents declare every
+toolset it names: `skills`, `mcp`, `compute`, `fs_write`, `config`, and `documents`. An agent set that
+leaves one out (say, no agent declares `documents`) fails startup naming the entry, the same
+[gate-nothing error](#an-entry-that-would-gate-nothing-fails-startup) a hand-written one gets. Write an
+`[assistant.tools]` table listing only what your agents hold. A `config.toml` whose table predates the
+document writers keeps saving and editing documents without asking until you add both entries to its
+`confirm`; once such an agent can reach a `writable = true` collection, startup raises a notice naming
+the table and the two lines.
 
 This table holds only those two keys. `available` or `resident` here is a startup error, because
 availability is declared per agent and never defaulted. The two lists must not name the same tool.
@@ -438,8 +458,12 @@ starts unprompted) **auto-deny** a gated call regardless, since there is no one 
 `--confirm-tools` overrides this key for one run.
 
 The default entries each reach past the model: `config.update_config` rewrites this file (except the
-locked keys it can never change, and this table is one of them by default), and `skills.add_skill_script`
-and `mcp.add_mcp_server` each install something that will run later.
+locked keys it can never change, and this table is one of them by default), `skills.add_skill_script`
+and `mcp.add_mcp_server` each install something that will run later, and `documents.save_document` and
+`documents.edit_document` change a file in a folder that may be your own vault. The gate decides by tool
+name, so it cannot tell a write to Kokua's own `kokua` collection from one to a vault you marked
+writable; both ask. Name the toolset, never a part: `work_write.edit_document` is refused with the entry
+to write instead (see [`[[documents.collection]]`](#documentscollection)).
 
 ### `review`
 
@@ -585,7 +609,7 @@ decides what a reviewer may never answer for.
 
 A list of patterns naming which keys `update_config` refuses. Default:
 `["security.*", "email.to", "paths.data_dir", "agents.*", "assistant.tools.*", "reviewers.*",
-"scheduling.task.*", "compute.command_env_passthrough"]`. Startup-only, and
+"scheduling.task.*", "compute.command_env_passthrough", "documents.embedding_model"]`. Startup-only, and
 always locked against `update_config` regardless of its own value. See
 [Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
 pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
@@ -796,7 +820,10 @@ There is one namespace for every capability, so a name may be an AIMU built-in t
 one of Kokua's optional toolsets (`aimu_agents`, `benchmark`, `github_backup`, `image`, which
 `--list-toolsets` groups with the rest of Kokua's as built-in toolsets), a third-party plugin toolset, a
 skill in your skills folder
-named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list
+named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. A name
+may also be a *part* of a toolset, a narrower grant derived from the config: each
+[`[[documents.collection]]`](#documentscollection) adds `<name>` (that collection, read-only) and, when it
+is writable, `<name>_write` (read and write), both parts of `documents`. The list
 does not say which kind a name is. Run `kokua --list-toolsets` for every name this install accepts,
 grouped by what provides it, and `kokua agents` for what each declared agent holds.
 
@@ -868,6 +895,9 @@ every available toolset is resident. Why the axis exists, and what a load costs 
   until you fix the entry and restart.
 - **A deferred MCP server that is not connected refuses to load**, and stays loadable for a retry once it
   is, where a resident one builds empty.
+- **Parts are resident or deferred with their toolset.** Every part an agent names builds as that one
+  toolset, so `resident` naming the part `work` while `available` also grants `personal`, or `documents`
+  whole, is a startup error: name every part `available` grants for that toolset, or none of them.
 
 The shipped `[agents.assistant]` keeps `memory`, `config`, `conversations`, `planning`, `capabilities`,
 `time`, and `messaging` resident and defers `documents`, `skills`, `mcp`, `scheduling`, and `benchmark`;
@@ -1030,7 +1060,8 @@ description = "Stock quotes and fundamentals, and placing trades."
 ```
 
 Servers added at runtime with the `add_mcp_server` tool are appended here automatically, with a `name`
-derived from the host and a numeric suffix if that name is taken, so the file always loads. Nothing can
+derived from the host and a numeric suffix if that name is taken (by another server, or by any toolset,
+skill, or collection), so the file always loads. Nothing can
 use that server in the session that added it, since the toolset namespace and the agent tables are both
 read only at startup. **After a restart** it reaches every agent declaring `available = "all"`, and any
 other agent once you add its name to that agent's `available` list. A server added with a bearer token is
@@ -1083,7 +1114,8 @@ $KOKUA_HOME/
   data/                  <- data_dir
     sessions.json        conversations
     memory/              the memory store
-    documents/           the document store
+    documents/           the built-in `kokua` document collection
+    index/<collection>/  each document collection's search index, a cache rebuilt from the folder
     skills/              installed skills
     images/              uploaded and generated images, served at /images
     payloads/            oversized sub-agent tool responses, served at /payloads
@@ -1290,7 +1322,8 @@ repository's history with it.
 The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
 fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do unless
 you lock the key yourself with `"github_backup.repo"` in [`locked_config_keys`](#locked_config_keys), as
-no toolset section is locked by default) can never widen the capability past whatever repository that one
+the shipped list locks only two toolset keys, `compute.command_env_passthrough` and
+`documents.embedding_model`) can never widen the capability past whatever repository that one
 token already writes. Scope the token, a fine-grained GitHub PAT with `contents: write`, to the backup
 repository alone.
 
@@ -1339,6 +1372,108 @@ suites, and applying one to a shell child needs `preexec_fn`, which is neither p
 alongside threads. Neither tool confines the filesystem, the network, or process signalling: a command
 runs as you, reads what you can read, and can signal Kokua's own process. The approval gate is the
 control; reach for a container if you need containment.
+
+## `[documents]`
+
+Declared by the `documents` toolset, so read only when some agent declares `documents` or one of its
+parts. Both keys are startup-only: they decide how every collection's index is built.
+
+| Key | Type | Default | Hot | Meaning |
+| --- | --- | --- | --- | --- |
+| `embedding_model` | string | `"hf:BAAI/bge-base-en-v1.5"` | no | the embedding model every collection's index uses for semantic search; `""` for keyword search only |
+| `rerank` | bool | `false` | no | rerank each search's fused results with a cross-encoder |
+
+```toml
+[documents]
+embedding_model = "hf:BAAI/bge-base-en-v1.5"
+rerank = false
+```
+
+**`embedding_model`** is any embedding model AIMU can build, as a `provider:model_id` string. The default
+runs locally: nothing is fetched at startup, and the first search downloads the model (about 440 MB)
+while indexing begins in the background, so early searches say their results may be incomplete. Set it to
+`""` to search by keyword alone: no model, no download, and no vectors. A string AIMU cannot build as an
+embedding model fails when the documents toolset is first built, naming the value and both fixes. One
+AIMU can build but not load (the download fails, say) leaves keyword search working, and each search says
+so in its result.
+Changing it re-embeds every collection on the next search.
+
+A remote embedding model (AIMU accepts `openai:` ones) reads every passage of every collection while it
+indexes, not just what a search returns, which is why this key is locked by default in
+[`locked_config_keys`](#locked_config_keys): `update_config` refuses it, so only a hand-edit changes
+where your collections are embedded. A `config.toml` scaffolded before that lock writes the list out in
+full, so add `"documents.embedding_model"` to it. [Retrieval](../explanation/retrieval.md#privacy) covers
+what the chat model reads as well.
+
+**`rerank`** reorders the top fused results with a cross-encoder, a model that reads the query and each
+passage together. It is slower than fusion alone and downloads a model of its own on first use.
+
+How search works, from chunking to rank fusion, is [Retrieval](../explanation/retrieval.md).
+
+## `[[documents.collection]]`
+
+Folders of your own documents, such as an Obsidian vault or a folder of papers, for the `documents`
+toolset to search, read, and, where you allow it, write. An array of tables: one
+`[[documents.collection]]` header per folder.
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `name` | yes | how the collection is named in `available` lists, tool calls, and search results |
+| `path` | yes | the folder, absolute or starting with `~` |
+| `writable` | no | `true` to allow `save_document` and `edit_document` here. Default `false` |
+| `description` | no | what the collection holds, shown to the model beside its name in `list_documents` |
+
+```toml
+[[documents.collection]]
+name = "personal"
+path = "~/Obsidian/Personal"
+writable = true
+description = "Personal research notes and papers."
+
+[[documents.collection]]
+name = "work"
+path = "~/Obsidian/Work"
+```
+
+Every install also has the built-in collection `kokua`, the folder at `data/documents` the assistant saves
+into, always writable. Files count as documents when they end in `.md`, `.markdown`, `.txt`, or `.pdf`;
+anything else in the folder is not listed or searched, and dot-files and dot-directories (`.obsidian/`,
+`.trash/`) are skipped. PDFs are read-only. Each collection's index lives under `data/index/<name>/`,
+never in the folder itself.
+
+**Granting a collection.** A collection reaches an agent only by being named in its
+[`available`](#available) list, as a part of the `documents` toolset:
+
+| In `available` | Grants |
+| --- | --- |
+| `"documents"` | every collection, each writable where `writable = true` (and `kokua`, always writable) |
+| `"<name>"` | that collection, read-only, whatever `writable` says |
+| `"<name>_write"` | that collection, read and write; exists only when it is `writable = true` |
+
+An agent granted only read-only collections gets `list_documents`, `read_document`, and
+`search_documents`, and no write tool at all. `kokua --list-toolsets` lists every part under `documents`.
+Approval entries name the toolset (`documents.edit_document`), however the agent was granted it.
+
+**What startup checks.** Each of these fails startup, naming the collection:
+
+- a `name` that is not lowercase letters, digits, underscores, and hyphens starting with a letter, that
+  ends in `_write`, that is `kokua` or `documents`, or `core` or `all` (both reserved for every name an
+  agent declares), or that is declared twice;
+- a `name`, or its `<name>_write`, that is already the name of a toolset, a skill, or an MCP server;
+- a `path` that is absent or relative, or names something that does not exist or is not a folder;
+- a `path` that is, is inside, or holds Kokua's data directory, since indexing it would index Kokua's own
+  state;
+- two collections whose paths resolve to the same folder (symlinks are resolved first);
+- a read-only collection whose folder is inside a writable collection's, since its files could be written
+  through the outer one and `writable = false` would protect nothing;
+- `writable` or `description` of the wrong type, or any other key;
+- an agent declaring `<name>_write` for a collection that is not writable, with the error naming the
+  `writable = true` to set.
+
+Any other nesting is allowed: a read-only folder inside a read-only one, or a writable folder inside
+either kind. Startup-only, like `[[mcp.server]]`, because a new
+collection is a new set of files the assistant may read; and refused by `update_config` for the same
+reason, whatever [`locked_config_keys`](#locked_config_keys) says.
 
 ## Toolset sections
 
