@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "aimu"
-version = "0.40.1"
+version = "0.41.0"
 source = { editable = "../aimu" }
 dependencies = [
     { name = "fastmcp" },

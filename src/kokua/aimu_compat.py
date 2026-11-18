@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.40.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.41.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -354,29 +354,43 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 40, 0)
+MINIMUM_AIMU = (0, 41, 0)
 
-# The floor is 0.40.0, for the three capabilities that release carries and Kokua depends on: the
-# `TOOL_REQUESTED` phase the web page draws a running tool call from, `aimu.tools.ToolResult` so
+# The floor is 0.41.0, for document collections: `DocumentStore` gained a passage index
+# (`index_path`, `embedding_client`, `search_passages`, `index_status`) and reads PDFs, and
+# `aimu.tools.builtin.make_collection_tools` binds an agent's tools to several stores at once, which is
+# what `toolsets/documents.py` hands out in place of `make_document_tools`.
+#
+# The surface is `make_collection_tools`, a plain name lookup, the tenth time: the factory is a new export,
+# so its presence alone dates a checkout. Left unprobed it is loud, `toolsets/documents.py` importing it at
+# module scope while the toolsets load, after this preflight, but naming a symbol rather than the fix. What
+# it leaves to the floor is the behavior behind the name: that a store reads a PDF's text rather than
+# listing the file unreadable, which raises nothing; that the index ranks passages and reports its
+# `problems`; and that the factory takes the `descriptions` Kokua passes. `tests/test_aimu_compat.py` pins
+# those. `aimu.tools.Denied`, which the unattended refusal returns, is older than this floor and needs
+# nothing. `aimu.context.compaction.chain` is the floor's job now.
+#
+# Previously, from 0.40.0: the floor was 0.40.0, for the three capabilities that release carries and Kokua
+# depends on: the `TOOL_REQUESTED` phase the web page draws a running tool call from, `aimu.tools.ToolResult` so
 # `generate_image` can hand the model its image, and `aimu.context.compaction`, which a worker compacts with.
 # The probe ran ahead of the release through all three, the floor holding at 0.39.0 so a sibling on AIMU main
 # could start and `_PROBE_UNRELEASED` saying no release had them yet; with 0.40.0 published, the floor is that
 # release and `_PROBE_UNRELEASED` is back to None, kept for the next probe that runs ahead.
 #
-# The surface is `aimu.context.compaction.chain`, from the module that bundles AIMU's compaction strategies
+# The surface was `aimu.context.compaction.chain`, from the module that bundles AIMU's compaction strategies
 # and ready-made compactions. `compaction_for_window` builds a worker's compaction as
 # `chain(mask(budget), trim(budget))`: old content masked in place with notes naming each message, whole
 # messages dropped only if that is not enough. It replaced `ToolResult` below while both were only on AIMU's
 # main branch, and the compaction module landed later in 0.40.0, so a checkout that has it has `ToolResult`
 # and `TOOL_REQUESTED` too.
 #
-# The shape is a plain name lookup, the ninth time, on a module that did not exist before (the strategies
+# The shape was a plain name lookup, the ninth time, on a module that did not exist before (the strategies
 # lived in a single `aimu.context` module), so an older checkout fails the import itself and the preflight
 # reports that. Left unprobed it is loud, `core/agents.py` importing it at module scope, but naming a module
 # rather than the fix. What it leaves to the floor is the behavior behind the names: that `mask` replaces
 # content in place in the documented order, and that every run with a compaction carries AIMU's
-# `get_message` for the notes to name. `tests/test_aimu_compat.py` pins both by behavior. `ToolResult` is the
-# floor's job now.
+# `get_message` for the notes to name. `tests/test_aimu_compat.py` pins both by behavior. `ToolResult` became
+# the floor's job then.
 #
 # Previously, on AIMU main before 0.40.0: the surface was `aimu.tools.ToolResult`, a tool's answer carrying
 # images as well as text. `generate_image`
@@ -504,9 +518,9 @@ MINIMUM_AIMU = (0, 40, 0)
 #
 # `aio.SkillAgent.run`'s `steering` parameter (a signature check) is the floor's job now, in its turn, and
 # the parameter this probe grips today is spelled `inbox`.
-_PROBE_MODULE = "aimu.context.compaction"
+_PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "chain"
+_PROBE_SYMBOL = "make_collection_tools"
 _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 #: The first AIMU release that will carry the probed surface, when no published release does yet; None

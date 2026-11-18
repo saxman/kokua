@@ -51,7 +51,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.40.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.41.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -60,7 +60,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.40.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.41.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -423,7 +423,7 @@ Consequences for working in this repo:
   pinned in `tests/test_aimu_compat.py`. 0.39.0 is also when Ollama clients stopped downloading a missing
   model on construction, so a missing model reaches a turn as `ModelNotInstalledError`, imported at module
   scope by `core/turns.py` (loud when absent, so the floor's job).
-  **AIMU 0.40.0 is the current floor, and its probe ran ahead of the release three times before it shipped.**
+  **AIMU 0.40.0 was the floor until 0.41.0, and its probe ran ahead of the release three times before it shipped.**
   First onto `StreamingContentType.TOOL_REQUESTED`, the phase a streamed loop yields for each tool call before
   it runs, which the web page draws a call's card from: a membership check (the enum is far older than the
   floor). Then onto `aimu.tools.ToolResult`, a tool's answer carrying images, which `generate_image` returns so
@@ -433,10 +433,17 @@ Consequences for working in this repo:
   the ninth, on a module that did not exist before, so an older checkout fails the import itself. Each landed
   after the one before, so each probe subsumed the last. Throughout, the floor stayed at 0.39.0 so a sibling
   on AIMU main could start, and `_PROBE_UNRELEASED` named 0.40.0 so the refusal said no release had the
-  surface yet; with 0.40.0 published, the floor is that release and `_PROBE_UNRELEASED` is None again.
+  surface yet; with 0.40.0 published, the floor became that release and `_PROBE_UNRELEASED` None again.
   `make_page_tools`, `TOOL_REQUESTED`, and `ToolResult` are pinned in `tests/test_aimu_compat.py`, and so is
-  what the current probe's name cannot see: that the loops store image blocks only on a vision model, that
+  what that probe's name could not see: that the loops store image blocks only on a vision model, that
   masking happens in place, and that `get_message` comes with every compaction.
+  **AIMU 0.41.0 is the current floor, for document collections.** The probe is a plain name lookup on
+  `aimu.tools.builtin.make_collection_tools`, the tenth, which `toolsets/documents.py` binds to every
+  collection an agent holds; it is a new export, so the name alone dates a checkout. What it leaves to the
+  floor, pinned in `tests/test_aimu_compat.py`: that `DocumentStore` reads a PDF's text (an older store
+  lists the file unreadable and raises nothing), that its index ranks passages and reports `problems`, and
+  that the factory takes `descriptions`. `aimu.tools.Denied`, which the unattended refusal returns, is older
+  than this floor. `aimu.context.compaction.chain` is the floor's job now.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
