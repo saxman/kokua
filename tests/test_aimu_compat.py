@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from importlib.metadata import PackageNotFoundError
 import tempfile
 from pathlib import Path
@@ -178,28 +179,26 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
     require_aimu()
 
 
-def test_the_probe_targets_the_compaction_module_a_worker_compacts_with():
-    """The surface today is ``aimu.context.compaction.chain``, published in 0.40.0, the floor.
+def test_the_probe_targets_the_collection_tools_the_documents_toolset_builds():
+    """The surface today is ``aimu.tools.builtin.make_collection_tools``, published in 0.41.0, the floor.
 
-    A name lookup on a module that did not exist before (the strategies lived in a single
-    ``aimu.context`` module), so an older checkout fails at the import and the preflight says so.
-    ``core/agents.py`` imports it at module scope, so without the probe the failure would name a module
-    rather than the fix.
+    A name lookup on a new export: ``toolsets/documents.py`` imports it at module scope, so without the
+    probe an older AIMU fails while the toolsets load, naming a symbol rather than the fix.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     assert callable(getattr(module, aimu_compat._PROBE_SYMBOL))
-    assert aimu_compat._PROBE_MODULE == "aimu.context.compaction"
+    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_SYMBOL == "chain"
+    assert aimu_compat._PROBE_SYMBOL == "make_collection_tools"
     assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
-    # 0.40.0 is published, so no probe is running ahead of a release.
+    # 0.41.0 is published, so no probe is running ahead of a release.
     assert aimu_compat._PROBE_UNRELEASED is None
 
 
-def _aimu_without_the_compaction_module(monkeypatch):
+def _aimu_without_the_probed_module(monkeypatch):
     def import_module(name):
         raise ModuleNotFoundError(f"No module named {name!r}")
 
@@ -210,17 +209,84 @@ def _aimu_without_the_compaction_module(monkeypatch):
 def test_a_checkout_claiming_the_floor_without_the_module_is_sent_to_pypi(monkeypatch):
     """With the probe's surface published, an AIMU claiming the floor and lacking it is a stale editable
     checkout, and installing the floor from PyPI is a real remedy."""
-    _aimu_without_the_compaction_module(monkeypatch)
+    _aimu_without_the_probed_module(monkeypatch)
     with pytest.raises(AimuVersionError) as excinfo:
         require_aimu()
     message = str(excinfo.value)
-    assert "aimu.context.compaction" in message
+    assert "aimu.tools.builtin" in message
     assert "--no-sources" in message
     assert "no AIMU release" not in message
 
 
-def test_the_floor_covers_masking_in_place_behind_the_probed_name():
-    """What a name lookup cannot see: ``mask`` keeps every message where it is and replaces old content
+def _minimal_pdf(text: str) -> bytes:
+    """A one-page PDF with one line of Helvetica text, built literally so the fixture stays readable."""
+    stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 3 0 R >> >> "
+        b"/Contents 5 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def test_the_floor_covers_a_document_store_that_reads_pdfs(tmp_path):
+    """What a name lookup cannot see, and silent when missing: an older store skips a PDF as unreadable
+    rather than raising, so a collection of papers simply comes back empty."""
+    from aimu.memory import DocumentStore
+
+    (tmp_path / "paper.pdf").write_bytes(_minimal_pdf("Alpha results"))
+    store = DocumentStore(persist_path=str(tmp_path), extensions=(".md", ".pdf"))
+    assert "/paper.pdf" in store.list_paths()
+    assert "Alpha results" in store.read("/paper.pdf")
+
+
+def test_the_floor_covers_the_index_surface_documents_build_on():
+    """``LiveState.document_stores`` builds each store with an index and a shared embedding client, and the
+    collection tools read its passages and its status; a store without them fails only when documents
+    first build, after this preflight."""
+    import inspect
+
+    from aimu.memory import DocumentStore, IndexStatus
+
+    parameters = inspect.signature(DocumentStore).parameters
+    assert {"index_path", "embedding_client", "max_file_bytes", "extensions"} <= set(parameters)
+    assert callable(DocumentStore.search_passages)
+    assert callable(DocumentStore.index_status)
+    assert "problems" in {field.name for field in dataclasses.fields(IndexStatus)}
+
+
+def test_the_floor_covers_the_descriptions_the_documents_toolset_passes():
+    """``toolsets/documents.py`` passes each collection's declared description, so a model can tell
+    collections apart; a factory without the keyword raises ``TypeError`` at the first documents build."""
+    import inspect
+
+    from aimu.tools.builtin import make_collection_tools
+
+    assert "descriptions" in inspect.signature(make_collection_tools).parameters
+
+
+def test_the_floor_covers_the_compaction_module_the_probe_no_longer_grips():
+    """0.40.0's probe surface is the floor's job now that ``make_collection_tools`` holds the one probe slot.
+    ``core/agents.py`` imports it at module scope, so an AIMU without it fails at import, naming a module."""
+    from aimu.context.compaction import chain
+
+    assert callable(chain)
+
+
+def test_the_floor_covers_masking_in_place_behind_the_compaction_module():
+    """What a name lookup on the module could not see: ``mask`` keeps every message where it is and replaces old content
     with a note naming the message and ``get_message``, tool results first."""
     from aimu.context.compaction import MASK_ORDER, mask
 
@@ -261,8 +327,7 @@ def test_the_floor_covers_get_message_coming_with_a_compaction():
 
 
 def test_the_floor_covers_the_tool_result_the_probe_no_longer_grips():
-    """The previous probe surface is the floor's job now that the compaction module, which landed later in
-    the same release, holds the one probe slot. ``toolsets/image.py`` imports it at module scope, so an AIMU
+    """Two probes back: the compaction module, which landed later in 0.40.0, took the probe slot from it. ``toolsets/image.py`` imports it at module scope, so an AIMU
     without it fails while the toolsets load, naming a symbol."""
     from aimu.tools import ToolResult
 
@@ -270,15 +335,15 @@ def test_the_floor_covers_the_tool_result_the_probe_no_longer_grips():
 
 
 def test_the_floor_covers_the_announcement_phase_the_probe_no_longer_grips():
-    """Two probes back, and the floor's job since: ``channels/ui.py`` reads the member by attribute on a
+    """Three probes back, and the floor's job since: ``channels/ui.py`` reads the member by attribute on a
     turn's first chunk, so an AIMU without it fails mid-turn naming a symbol."""
     from aimu.models import StreamingContentType
 
     assert "TOOL_REQUESTED" in StreamingContentType.__members__
 
 
-def test_the_floor_covers_the_image_blocks_behind_the_probed_name():
-    """What the name lookup cannot see: a vision model's tool message carries the image, and a model
+def test_the_floor_covers_the_image_blocks_behind_tool_result():
+    """What a name lookup on ``ToolResult`` could not see: a vision model's tool message carries the image, and a model
     without vision is sent the text alone. Both are silent when missing (the turn still completes)."""
     from unittest.mock import MagicMock
 
@@ -627,10 +692,10 @@ def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
     assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_40_0():
+def test_the_floor_is_0_41_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 40, 0)
+    assert MINIMUM_AIMU == (0, 41, 0)
 
 
 def test_the_floor_covers_a_trim_that_keeps_the_workers_task():
