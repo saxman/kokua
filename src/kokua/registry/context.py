@@ -78,7 +78,8 @@ class LiveState:
 
     ``for_each_agent`` fans a global tool mutation (an MCP add or remove) across every live agent.
     ``notify`` is ``ChannelUI.alert``: a line raised outside whatever conversation the user is reading,
-    which today is only the MCP authorization link (see ``mcp.auth.Notify`` for its shape).
+    which today is only the MCP authorization link (see ``mcp.auth.Notify`` for its shape), and
+    ``retire_alert`` is ``ChannelUI.retire_alert``, which takes that link down once it is answered.
     ``proactive`` is the assistant's unprompted-turn entry point, which a due scheduled task fires.
     ``registry`` is the toolset registry, needed here because rebuilding an agent's delegation tool
     after an MCP change has to re-resolve names.
@@ -86,6 +87,7 @@ class LiveState:
 
     config: AssistantConfig
     notify: Optional[Callable] = None
+    retire_alert: Optional[Callable] = None
     oauth: Optional[OAuthSettings] = None
     connections: list = field(default_factory=list)
     for_each_agent: Optional[Callable[[Callable], None]] = None

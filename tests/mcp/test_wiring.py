@@ -531,3 +531,16 @@ async def test_an_oauth_prompt_is_raised_as_an_alert_not_a_chat_message(tmp_path
 
     assert channel.alerts == [("Authorize access at https://auth.svc/a", None, "https://auth.svc/a", None)]
     assert channel.sent == []
+
+
+async def test_an_answered_oauth_prompt_is_taken_down_on_the_channel(tmp_path):
+    """``retire_alert`` is how ``ChatOAuth`` takes its card back once the callback arrives; wired to
+    nothing, the card would outlive the authorization it asked for."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["ok"])
+    )
+
+    await assistant._state.retire_alert("mcp-auth:https://svc/mcp")
+
+    assert channel.retired_groups == ["mcp-auth:https://svc/mcp"]

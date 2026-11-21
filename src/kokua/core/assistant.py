@@ -276,6 +276,7 @@ class Assistant:
         state = LiveState(
             config=config,
             notify=assistant._ui.alert,
+            retire_alert=assistant._ui.retire_alert,
             oauth=oauth,
             connections=connections,
             scheduler=scheduler,
@@ -344,7 +345,12 @@ class Assistant:
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
         await reconnect_mcp_servers(
-            state.for_each_agent, state.connections, config, notify=state.notify, oauth=state.oauth
+            state.for_each_agent,
+            state.connections,
+            config,
+            notify=state.notify,
+            retire_alert=state.retire_alert,
+            oauth=state.oauth,
         )
         for name in configured_but_undeclared(config, state.registry):
             logger.warning(

@@ -3301,6 +3301,22 @@ async def test_web_channel_notification_carries_its_group():
     assert ws.frames[0]["group"] == "Digest"
 
 
+async def test_an_alert_retired_frame_is_never_muted_by_a_switch():
+    """The card was raised over whatever was on screen, so its retirement must reach the page
+    whatever is on screen now, including while a background turn streams elsewhere."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "on-screen"
+    token = streaming_conversation.set("elsewhere")
+    try:
+        await channel.send_alert_retired("mcp-auth:https://svc/mcp")
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "alert_retired", "group": "mcp-auth:https://svc/mcp"}]
+
+
 async def test_send_history_replays_a_stored_turns_mid_turn_messages_as_inbox_items():
     """The conversation's own record of which messages were sent into a running turn reaches the
     replay, so a reload draws them the way the live frame marked them rather than as turns of their

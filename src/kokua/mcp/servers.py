@@ -23,7 +23,7 @@ from aimu import aio
 
 from kokua.config import AssistantConfig, MCPServerConfig
 from kokua.config import store as config_store
-from kokua.mcp.auth import Notify, OAuthSettings, build_chat_oauth
+from kokua.mcp.auth import Notify, OAuthSettings, RetireAlert, build_chat_oauth
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,7 @@ async def connect_mcp(
     bearer_token: Optional[str] = None,
     auth_mode: Optional[str] = None,
     notify: Notify,
+    retire_alert: RetireAlert,
     oauth: OAuthSettings,
 ) -> tuple[Any, str]:
     """Connect to a remote MCP server, returning ``(client, auth_mode_used)``.
@@ -133,13 +134,14 @@ async def connect_mcp(
     OAuth persists tokens under ``oauth.storage_dir``, so the usual path through the challenge branch
     below finds a cached token and connects without involving the user at all. ``notify`` posts an
     authorization link only when there is no usable token, which is why its absence from a log is the
-    signal that token reuse is working.
+    signal that token reuse is working. ``retire_alert`` takes that link back once the flow no longer
+    needs it (see :class:`~kokua.mcp.auth.ChatOAuth`).
     """
     if bearer_token:
         return await aio.MCPClient.connect(url=url, auth=bearer_token), "bearer"
     if auth_mode == "oauth":
         async with _OAUTH_CONNECT_LOCK:
-            provider = build_chat_oauth(url, notify=notify, oauth=oauth)
+            provider = build_chat_oauth(url, notify=notify, retire_alert=retire_alert, oauth=oauth)
             return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
     if auth_mode == "none":
         return await aio.MCPClient.connect(url=url), "none"
@@ -154,7 +156,7 @@ async def connect_mcp(
         # tool came back empty off hunting a token-persistence bug that isn't there.
         logger.info("MCP server %s rejected an unauthenticated request; trying OAuth credentials.", url)
         async with _OAUTH_CONNECT_LOCK:
-            provider = build_chat_oauth(url, notify=notify, oauth=oauth)
+            provider = build_chat_oauth(url, notify=notify, retire_alert=retire_alert, oauth=oauth)
             try:
                 return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
             except Exception as oauth_exc:
@@ -246,6 +248,7 @@ async def add_server(
     *,
     bearer_token: Optional[str] = None,
     notify: Notify,
+    retire_alert: RetireAlert,
     oauth: OAuthSettings,
     config_path: Path,
     for_each_agent: ForEachAgent,
@@ -265,7 +268,9 @@ async def add_server(
     if any(conn.url == url for conn in connections):
         raise AlreadyConnected(url)
     try:
-        client, auth_mode = await connect_mcp(url, bearer_token=bearer_token, notify=notify, oauth=oauth)
+        client, auth_mode = await connect_mcp(
+            url, bearer_token=bearer_token, notify=notify, retire_alert=retire_alert, oauth=oauth
+        )
         added = await attach_server(connections, url, client, auth_mode)
     except BearerTokenRequired:
         raise
@@ -340,6 +345,7 @@ async def reconnect_mcp_servers(
     config: AssistantConfig,
     *,
     notify: Notify,
+    retire_alert: RetireAlert,
     oauth: OAuthSettings,
 ) -> None:
     """Reconnect MCP servers at boot so their tools are available without re-adding them.
@@ -376,6 +382,7 @@ async def reconnect_mcp_servers(
                 server.url,
                 bearer_token=_resolve_server_token(server),
                 notify=notify,
+                retire_alert=retire_alert,
                 oauth=oauth,
             )
         except Exception:

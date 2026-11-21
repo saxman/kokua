@@ -63,10 +63,11 @@ Three modes, chosen automatically:
 
 - **None.** An unprotected server connects directly.
 - **OAuth.** On an auth challenge, the flow starts by itself: the assistant posts an authorization link
-  into the chat and opens a browser window. Once you approve, the connection completes and the token is
-  saved under `$KOKUA_HOME/data/mcp-oauth/` for later sessions. The posted message names the address
-  your approval will be sent back to, which matters if you are not browsing from Kokua's own machine
-  (see below).
+  into the chat and opens a browser window. Once you approve, in either one, the link is taken down, the
+  connection completes, and the token is saved under `$KOKUA_HOME/data/mcp-oauth/` for later sessions.
+  If the flow times out or the provider refuses it, the link is replaced by the reason. The posted
+  message names the address your approval will be sent back to, which matters if you are not browsing
+  from Kokua's own machine (see below).
 - **Bearer token.** Set `token_env` to the name of an environment variable, exported however you already
   manage secrets. It is read at connect time, so the token never enters `config.toml`.
 

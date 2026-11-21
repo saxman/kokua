@@ -7,7 +7,11 @@ from kokua.mcp.auth import OAuthSettings
 from tests.helpers import core_table
 
 
-async def _noop_notify(message: str) -> None:
+async def _noop_notify(message: str, **fields) -> None:
+    return None
+
+
+async def _noop_retire(group: str) -> None:
     return None
 
 
@@ -16,6 +20,7 @@ def _tools(tmp_path, connections=None):
         lambda fn: None,
         connections if connections is not None else [],
         notify=_noop_notify,
+        retire_alert=_noop_retire,
         oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         config_path=tmp_path / "config.toml",
     )

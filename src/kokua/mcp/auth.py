@@ -12,9 +12,12 @@ in memory (re-auth every process). For a chat assistant we want two changes:
 - **Refuse a callback address Kokua cannot listen on** (:class:`CallbackUnavailable`), before the
   link is posted. FastMCP binds the callback server only after the browser has been sent off, and
   a failed bind exits through uvicorn's ``sys.exit``, which took the whole process down with it.
+- **Take the link back once nothing is waiting on it.** An alert card stays until something
+  replaces or retires it, so the card is retired when the callback arrives and replaced by the
+  reason when the flow is abandoned. Left up, it offers a link to a flow already finished.
 
 ``ChatOAuth`` is a thin ``fastmcp`` ``OAuth`` subclass wired with a persistent ``FileTreeStore``
-and a ``notify`` callback; ``build_chat_oauth`` constructs one for a URL from an
+and the ``notify`` / ``retire_alert`` pair; ``build_chat_oauth`` constructs one for a URL from an
 :class:`OAuthSettings`. AIMU forwards the provider object straight to the underlying
 ``fastmcp.Client`` (see ``MCPClient(auth=...)``).
 """
@@ -42,10 +45,22 @@ class Notify(Protocol):
 
     ``url`` is the one thing in the line worth clicking, passed as a field as well as in the text:
     a front end that can render a control makes one from it, and a plain-text channel still has the
-    address in the sentence. See ``ChannelUI.alert``, which is what this is bound to.
+    address in the sentence. ``group`` names what the line is about, so a later line, or a
+    :class:`RetireAlert` call, for the same group replaces it. See ``ChannelUI.alert``, which is what
+    this is bound to.
     """
 
-    async def __call__(self, text: str, *, url: Optional[str] = None) -> None: ...
+    async def __call__(self, text: str, *, url: Optional[str] = None, group: Optional[str] = None) -> None: ...
+
+
+class RetireAlert(Protocol):
+    """Take back the line :class:`Notify` posted under ``group``, because nothing waits on it any more.
+
+    See ``ChannelUI.retire_alert``, which is what this is bound to. A channel that printed the line
+    cannot take it back, so there it does nothing.
+    """
+
+    async def __call__(self, group: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -128,11 +143,21 @@ def _bind_error(host: str, port: int) -> Optional[OSError]:
 
 
 class ChatOAuth(OAuth):
-    """OAuth provider that also posts the authorization link into the chat channel."""
+    """OAuth provider that also posts the authorization link into the chat channel.
 
-    def __init__(self, mcp_url: str, *, notify: Notify, token_storage: FileTreeStore, **kwargs):
+    Every line it posts carries one group per server, so the link, the reason a flow could not
+    finish, and the retirement all address the same card, and a second flow for the server (FastMCP
+    restarts one whose cached client the provider no longer knows) replaces the first card.
+    """
+
+    def __init__(
+        self, mcp_url: str, *, notify: Notify, retire_alert: RetireAlert, token_storage: FileTreeStore, **kwargs
+    ):
         super().__init__(mcp_url, token_storage=token_storage, **kwargs)
         self._notify = notify
+        self._retire_alert = retire_alert
+        self._mcp_url = mcp_url
+        self._alert_group = f"mcp-auth:{mcp_url}"
 
     @property
     def _callback_url(self) -> str:
@@ -155,7 +180,7 @@ class ChatOAuth(OAuth):
     async def _callback_unavailable(self, cause: Optional[OSError]) -> CallbackUnavailable:
         """Tell the user why authorization cannot finish, and return the error to raise."""
         error = CallbackUnavailable(*self._callback_address, cause)
-        await self._notify(str(error))
+        await self._notify(str(error), group=self._alert_group)
         return error
 
     async def redirect_handler(self, authorization_url: str) -> None:
@@ -174,29 +199,60 @@ class ChatOAuth(OAuth):
             "listening, so that address has to reach the machine Kokua runs on. A browser window "
             "should also open there automatically.",
             url=authorization_url,
+            group=self._alert_group,
         )
         # super() performs the stale-client pre-flight check and webbrowser.open(). Run it after
-        # posting the link so the user always has the URL even if the browser does not open.
-        await super().redirect_handler(authorization_url)
+        # posting the link so the user always has the URL even if the browser does not open. A failed
+        # pre-flight abandons this attempt (and a stale client makes FastMCP start another, which
+        # posts its own card), so the link just posted leads nowhere.
+        try:
+            await super().redirect_handler(authorization_url)
+        except Exception:
+            await self._retire_alert(self._alert_group)
+            raise
 
     async def callback_handler(self) -> tuple[str, Optional[str]]:
-        """Run FastMCP's callback server, turning a failure to start it into :class:`CallbackUnavailable`.
+        """Run FastMCP's callback server, then retire the authorization card or say why it failed.
 
-        The check in :meth:`redirect_handler` makes this rare (something has to take the port in the
-        moment between the two), but its cost is the whole process: uvicorn reports a failed bind by
-        calling ``sys.exit(1)``, and the ``SystemExit`` passes every ``except Exception`` between here
-        and the event loop. Within this call the callback server is the only thing that can raise one.
+        The callback arriving is where the user's part ends, so the card goes then rather than after
+        the token exchange that follows. That exchange can still fail, and is reported where any
+        connect failure is (the log at boot, the tool's result at runtime), because by then there is
+        nothing the card could ask the user to do.
+
+        A failure to start the server becomes :class:`CallbackUnavailable`. The check in
+        :meth:`redirect_handler` makes this rare (something has to take the port in the moment between
+        the two), but its cost is the whole process: uvicorn reports a failed bind by calling
+        ``sys.exit(1)``, and the ``SystemExit`` passes every ``except Exception`` between here and the
+        event loop. Within this call the callback server is the only thing that can raise one.
+
+        Every failure arrives wrapped in an exception group, the timeout included, because FastMCP
+        raises from inside the task group running the server.
         """
         try:
-            return await super().callback_handler()
+            result = await super().callback_handler()
         except BaseExceptionGroup as group:
-            if group.subgroup(SystemExit) is None:
-                raise
-            cause = await asyncio.to_thread(_bind_error, *self._callback_address)
-            raise await self._callback_unavailable(cause) from group
+            if group.subgroup(SystemExit) is not None:
+                cause = await asyncio.to_thread(_bind_error, *self._callback_address)
+                raise await self._callback_unavailable(cause) from group
+            # Only an ordinary failure gets a card. A cancellation is the connect being torn down
+            # (shutdown, a stopped turn), with no reason worth telling the user and no time to tell it.
+            if isinstance(group, ExceptionGroup):
+                await self._notify(
+                    f"Authorization for {self._mcp_url} did not complete: {_innermost(group)}",
+                    group=self._alert_group,
+                )
+            raise
+        await self._retire_alert(self._alert_group)
+        return result
 
 
-def build_chat_oauth(url: str, *, notify: Notify, oauth: OAuthSettings) -> ChatOAuth:
+def _innermost(group: BaseExceptionGroup) -> BaseException:
+    """The first exception a (possibly nested) group wraps, which is the one worth telling the user."""
+    first = group.exceptions[0]
+    return _innermost(first) if isinstance(first, BaseExceptionGroup) else first
+
+
+def build_chat_oauth(url: str, *, notify: Notify, retire_alert: RetireAlert, oauth: OAuthSettings) -> ChatOAuth:
     """Build a ``ChatOAuth`` for ``url`` with file-backed token storage under ``oauth.storage_dir``.
 
     FastMCP keys cached tokens/client-info by the full server URL (e.g.
@@ -214,6 +270,7 @@ def build_chat_oauth(url: str, *, notify: Notify, oauth: OAuthSettings) -> ChatO
     return ChatOAuth(
         url,
         notify=notify,
+        retire_alert=retire_alert,
         token_storage=store,
         callback_host=oauth.callback_host,
         callback_port=oauth.callback_port,

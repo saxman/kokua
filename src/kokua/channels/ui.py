@@ -66,6 +66,7 @@ class ChannelUI:
         self._toolset_of = toolset_of
         self._conversations = getattr(channel, "send_conversations", None)
         self._notification = getattr(channel, "send_notification", None)
+        self._alert_retired = getattr(channel, "send_alert_retired", None)
         self._approval_request = getattr(channel, "send_approval_request", None)
         self._prompt_retired = getattr(channel, "send_prompt_retired", None)
         self._auto_approval = getattr(channel, "send_auto_approval", None)
@@ -270,6 +271,16 @@ class ChannelUI:
             await self._notification(text, conversation_id=conversation_id, url=url, group=group)
         else:
             await self._channel.send(text)
+
+    async def retire_alert(self, group: str) -> None:
+        """Take down the card :meth:`alert` raised under ``group``, once nothing is waiting on it.
+
+        Silence on a channel without the frame: what :meth:`alert`'s fallback printed is already in
+        the scrollback, and a line saying the earlier line no longer applies tells the user nothing
+        the next thing they see will not.
+        """
+        if self._alert_retired is not None:
+            await self._alert_retired(group)
 
     async def ask_approval(
         self,

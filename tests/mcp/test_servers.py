@@ -58,7 +58,11 @@ async def test_connect_mcp_bearer_token_skips_oauth(monkeypatch, tmp_path):
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     client, mode = await mcp.connect_mcp(
-        "https://svc/mcp", bearer_token="tok", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path)
+        "https://svc/mcp",
+        bearer_token="tok",
+        notify=_noop_notify,
+        retire_alert=_noop_retire,
+        oauth=OAuthSettings(storage_dir=tmp_path),
     )
     assert (client, mode) == ("client", "bearer")
 
@@ -73,7 +77,10 @@ async def test_connect_mcp_asks_for_bearer_when_registration_unsupported(monkeyp
 
     with pytest.raises(mcp.BearerTokenRequired) as excinfo:
         await mcp.connect_mcp(
-            "https://git.example/mcp", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+            "https://git.example/mcp",
+            notify=_noop_notify,
+            retire_alert=_noop_retire,
+            oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         )
     assert "git.example" in str(excinfo.value)
     assert "bearer token" in str(excinfo.value).lower()
@@ -89,7 +96,10 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
 
     with pytest.raises(RuntimeError, match="token exchange failed"):
         await mcp.connect_mcp(
-            "https://svc/mcp", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+            "https://svc/mcp",
+            notify=_noop_notify,
+            retire_alert=_noop_retire,
+            oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         )
 
 
@@ -115,7 +125,11 @@ async def test_connect_mcp_serializes_the_oauth_branch_across_concurrent_connect
 
     async def connect(url: str):
         return await mcp.connect_mcp(
-            url, auth_mode="oauth", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+            url,
+            auth_mode="oauth",
+            notify=_noop_notify,
+            retire_alert=_noop_retire,
+            oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         )
 
     await asyncio.gather(connect("https://one/mcp"), connect("https://two/mcp"))
@@ -141,7 +155,11 @@ def test_resolve_server_token_warns_when_env_unset(monkeypatch, caplog):
     assert any("MISSING_MCP_TOKEN" in rec.message for rec in caplog.records)
 
 
-async def _noop_notify(message: str) -> None:
+async def _noop_notify(message: str, **fields) -> None:
+    pass
+
+
+async def _noop_retire(group: str) -> None:
     pass
 
 
@@ -168,13 +186,14 @@ def _named(name):
     return fn
 
 
-async def _noop_notify(message: str) -> None:
+async def _noop_notify(message: str, **fields) -> None:
     return None
 
 
 def _kwargs(tmp_path, **overrides):
     base = {
         "notify": _noop_notify,
+        "retire_alert": _noop_retire,
         "oauth": OAuthSettings(storage_dir=tmp_path / "oauth"),
         "config_path": tmp_path / "config.toml",
         "for_each_agent": lambda fn: None,
@@ -316,7 +335,12 @@ async def test_boot_reconnect_logs_the_tool_names_each_server_contributed(monkey
 
     with caplog.at_level("INFO", logger="kokua.mcp.servers"):
         await mcp.reconnect_mcp_servers(
-            lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+            lambda fn: None,
+            [],
+            config,
+            notify=_noop_notify,
+            retire_alert=_noop_retire,
+            oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         )
 
     logged = " ".join(record.getMessage() for record in caplog.records)
@@ -334,7 +358,12 @@ async def test_boot_reconnect_says_so_when_a_server_contributes_no_tools(monkeyp
 
     with caplog.at_level("INFO", logger="kokua.mcp.servers"):
         await mcp.reconnect_mcp_servers(
-            lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+            lambda fn: None,
+            [],
+            config,
+            notify=_noop_notify,
+            retire_alert=_noop_retire,
+            oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         )
 
     assert any("no tools" in record.getMessage() for record in caplog.records)
@@ -367,6 +396,7 @@ async def test_boot_reconnect_through_an_auth_challenge_posts_nothing_to_the_cha
         connections,
         config,
         notify=recording_notify,
+        retire_alert=_noop_retire,
         oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
     )
 
@@ -398,7 +428,12 @@ async def test_boot_reconnect_overlaps_the_handshakes(monkeypatch, tmp_path):
     )
 
     await mcp.reconnect_mcp_servers(
-        lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        lambda fn: None,
+        [],
+        config,
+        notify=_noop_notify,
+        retire_alert=_noop_retire,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
     )
 
     assert peak == 2
@@ -424,7 +459,12 @@ async def test_boot_reconnect_attaches_in_config_order_not_answer_order(monkeypa
     connections = []
 
     await mcp.reconnect_mcp_servers(
-        lambda fn: None, connections, config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        lambda fn: None,
+        connections,
+        config,
+        notify=_noop_notify,
+        retire_alert=_noop_retire,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
     )
 
     assert [c.url for c in connections] == ["https://slow/mcp", "https://fast/mcp"]
@@ -447,7 +487,12 @@ async def test_boot_reconnect_keeps_the_healthy_server_when_another_fails(monkey
     connections = []
 
     await mcp.reconnect_mcp_servers(
-        lambda fn: None, connections, config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        lambda fn: None,
+        connections,
+        config,
+        notify=_noop_notify,
+        retire_alert=_noop_retire,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
     )
 
     assert [c.url for c in connections] == ["https://good/mcp"]

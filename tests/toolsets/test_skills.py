@@ -109,7 +109,10 @@ async def test_author_skill_refuses_the_name_of_a_server_added_this_session(tmp_
     async def fake_connect(url, **kwargs):
         return _FakeMCP([_fake_mcp_tool("get_quote")]), "none"
 
-    async def notify(message: str) -> None:
+    async def notify(message: str, **fields) -> None:
+        return None
+
+    async def retire_alert(group: str) -> None:
         return None
 
     monkeypatch.setattr(servers, "connect_mcp", fake_connect)
@@ -121,6 +124,7 @@ async def test_author_skill_refuses_the_name_of_a_server_added_this_session(tmp_
         [],
         "https://broker.example/mcp",
         notify=notify,
+        retire_alert=retire_alert,
         oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         config_path=config.config_path,
         for_each_agent=lambda fn: None,

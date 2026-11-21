@@ -350,6 +350,14 @@ class WebChannel(BaseWebChannel):
             }
         )
 
+    async def send_alert_retired(self, group: str) -> None:
+        """Take down the alert card raised under ``group``.
+
+        Never muted, for :meth:`send_notification`'s reason: the card it retires was raised over
+        whichever conversation was on screen, so it has to reach the page whichever one that is now.
+        """
+        await self.send_frame({"type": "alert_retired", "group": group})
+
     async def send_working(self, elapsed: Optional[float]) -> None:
         """Tell the page whether the conversation it is now viewing has a turn already running in
         the background (started before this switch), and how many seconds it has been running.
