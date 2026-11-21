@@ -548,6 +548,51 @@ async def test_stop_cancels_in_flight_turn(tmp_path):
     assert any(m.get("content") == "long task" for m in assistant._agent.model_client.messages)
 
 
+class _StreamsToolRequestOnce(_RequestsToolOnce):
+    """`_RequestsToolOnce` on the streamed path a reactive turn takes, so AIMU's own streamed dispatch
+    reaches the approval gate."""
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        await super()._chat(user_message, generate_kwargs, use_tools, stream, **kwargs)
+
+        async def nothing():
+            return
+            yield
+
+        return nothing()
+
+
+async def test_a_turn_stopped_while_a_call_awaits_approval_answers_that_call(tmp_path):
+    """A stop during tool dispatch used to save the assistant's tool call with no result after it, and
+    every later message in that conversation then failed: Anthropic rejects such a transcript with
+    ``tool_use ids were found without tool_result blocks``, and OpenAI-shaped providers likewise
+    require each call to be answered. Waiting on an approval is the long, ordinary way to be mid-dispatch.
+    """
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsToolRequestOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
+    asked = asyncio.Event()
+    channel = _StopChannel(asked)
+    assistant = await Assistant.create(cfg, channel, client=client)
+    await assistant.start()
+
+    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None):
+        asked.set()
+
+    assistant._ui.ask_approval = prompt_and_wait
+
+    await assistant._serve_channel()
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    stored = assistant._store.get(assistant._active_id).messages
+    answers = [m for m in stored if m.get("role") == "tool" and m.get("tool_call_id") == "x"]
+    assert len(answers) == 1
+    assert answers[0]["name"] == "update_config"
+    assert "stopped" in answers[0]["content"] and "may or may not have run" in answers[0]["content"]
+    assert stored.index(answers[0]) == next(i for i, m in enumerate(stored) if m.get("tool_calls")) + 1
+
+
 class _RecordingClient(MockAsyncModelClient):
     """MockAsyncModelClient never reaches AIMU's request seam, so emit the pair a real provider would."""
 

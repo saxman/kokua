@@ -48,6 +48,14 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
 
 ### Conversations and turns
 
+- **Stopping a turn mid tool call no longer breaks the conversation.** A stop that landed while a call
+  waited for approval, or while one ran, saved the assistant's tool call with no result after it. No
+  provider accepts that transcript, so every later message in the conversation failed (Anthropic:
+  `tool_use ids were found without tool_result blocks`). The cancelled branch in `core/turns.py` now
+  answers each pending call (`core.messages.answer_stranded_tool_calls`) before it saves. The answer
+  says the call may or may not have run, because a running call may have finished, and concurrent
+  dispatch records no result until every call in the round returns. A conversation saved in the broken
+  state before this fix is not repaired; retry from the last message that worked.
 - **System prompts in the export, and `kokua export --turn N`.** The conversation export now shows each
   agent's system prompt the first time it appears and again whenever it changes, read from the recorded
   request payloads (never the payloads themselves), in every route: the command, the web download, and

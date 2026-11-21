@@ -313,6 +313,7 @@ from kokua.core.errors import describe_error
 from kokua.core.artifacts import ArtifactSink, current_artifacts
 from kokua.core.messages import (
     PROVENANCE_MIXED,
+    answer_stranded_tool_calls,
     derive_title,
     last_assistant_index,
     resolve_message_indices,
@@ -727,6 +728,14 @@ class TurnRunner:
                     # partial state (the agent snapshots it in a finally), and return so the daemon
                     # keeps serving.
                     stopped = True
+                    stranded = answer_stranded_tool_calls(agent.model_client.messages)
+                    if stranded:
+                        logger.warning(
+                            "turn %s stopped with %d tool call(s) pending (%s); recorded as unanswered",
+                            tid,
+                            len(stranded),
+                            ", ".join(stranded),
+                        )
                     self._record_provenance(
                         conversation_id,
                         user_index,

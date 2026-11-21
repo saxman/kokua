@@ -9,6 +9,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROA
 
 from kokua.core.messages import (
     PROVENANCE_AGENT,
+    answer_stranded_tool_calls,
     derive_title,
     first_user_text,
     is_user_turn,
@@ -172,3 +173,33 @@ def test_last_assistant_index_skips_trailing_tool_results():
 
 def test_last_assistant_index_is_minus_one_without_an_assistant_message():
     assert last_assistant_index([{"role": "user"}]) == -1
+
+
+def _call(call_id: str, name: str = "run_command") -> dict:
+    return {"type": "function", "function": {"name": name, "arguments": {}}, "id": call_id}
+
+
+def test_answer_stranded_tool_calls_answers_only_the_calls_with_no_result():
+    """Sequential dispatch appends each result as it lands, so a stop can leave a round half answered."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "tool_calls": [_call("a", "get_quote"), _call("b", "get_portfolio")]},
+        {"role": "tool", "name": "get_quote", "content": "42", "tool_call_id": "a"},
+    ]
+
+    assert answer_stranded_tool_calls(messages) == ["get_portfolio"]
+    assert [m.get("tool_call_id") for m in messages[2:]] == ["a", "b"]
+    assert messages[-1]["name"] == "get_portfolio" and messages[-1]["role"] == "tool"
+
+
+def test_answer_stranded_tool_calls_leaves_a_settled_transcript_alone():
+    answered = [
+        {"role": "assistant", "tool_calls": [_call("a")]},
+        {"role": "tool", "name": "run_command", "content": "ok", "tool_call_id": "a"},
+    ]
+    plain = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+
+    for messages in (answered, plain, []):
+        before = list(messages)
+        assert answer_stranded_tool_calls(messages) == []
+        assert messages == before

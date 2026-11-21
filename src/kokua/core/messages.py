@@ -123,6 +123,46 @@ def last_assistant_index(messages: list[dict]) -> int:
     return -1
 
 
+def answer_stranded_tool_calls(messages: list[dict]) -> list[str]:
+    """Append a result for every tool call the newest assistant message made and nothing answered.
+    Returns the names of the calls it answered.
+
+    A turn stopped during tool dispatch leaves that message's calls without results, and no provider
+    accepts the transcript afterwards: Anthropic rejects it with ``tool_use ids were found without
+    tool_result blocks``, and OpenAI-shaped APIs need every call answered, so each later message in
+    the conversation would fail. AIMU's ``_settle_pending_tools`` answers calls for the same reason
+    at its round cap, and this matches its shape; a cancelled run never reaches that code.
+
+    The result does not claim the call did not run. A call awaiting approval did not, but a call already
+    running when the stop landed may have finished, and concurrent dispatch appends no result until
+    every call in the round returns. A model told "not run" could repeat a write that happened.
+
+    Only the newest assistant message is checked, because a stop can only strand the round it lands
+    in. Calls stranded further back (an older conversation where the user kept writing after a stop)
+    would need results inserted mid-transcript, which would shift every later index the stored turn
+    metadata is keyed by.
+    """
+    index = last_assistant_index(messages)
+    if index < 0:
+        return []
+    answered = {message.get("tool_call_id") for message in messages[index + 1 :] if message.get("role") == "tool"}
+    stranded = [call for call in messages[index].get("tool_calls") or [] if call["id"] not in answered]
+    for call in stranded:
+        name = call["function"]["name"]
+        messages.append(
+            {
+                "role": "tool",
+                "name": name,
+                "content": (
+                    f"Tool '{name}' returned no result: the turn was stopped while this call was pending, "
+                    "so it may or may not have run."
+                ),
+                "tool_call_id": call["id"],
+            }
+        )
+    return [call["function"]["name"] for call in stranded]
+
+
 def resolve_user_index(messages: list[dict], base_len: int) -> int:
     """Where a turn's user message sits in ``messages``, or -1 if the turn committed none.
 
