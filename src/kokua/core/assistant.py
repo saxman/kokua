@@ -851,8 +851,8 @@ class Assistant:
                     continue
                 # While an approval or a workflow decision is outstanding, the next message is its
                 # answer, not a new turn. (A `/stop` above still takes priority, cancelling the waiting
-                # turn.)
-                if self._human.resolve_reply(raw, text):
+                # turn.) A web button's reply names the approval it answers; a typed one does not.
+                if self._human.resolve_reply(raw, text, approval_id=msg.metadata.get("approval")):
                     continue
                 # A workflow command runs this one turn through that workflow (the web UI's Plan
                 # toggle sends "/plan <task>", which is exactly this path). Any other message runs a

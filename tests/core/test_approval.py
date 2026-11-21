@@ -110,6 +110,44 @@ async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
     assert assistant._tracker.get(assistant._active_id) is None  # the answer did not start a new turn
 
 
+async def test_the_serve_loop_routes_an_id_tagged_reply_to_its_own_approval(tmp_path):
+    """A click names its prompt, so it answers that call even when an older one is waiting, and a click on
+    a prompt that closed meanwhile is consumed rather than read as a turn saying "y"."""
+
+    class _Clicks(Channel):
+        name = "fake"
+
+        def __init__(self, ids):
+            self._ids = ids
+
+        async def receive(self):
+            for prompt_id in self._ids:
+                yield ChannelMessage(text="y", channel="fake", metadata={"approval": prompt_id})
+
+        async def send(self, content, *, reply_to=None):
+            pass
+
+    asked: list[int] = []
+
+    async def remember(prompt_id):
+        asked.append(prompt_id)
+
+    channel = _Clicks([])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    older = asyncio.create_task(assistant._human.approval.ask(remember))
+    newer = asyncio.create_task(assistant._human.approval.ask(remember))
+    await asyncio.sleep(0)
+    channel._ids = [asked[1], 999]  # the newer prompt, then one nothing is waiting on
+
+    await assistant._serve_channel()
+
+    assert await newer is True
+    assert not older.done()
+    assert assistant._tracker.get(assistant._active_id) is None  # neither click started a turn
+    assistant._human.approval.abandon()
+    assert await older is False
+
+
 async def test_denied_gated_tool_does_not_run(tmp_path):
     cfg = _config(tmp_path, default_confirm=["skills.add_skill_script"])
     client = _RequestsToolOnce("add_skill_script", {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"})

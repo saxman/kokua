@@ -2318,10 +2318,12 @@ function handleFrame(event) {
   } else if (frame.type === "approval") {
     renderApproval(frame);
   } else if (frame.type === "prompt_retired") {
-    // The question this page is showing is no longer waiting on an answer, however it stopped
+    // A question this page is showing is no longer waiting on an answer, however it stopped
     // waiting: answered here, answered by a typed reply, abandoned by a switch, or cancelled with
-    // its turn. Only the controls change; the card stays as the record of what was asked.
-    retirePrompt();
+    // its turn. Only the controls change; the card stays as the record of what was asked. An id
+    // names an approval prompt; no id is the plan review.
+    if (frame.id != null) retireApproval(frame.id);
+    else retirePrompt();
   } else if (frame.type === "auto_approval") {
     renderAutoApproval(frame);
   } else if (frame.type === "plan") {
@@ -2411,6 +2413,7 @@ function handleFrame(event) {
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
     outstandingPrompt = null;  // and any prompt card, which this repaint has just removed
+    outstandingApprovals.clear();
     // Drop the references to the bubbles just removed. Without this they stay live but detached, and
     // the next token or thinking frame -- from any conversation -- re-attaches the old conversation's
     // partial bubble into this view and keeps writing into it. A `partial` item below re-opens the
@@ -2534,14 +2537,26 @@ function renderModels(frame) {
   modelLabel.title = lines.join("\n");
 }
 
-// The prompt currently waiting on an answer (a tool approval, or a plan review), or null. One at a
-// time, because the core allows one at a time: `HumanGate` holds each as a single lock-guarded slot.
-// Held so that the controls can be retired when the question closes, which is not always something
-// this page did: a typed "y" answers the prompt without touching its buttons, and a /stop cancels the
-// turn the question belonged to. A button that outlives its question sends a reply nothing is waiting
-// for, and the server can only read that as an ordinary message, so an idle click turns "y" into a
-// turn saying "y".
+// The plan review currently waiting on an answer, or null. One at a time, because the core allows one
+// at a time: `HumanGate` holds a workflow decision as a single lock-guarded slot. Held so that the
+// controls can be retired when the question closes, which is not always something this page did: a
+// typed reply answers it without touching its buttons, and a /stop cancels the turn it belonged to. A
+// button that outlives its question sends a reply nothing is waiting for, and the server can only read
+// that as an ordinary message.
 let outstandingPrompt = null;
+
+// Every tool approval waiting on an answer, by the prompt id the server gave it. Many at once, unlike
+// the plan review: concurrent tool dispatch puts several gated calls in front of the user together, and
+// each is answered on its own. Held for the reason `outstandingPrompt` is, so each card's controls go
+// dead when its own question closes (a typed "y" answers the oldest without touching any buttons).
+const outstandingApprovals = new Map();
+
+function retireApproval(id) {
+  const el = outstandingApprovals.get(id);
+  if (!el) return;
+  el.querySelectorAll("button").forEach((control) => (control.disabled = true));
+  outstandingApprovals.delete(id);
+}
 
 // Close whatever prompt is on screen: the controls go dead, exactly as they do when this page is the
 // one that answered. Disabled rather than removed, because the question and its answer are part of
@@ -2552,12 +2567,12 @@ function retirePrompt() {
   outstandingPrompt = null;
 }
 
-// A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
-// "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
-// The question belongs to one turn, so a prompt that raced a conversation switch is dropped rather
-// than put in front of the wrong reader. The server asks the same question last thing before sending
-// (HumanGate.approve, under the lock that orders concurrent gated calls); this covers the gap between
-// that check and the frame arriving. Same shape as `renderAutoApproval` below.
+// A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is an
+// `approval_reply` frame naming this prompt's id, so it answers this call even when others are waiting
+// on screen beside it. The question belongs to one turn, so a prompt that raced a conversation switch is
+// dropped rather than put in front of the wrong reader. The server asks the same question last thing
+// before sending (HumanGate.approve); this covers the gap between that check and the frame arriving.
+// Same shape as `renderAutoApproval` below.
 function renderApproval(frame) {
   const { name, arguments: args, agent } = frame;
   const active = lastConversations.find((item) => item.active);
@@ -2575,23 +2590,23 @@ function renderApproval(frame) {
   prompt.appendChild(document.createTextNode("?"));
   const actions = document.createElement("div");
   actions.className = "actions";
-  const answer = (reply) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(reply);
+  const answer = (allow) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "approval_reply", id: frame.id, allow }));
     actions.querySelectorAll("button").forEach((b) => (b.disabled = true));
   };
   const allow = document.createElement("button");
   allow.textContent = "Allow";
-  allow.addEventListener("click", () => answer("y"));
+  allow.addEventListener("click", () => answer(true));
   const deny = document.createElement("button");
   deny.className = "deny";
   deny.textContent = "Deny";
-  deny.addEventListener("click", () => answer("n"));
+  deny.addEventListener("click", () => answer(false));
   actions.appendChild(allow);
   actions.appendChild(deny);
   el.appendChild(prompt);
   el.appendChild(actions);
   appendToLog(el);
-  outstandingPrompt = el;
+  outstandingApprovals.set(frame.id, el);
   autoscroll();
 }
 

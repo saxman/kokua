@@ -100,13 +100,17 @@ _CONTROL_TYPES = (
     "export",
 )
 
+# The frame the page's Allow and Deny send. Not a control: an answer has to travel the serve loop's own
+# path (`HumanGate.resolve_reply`), in order with the messages around it, so it is fed to the channel.
+APPROVAL_REPLY = "approval_reply"
+
 
 def _parse_control(raw: str) -> Optional[dict]:
     """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"duplicate"/
     "rename"/"retitle"/"settings"/"task"/"export"/...}), else None.
 
-    Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
-    approval "y"/"n") and is fed to the channel unchanged.
+    Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop", a
+    typed "y"/"n") and is fed to the channel unchanged.
     """
     try:
         obj = json.loads(raw)
@@ -115,6 +119,35 @@ def _parse_control(raw: str) -> Optional[dict]:
     if isinstance(obj, dict) and obj.get("type") in _CONTROL_TYPES:
         return obj
     return None
+
+
+def _parse_approval_reply(raw: str) -> Optional[tuple[int, bool]]:
+    """Return ``(prompt_id, allowed)`` for a well-formed ``{"type": "approval_reply", ...}`` frame, else None.
+
+    Strict on both fields: ``id`` must be an int and not a bool (``True`` is an int in Python, and
+    would name prompt 1), and ``allow`` must be a bool, since a reply that cannot say which call it
+    answers, or what it says about it, must answer nothing.
+    """
+    try:
+        obj = json.loads(raw)
+    except ValueError, TypeError:
+        return None
+    if not (isinstance(obj, dict) and obj.get("type") == APPROVAL_REPLY):
+        return None
+    prompt_id, allowed = obj.get("id"), obj.get("allow")
+    if not isinstance(prompt_id, int) or isinstance(prompt_id, bool) or not isinstance(allowed, bool):
+        return None
+    return prompt_id, allowed
+
+
+def _is_approval_reply(raw: str) -> bool:
+    """Whether ``raw`` claims to be an approval reply, well-formed or not: a malformed one is dropped
+    rather than fed on as text, which would start a turn made of raw JSON."""
+    try:
+        obj = json.loads(raw)
+    except ValueError, TypeError:
+        return False
+    return isinstance(obj, dict) and obj.get("type") == APPROVAL_REPLY
 
 
 def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str], Optional[str]]]:
@@ -429,8 +462,9 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
 
             # Conversation controls (new/select/delete) are handled here and never reach the channel; an
             # "input" frame (every message the composer sends, with whatever that message carries) is
-            # decoded and fed with its text; all other frames ("/stop", approval "y"/"n", and anything
-            # another client sends as bare text) are fed to the channel as today.
+            # decoded and fed with its text; an "approval_reply" frame (the Allow and Deny buttons) is fed
+            # as the answer it carries, naming its prompt; all other frames ("/stop", a typed "y"/"n", and
+            # anything another client sends as bare text) are fed to the channel as today.
             async def apply_frames() -> None:
                 while True:
                     raw = await inbound.get()
@@ -446,6 +480,13 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             if reference:
                                 paths.append(str(images.reference_to_path(config.images_path, reference)))
                         await channel.feed_input(text, paths, thinking=thinking, token=token)
+                        continue
+                    if _is_approval_reply(raw):
+                        reply = _parse_approval_reply(raw)
+                        if reply is None:
+                            logger.warning("Dropped a malformed approval reply from the page: %.200s", raw)
+                        else:
+                            await channel.feed_approval(*reply)
                         continue
                     control = _parse_control(raw)
                     if control is None:

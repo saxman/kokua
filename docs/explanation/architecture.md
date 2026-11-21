@@ -41,7 +41,7 @@ src/kokua/
     messaging.py         MessageBus: what the user types into a turn that is already running, and
                           what one of that turn's own agents sends another; the roster of addresses
                           it mints per run, and the two sources that decide who has read it
-    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
+    interaction.py       HumanGate: tool approvals keyed by prompt id, and a workflow's own decision in one slot
     auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
                           place, and the code that decides whether it did (explanation/auto-approval.md)
     settings_runtime.py  SettingsApplier: read, apply live, persist
@@ -106,8 +106,9 @@ serve loop, and little else. It owns:
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
   fired). The ten concurrency invariants are documented at the top of that module.
-- **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
-  the serve loop resolves with the user's next message. With
+- **`HumanGate`** -- tool approval and a workflow's own decision, which the serve loop resolves with the
+  user's reply. Every waiting gated call is asked at once under its own prompt id (`PendingApprovals`);
+  a workflow decision is a lock-guarded single slot, since one turn never asks two. With
   [`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) on, a gated call
   named there is reviewed by a declared model reviewer just before that prompt, and only there.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
@@ -128,16 +129,17 @@ that cannot ask takes the safe answer it named for an abandoned request, and say
 words the workflow supplied, since only the asker knows what it was asking.
 
 For a gated call, `HumanGate.approve` asks at each of the three points the answer can have gone
-stale, and each window is wider than the last: when the call arrives, after the reviewer's model
-call, and once the single approval slot is finally held. The third is the one that is easy to miss.
-Tool calls in a round are dispatched concurrently (`[assistant].concurrent_tools`) while the approval
-slot is single and lock-guarded, so a round's second gated call waits inside `PendingRequest.ask` for
-as long as the user takes to answer the first. A switch during that wait abandons only the request
-holding the slot, and without the third check the call queued behind it would go on to ask: an
-`approval` frame is never muted, so the page would draw that question into whatever transcript is now
-on screen, and an Allow there would run the tool on a turn nobody is watching. The frame carries its
-conversation for the reason an `auto_approval` card does, so a prompt that raced even that last check
-is dropped by the page rather than shown to the wrong reader.
+stale: when the call arrives, after the reviewer's model call, and as the call is registered to wait.
+After that a switch reaches it through `abandon_all`, which denies every waiting call at once, so the
+question never needs asking again however long the user takes. Tool calls in a round are dispatched
+concurrently (`[assistant].concurrent_tools`), and every gated call among them is asked at once, each
+under its own prompt id. They used to queue behind one approval slot, which showed only the oldest
+prompt, so a prompt the user had scrolled past held every call behind it with nothing on screen to
+answer. Now a button's reply names the call it answers, a typed `y` answers the oldest one waiting,
+and a reply naming a call that is no longer waiting is consumed rather than read as a turn saying
+"y". An `approval` frame is never muted, so it carries its conversation for the reason an
+`auto_approval` card does: a prompt that raced the last check is dropped by the page rather than shown
+to the wrong reader.
 
 The approval gate has one optional layer above it, off by default:
 [`core/auto_approval.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py).

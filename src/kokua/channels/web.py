@@ -430,14 +430,24 @@ class WebChannel(BaseWebChannel):
         """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, the
         page's own id for the bubble it drew, or any combination (the web pump's ``input`` frame).
 
-        ``/stop`` and approval replies still arrive through the base string ``feed``; only a message
-        the page composed uses this richer path, so ``receive`` can populate ``ChannelMessage.images``
-        and ``ChannelMessage.metadata``."""
+        ``/stop`` still arrives through the base string ``feed`` and an approval reply through
+        ``feed_approval``; only a message the page composed uses this richer path, so ``receive`` can
+        populate ``ChannelMessage.images`` and ``ChannelMessage.metadata``."""
         await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking, "token": token})
+
+    async def feed_approval(self, prompt_id: int, allowed: bool) -> None:
+        """Enqueue the page's answer to one approval prompt (the web pump's ``approval_reply`` frame).
+
+        It travels as the "y" or "n" a terminal user would type, so the serve loop reads both the same
+        way, with the prompt's id in ``ChannelMessage.metadata["approval"]``: several prompts can be on
+        screen at once, and the id is what makes a click answer the call it was drawn for rather than
+        the oldest one waiting."""
+        await self._inbound.put({"text": "y" if allowed else "n", "approval": prompt_id})
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
         """Yield inbound turns; a dict item carries attached image paths, a per-turn reasoning effort, a
-        bubble token, or any combination, a string is a plain text turn.
+        bubble token, or any combination, or is an approval reply naming its prompt; a string is a plain
+        text turn.
 
         Overrides the base (string-only) receive so uploaded images reach the agent. ``None`` remains the
         socket-closed sentinel."""
@@ -450,7 +460,7 @@ class WebChannel(BaseWebChannel):
                 # None: the core reads a missing effort as "use the configured one" and a missing token
                 # as "no bubble is waiting on this", and a present-but-None key would be a second
                 # spelling of the same thing for every reader to remember.
-                metadata = {key: item[key] for key in ("thinking", "token") if item.get(key) is not None}
+                metadata = {key: item[key] for key in ("thinking", "token", "approval") if item.get(key) is not None}
                 yield ChannelMessage(
                     text=item.get("text", ""),
                     images=item.get("images") or None,

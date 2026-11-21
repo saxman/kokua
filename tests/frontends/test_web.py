@@ -3715,3 +3715,56 @@ async def test_a_muted_turns_catch_up_shows_a_running_call_and_then_its_result()
 
     assert running == [{"type": "tool", **_REQUESTED, "round": 0, "pending": True, "ts": ANY}]
     assert returned == [{"type": "tool", **_RETURNED, "round": 0, "ts": ANY}]
+
+
+def test_an_approval_reply_reaches_the_serve_loop_with_its_id():
+    """The page's Allow and Deny name the prompt they answer, which is what lets several be on screen."""
+
+    async def run():
+        channel = WebChannel(_FakeWS())
+        await channel.feed_approval(4, True)
+        await channel.feed_approval(5, False)
+        await channel.feed(None)
+        return [m async for m in channel.receive()]
+
+    received = asyncio.run(run())
+    assert [(m.text, m.metadata["approval"]) for m in received] == [("y", 4), ("n", 5)]
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ('{"type": "approval_reply", "id": 4, "allow": true}', (4, True)),
+        ('{"type": "approval_reply", "id": 4, "allow": false}', (4, False)),
+        ('{"type": "approval_reply", "id": "4", "allow": true}', None),
+        ('{"type": "approval_reply", "id": true, "allow": true}', None),
+        ('{"type": "approval_reply", "id": 4}', None),
+        ('{"type": "approval_reply", "id": 4, "allow": "yes"}', None),
+        ('{"type": "input", "text": "y"}', None),
+        ("y", None),
+    ],
+)
+def test_parse_approval_reply(raw, expected):
+    from kokua.frontends.web import _parse_approval_reply
+
+    assert _parse_approval_reply(raw) == expected
+
+
+def test_a_malformed_approval_reply_starts_no_turn(tmp_path):
+    """A reply frame that fails validation is dropped, never fed on as text: as text it would reach the
+    model as a turn made of raw JSON."""
+    import json
+
+    from aimu.sessions import TinyDBSessionStore
+    from starlette.testclient import TestClient
+
+    cfg = _config(tmp_path)
+    app = build_app(cfg, client=MockAsyncModelClient(["Hello there."]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "approval_reply", "id": "4", "allow": True}))
+        ws.send_text(json.dumps({"type": "input", "text": "hi"}))
+        _drain_until(ws, "done")
+
+    store = TinyDBSessionStore(str(cfg.sessions_path))
+    (key,) = store.list_keys()
+    assert [m["content"] for m in store.get(key).messages if m.get("role") == "user"] == ["hi"]
