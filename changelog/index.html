@@ -2326,9 +2326,15 @@ The pre-release development history is in the git log.</p>
     its own, so an unattended task can never block the composer. A later card supersedes an earlier one
     with the same <code>group</code> (a task, a conversation, a conversation and tool pair), which keeps a task
     firing all night from greeting you with one card per firing; a card whose conversation has since
-    been pruned keeps its text and drops its Open control. The terminal has no such layer, so
-    <code>ChannelUI.alert</code> prints the sentence there instead, which is why an alert's text always carries
-    its link in words.</li>
+    been pruned keeps its text and drops its Open control. A card can also be retired: an
+    <code>alert_retired</code> frame (<code>ChannelUI.retire_alert</code>, an optional <code>send_alert_retired</code> on a rich channel)
+    takes down the card raised under its group. The MCP authorization card uses it, grouped per server:
+    it leaves when the callback arrives, whether you clicked its link or approved in the tab that opened
+    on its own, and a flow that times out or is refused replaces it with the reason, since a link to an
+    abandoned flow leads nowhere. Before this the card stayed until dismissed, still offering to
+    authorize a connection already made. The terminal has no such layer, so <code>ChannelUI.alert</code> prints the
+    sentence there instead, which is why an alert's text always carries its link in words, and
+    <code>retire_alert</code> is silence there.</li>
 <li><strong>A Think picker beside the Plan toggle</strong> sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     <code>input</code> frame field, writes nothing to <code>config.toml</code>, and resets to the configured default on reload.

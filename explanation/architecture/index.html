@@ -4253,13 +4253,19 @@ can draw a control turns into one, not the only copy of the information.</p>
 is an anchor. Approving a tool call from a card was considered and rejected: the card cannot hold
 <code>execute_python</code>'s body or <code>add_skill_script</code>'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread, which is the one thing the gate exists to prevent.</p>
-<p>Three properties of the layer are worth stating, because each answers a failure this shape can have:</p>
+<p>Four properties of the layer are worth stating, because each answers a failure this shape can have:</p>
 <ul>
 <li><strong>Non-blocking.</strong> The layer takes no pointer events; the cards do. A scheduled task fires whether or
   not anyone is at the keyboard, so a modal here would let an unattended process seize the composer.</li>
 <li><strong>Grouped.</strong> A card supersedes an earlier card with the same <code>group</code>: the task for a firing's report,
   the conversation for a completion, the conversation and tool name for a denial. Ungrouped, a task
   firing every ten minutes overnight greets the user with a card per firing.</li>
+<li><strong>Retired when nothing waits on it.</strong> <code>ChannelUI.retire_alert(group)</code> sends an <code>alert_retired</code> frame,
+  never muted, and the page drops that group's card. Nothing else expires, so a card pointing at
+  something already finished is one the user dismisses by hand for no reason. The MCP authorization card
+  is the case: <code>ChatOAuth</code> groups it per server, retires it when the callback arrives, and replaces it
+  with the reason when the flow times out or is refused. The token exchange after the callback can still
+  fail; that is reported where any connect failure is, since by then the card has nothing to ask.</li>
 <li><strong>Anchors are built from the <code>url</code> field, never from the text.</strong> The authorization URL comes from a
   remote MCP server's own metadata, and the page checks its scheme is <code>http(s)</code> before making a link of
   it. Linkifying the sentence instead would let any text that ever reaches a card become a link.</li>

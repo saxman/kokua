@@ -1764,10 +1764,11 @@ would stay empty after the server came back.</p>
 <ul>
 <li><strong>None.</strong> An unprotected server connects directly.</li>
 <li><strong>OAuth.</strong> On an auth challenge, the flow starts by itself: the assistant posts an authorization link
-  into the chat and opens a browser window. Once you approve, the connection completes and the token is
-  saved under <code>$KOKUA_HOME/data/mcp-oauth/</code> for later sessions. The posted message names the address
-  your approval will be sent back to, which matters if you are not browsing from Kokua's own machine
-  (see below).</li>
+  into the chat and opens a browser window. Once you approve, in either one, the link is taken down, the
+  connection completes, and the token is saved under <code>$KOKUA_HOME/data/mcp-oauth/</code> for later sessions.
+  If the flow times out or the provider refuses it, the link is replaced by the reason. The posted
+  message names the address your approval will be sent back to, which matters if you are not browsing
+  from Kokua's own machine (see below).</li>
 <li><strong>Bearer token.</strong> Set <code>token_env</code> to the name of an environment variable, exported however you already
   manage secrets. It is read at connect time, so the token never enters <code>config.toml</code>.</li>
 </ul>
