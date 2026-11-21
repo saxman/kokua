@@ -575,12 +575,12 @@ async def test_a_turn_stopped_while_a_call_awaits_approval_answers_that_call(tmp
     assistant = await Assistant.create(cfg, channel, client=client)
     await assistant.start()
 
-    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None):
+    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
         asked.set()
 
     assistant._ui.ask_approval = prompt_and_wait
 
-    await assistant._serve_channel()
+    await asyncio.wait_for(assistant._serve_channel(), timeout=5)
     info = assistant._tracker.get(assistant._active_id)
     if info is not None:
         await asyncio.gather(info.handle.task, return_exceptions=True)
@@ -591,6 +591,63 @@ async def test_a_turn_stopped_while_a_call_awaits_approval_answers_that_call(tmp
     assert answers[0]["name"] == "update_config"
     assert "stopped" in answers[0]["content"] and "may or may not have run" in answers[0]["content"]
     assert stored.index(answers[0]) == next(i for i, m in enumerate(stored) if m.get("tool_calls")) + 1
+
+
+class _StreamsTwoToolRequests(MockAsyncModelClient):
+    """Requests two gated calls in one assistant message, on the streamed path, then never answers again."""
+
+    def __init__(self):
+        super().__init__([])
+        self._requested = False
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        if user_message is not None:
+            self.messages.append({"role": "user", "content": user_message})
+        if not self._requested:
+            self._requested = True
+            arguments = {"section": "planning", "key": "plan_review", "value": "true"}
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"type": "function", "function": {"name": "update_config", "arguments": arguments}, "id": i}
+                        for i in ("x", "y")
+                    ],
+                }
+            )
+
+        async def nothing():
+            return
+            yield
+
+        return nothing()
+
+
+async def test_a_stop_with_two_approvals_waiting_answers_both_calls(tmp_path):
+    """Both calls of a concurrently dispatched round are asked at once, and a stop leaves neither unanswered."""
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsTwoToolRequests()
+    both_asked = asyncio.Event()
+    channel = _StopChannel(both_asked)
+    assistant = await Assistant.create(cfg, channel, client=client)
+    await assistant.start()
+    asked: list[int] = []
+
+    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
+        asked.append(prompt_id)
+        if len(asked) == 2:
+            both_asked.set()
+
+    assistant._ui.ask_approval = prompt_and_wait
+
+    await asyncio.wait_for(assistant._serve_channel(), timeout=5)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    stored = assistant._store.get(assistant._active_id).messages
+    for call_id in ("x", "y"):
+        assert len([m for m in stored if m.get("role") == "tool" and m.get("tool_call_id") == call_id]) == 1
 
 
 class _RecordingClient(MockAsyncModelClient):
@@ -2823,8 +2880,8 @@ async def test_a_message_that_starts_a_turn_is_not_reported_as_joining_one(tmp_p
 async def test_a_pending_approval_still_takes_the_message_rather_than_the_running_turn(tmp_path, track_running_turn):
     """Priority: `HumanGate.resolve_reply` consumes the next message and always has."""
 
-    async def noop_prompt() -> None:
-        """A prompt that sends nothing: what this exercises is the pending-request slot."""
+    async def noop_prompt(prompt_id) -> None:
+        """A prompt that sends nothing: what this exercises is the pending approval."""
 
     channel = FakeChannel(["y"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))

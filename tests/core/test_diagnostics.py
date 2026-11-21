@@ -162,3 +162,22 @@ async def test_diag_omits_the_generation_line_when_nothing_is_declared(tmp_path)
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
 
     assert "generation:" not in assistant._diag_report()
+
+
+async def test_diag_counts_the_approvals_waiting(tmp_path):
+    """Several gated calls can wait at once, so "is one waiting" undersells what a wedged turn holds."""
+    import asyncio
+
+    from tests.channels import FakeChannel
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "- pending approvals: 0 |" in assistant._diag_report()
+
+    async def shown(prompt_id):
+        pass
+
+    waiting = [asyncio.create_task(assistant._human.approval.ask(shown)) for _ in range(2)]
+    await asyncio.sleep(0)
+    assert "- pending approvals: 2 |" in assistant._diag_report()
+    assistant._human.approval.abandon()
+    await asyncio.gather(*waiting)

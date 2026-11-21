@@ -39,6 +39,10 @@ async def _noop_prompt() -> None:
     """A prompt that sends nothing: these tests exercise the pending-request slot, not the channel."""
 
 
+async def _noop_approval_prompt(prompt_id: int) -> None:
+    """The same, shaped for an approval, whose prompt is told which call it is asking about."""
+
+
 async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
     from kokua.channels.web import streaming_conversation
 
@@ -97,7 +101,7 @@ async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
             pass
 
     assistant = await Assistant.create(_config(tmp_path), _OneMsg(), client=MockAsyncModelClient([]))
-    asking = asyncio.create_task(assistant._human.approval.ask(_noop_prompt))
+    asking = asyncio.create_task(assistant._human.approval.ask(_noop_approval_prompt))
     await asyncio.sleep(0)  # let it register as pending before the loop reads the "y"
 
     await assistant._serve_channel()
@@ -123,16 +127,11 @@ async def test_denied_gated_tool_does_not_run(tmp_path):
     assert not (cfg.skills_dir / "disk" / "scripts" / "u.py").exists()
 
 
-async def test_approve_serializes_concurrent_gated_calls(tmp_path):
+async def test_concurrent_gated_calls_each_get_their_own_answer(tmp_path):
     """Two concurrent gated approvals must not clobber each other's pending future.
 
-    Without the lock the interleaved coroutines both call asyncio.gather concurrently. The first
-    call takes the slot and yields at the sleep; without the lock the second then overwrites it with
-    a fresh future before the first has resolved. The first call then calls set_result on the
-    already-cleared (None) reference, raising AttributeError ('NoneType' has no attribute
-    'set_result'). With the lock the second call waits until the first has fully completed (future
-    resolved, pending_approval cleared) before it acquires the lock, creates its own future, and
-    resolves it safely.
+    Both are asked at once, each under its own prompt id, so an answer to one can never land on the
+    other, and neither waits behind the other's prompt.
     """
     from kokua.channels.web import streaming_conversation
 
@@ -143,14 +142,11 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
     prompts: list[str] = []
     order: list[str] = []
 
-    async def fake_prompt(name, arguments, *, agent=None, conversation_id=None):
+    async def fake_prompt(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
         prompts.append(name)
-        # Yield to the event loop before resolving so the two gathered coroutines can interleave.
-        # Without the lock the second call overwrites the pending slot here, causing the
-        # first call to resolve the wrong future and the second to deadlock (or raise
-        # InvalidStateError if its future is resolved twice).
+        # Yield first so the two gathered calls interleave, then answer this prompt by its own id.
         await asyncio.sleep(0)
-        assistant._human.approval.resolve(True)
+        assistant._human.approval.resolve(True, prompt_id)
 
     assistant._ui.ask_approval = fake_prompt
 
@@ -167,7 +163,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
         streaming_conversation.reset(token)
 
     assert results == [True, True]
-    assert prompts == ["compute.execute_python", "compute.execute_python"]  # both prompted, one at a time
+    assert prompts == ["compute.execute_python", "compute.execute_python"]  # both prompted
     assert set(order) == {"a", "b"}
 
 
@@ -211,7 +207,7 @@ async def test_foreground_turn_prompts_for_approval(tmp_path):
 async def test_switch_away_resolves_pending_approval_as_denied(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    asking = asyncio.create_task(assistant._human.approval.ask(_noop_prompt))
+    asking = asyncio.create_task(assistant._human.approval.ask(_noop_approval_prompt))
     await asyncio.sleep(0)
     await assistant.new_conversation()  # switching away
     assert await asking is False

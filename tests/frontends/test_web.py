@@ -1077,6 +1077,21 @@ async def test_web_channel_sends_a_prompt_retired_frame():
     assert ws.frames == [{"type": "prompt_retired"}]
 
 
+async def test_an_approval_frame_carries_its_prompt_id():
+    """Several prompts can be on screen at once, so each frame names the one it is."""
+    ws = _FakeWS()
+    await WebChannel(ws).send_approval_request("run_command", {}, conversation_id="c1", prompt_id=3)
+    assert ws.frames == [
+        {"type": "approval", "name": "run_command", "arguments": {}, "agent": None, "conversation_id": "c1", "id": 3}
+    ]
+
+
+async def test_a_prompt_retired_frame_names_the_approval_it_retires():
+    ws = _FakeWS()
+    await WebChannel(ws).send_prompt_retired(prompt_id=3)
+    assert ws.frames == [{"type": "prompt_retired", "id": 3}]
+
+
 async def test_a_prompt_retired_frame_is_never_muted_by_a_switch():
     """Not a turn frame, deliberately. It is sent as a turn ends, including by the /stop that ended
     it, and muting it would leave live controls on a question nothing is waiting to answer."""

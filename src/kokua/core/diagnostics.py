@@ -99,7 +99,7 @@ def diag_report(
     *,
     config: AssistantConfig,
     models: dict,
-    pending_approval: bool,
+    pending_approvals: int,
     pending_decision: bool,
 ) -> str:
     """The `/diag` text: the models, reasoning effort, and generation parameters in play, in-flight
@@ -127,10 +127,7 @@ def diag_report(
     else:
         lines.append("- turn in flight: no")
     lines.append(f"- active turns: {gate.active_turns()}")
-    lines.append(
-        f"- pending approval: {'yes' if pending_approval else 'no'} | pending decision: "
-        f"{'yes' if pending_decision else 'no'}"
-    )
+    lines.append(f"- pending approvals: {pending_approvals} | pending decision: {'yes' if pending_decision else 'no'}")
     for conversation_id, info in turns:
         if info.handle.done:
             continue

@@ -1105,7 +1105,7 @@ class Assistant:
             self._gate,
             config=self._config,
             models=self.current_models(),
-            pending_approval=self._human.approval.pending,
+            pending_approvals=self._human.approval.count,
             pending_decision=self._human.decision.pending,
         )
 

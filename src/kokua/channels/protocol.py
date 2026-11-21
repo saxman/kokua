@@ -80,17 +80,26 @@ class RichChannel(Protocol):
         """
 
     async def send_approval_request(
-        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        agent: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        prompt_id: Optional[int] = None,
     ) -> None:
         """Prompt for tool-call approval. The reply arrives through the ordinary inbound path.
 
         ``agent`` is the name of the agent asking, or None when unknown. ``conversation_id`` is the
         turn's, so a front end drawing the prompt into a transcript can tell whether it is still the
-        transcript on screen, exactly as ``send_auto_approval`` does.
+        transcript on screen, exactly as ``send_auto_approval`` does. ``prompt_id`` names this call
+        among the others that may be waiting at the same time; a reply carrying it answers this call
+        alone, and a reply without one answers the oldest.
         """
 
-    async def send_prompt_retired(self) -> None:
-        """Say that the outstanding prompt is closed, so its controls must stop being usable.
+    async def send_prompt_retired(self, prompt_id: Optional[int] = None) -> None:
+        """Say that a prompt is closed, so its controls must stop being usable: the approval
+        ``prompt_id`` names, or the plan review when it is None.
 
         Only a channel whose prompt is a control needs it, which is the same channel that offers
         ``send_approval_request`` and ``send_plan_review_request``: a button that outlives its
