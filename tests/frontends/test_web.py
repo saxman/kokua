@@ -3000,6 +3000,50 @@ async def test_a_blocked_control_still_releases_the_connection_on_disconnect(tmp
         await asyncio.gather(serving, return_exceptions=True)
 
 
+class _VanishingSocket(_AsgiSocket):
+    """A socket whose sends start failing the way a closed tab's do, from the moment `vanish()` is called."""
+
+    def __init__(self, inbound: list[dict]):
+        super().__init__(inbound)
+        self.vanished = False
+        self.failed_send = asyncio.Event()
+
+    def vanish(self) -> None:
+        self.vanished = True
+
+    async def send(self, message: dict) -> None:
+        if self.vanished:
+            self.failed_send.set()
+            raise OSError("connection reset by peer")
+        await super().send(message)
+
+
+async def test_a_send_to_a_vanished_tab_ends_the_connection_quietly(tmp_path):
+    """A tab that goes away mid-send is an ordinary disconnect, not an unhandled error.
+
+    Starlette answers a failed send by marking the socket disconnected without telling the reader, and its
+    `receive_text` then raises `RuntimeError` instead of `WebSocketDisconnect`. The reader caught only the
+    latter, so the connection tore down through an exception: uvicorn printed an `ExceptionGroup` trace for
+    a closed tab, and the task group cancelled `assistant.run()` rather than letting the sentinel end it.
+    """
+    sock = _VanishingSocket([{"type": "websocket.connect"}])
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["hello", "a title"]))
+    serving = asyncio.create_task(app(_ws_scope(), sock.receive, sock.send))
+    try:
+        await _until(lambda: _ready(sock))
+        sock.vanish()
+        sock.feed({"type": "websocket.receive", "text": "hi"})
+        await asyncio.wait_for(sock.failed_send.wait(), timeout=5)
+        sock.feed({"type": "websocket.receive", "text": "still there?"})
+
+        done, _ = await asyncio.wait({serving}, timeout=5)  # wait(), not wait_for(): must not cancel it
+        assert serving in done, "the connection never ended after its socket died"
+        assert serving.exception() is None
+    finally:
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+
+
 async def _until(predicate, timeout: float = 5) -> None:
     async with asyncio.timeout(timeout):
         while not predicate():
