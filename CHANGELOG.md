@@ -2220,6 +2220,13 @@ notice on startup.
   sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most
   prompts with no model at all, and the reviewer's own token cost is not counted (AIMU's structured
   path returns before a turn event is emitted, so no metrics sink can see it).
+  **The shipped reviewer prompt judges a call as one step toward the request.** Asked whether a call
+  "plainly serves" the request, a small reviewer read it as "completes" it, so a read-only data call
+  toward "investigate and recommend trades" was escalated as out of scope because one lookup cannot
+  recommend anything, and every call of a research turn reached the user anyway. The prompt now says a
+  call that gathers what the request needs, or does part of it, is in scope even though it cannot finish
+  the request alone; reaching beyond what was asked is still out of scope. An existing
+  `[reviewers.approval]` in your own `config.toml` keeps its old wording until you edit it.
 - **`[security].never_auto_approve`: tools no reviewer may ever approve.** Ships as
   `config.update_config`, `skills.add_skill_script`, and `mcp.add_mcp_server`, and naming one of them
   in `[security.auto_approval].tools` is a startup error. These three change what may act *later*
