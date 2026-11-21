@@ -272,7 +272,13 @@ class ChannelUI:
             await self._channel.send(text)
 
     async def ask_approval(
-        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        agent: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        prompt_id: Optional[int] = None,
     ) -> None:
         """Prompt for tool approval, as a frame or as a plain-text question.
 
@@ -287,16 +293,20 @@ class ChannelUI:
         somewhere else.
 
         ``name`` is the label to show, ``toolset.tool`` where the toolset is known (``HumanGate`` composes
-        it), not an identifier to match on: nothing replies with it, since the answer is a bare yes or no.
+        it), not an identifier to match on. ``prompt_id`` is the identifier: several calls can wait at
+        once, so a front end drawing controls sends it back with the answer and closes the prompt it
+        names. The plain-text fallback drops it, and a typed answer there takes the oldest waiting call.
         """
         if self._approval_request is not None:
-            await self._approval_request(name, arguments, agent=agent, conversation_id=conversation_id)
+            await self._approval_request(
+                name, arguments, agent=agent, conversation_id=conversation_id, prompt_id=prompt_id
+            )
         elif agent is None:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
         else:
             await self._channel.send(f"[approve] Allow {agent} to run {name}({arguments})? [y/N]")
 
-    async def retire_prompt(self) -> None:
+    async def retire_prompt(self, prompt_id: Optional[int] = None) -> None:
         """Say that the outstanding question is closed, however it closed: answered here, answered by
         a typed reply, abandoned by a switch, or cancelled with its turn.
 
@@ -306,9 +316,12 @@ class ChannelUI:
         serve loop can only read as an ordinary message, so the user's "y" becomes a turn saying "y".
         A channel that prompts by printing a line has nothing to take back and no way to be clicked,
         so this is silence there, as it is for a channel with no prompt frame at all.
+
+        ``prompt_id`` names the approval prompt to close; None is the plan review, of which there is
+        only ever one.
         """
         if self._prompt_retired is not None:
-            await self._prompt_retired()
+            await self._prompt_retired(prompt_id=prompt_id)
 
     async def show_auto_approval(
         self,

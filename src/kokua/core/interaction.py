@@ -5,15 +5,20 @@ serve loop reads the next inbound message and resolves the wait. ``PendingReques
 once. Tool approval fixes its own vocabulary (y/n) because the core owns it; a workflow's decision
 brings its own parser, so no one workflow's reply words live here.
 
-**Every pending request is single-slot and lock-guarded.** Concurrent turns (or concurrent tool
-calls within one turn) would otherwise both write the slot the serve loop resolves, and the first
-waiter would be resolved with the second's answer or left hanging forever. The lock makes a second
-asker wait until the first has been answered and the slot cleared.
+**A workflow decision is single-slot and lock-guarded; tool approvals are keyed.** A decision is
+one question a turn asks at a time, so a second asker waits until the first is answered and the slot
+cleared, and the serve loop can never resolve the wrong waiter. Approvals cannot work that way:
+concurrent tool dispatch puts several gated calls from one round in front of the user at once, and
+when they queued behind one slot only the oldest showed a prompt, so a prompt the user had scrolled
+past held every call behind it with nothing on screen to answer. ``PendingApprovals`` gives each call
+its own id and its own future instead, every prompt is shown as soon as it is ready, and a reply
+names the call it answers.
 """
 
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Generic, Optional, TypeVar, Union
 
@@ -139,13 +144,92 @@ class PendingRequest(Generic[T]):
         self.resolve(self._default)
 
 
-class _SwitchedAway(Exception):
-    """The viewed conversation moved on while an approval waited its turn for the single slot.
+class PendingApprovals:
+    """Every gated tool call waiting on the user, each under its own prompt id.
 
-    Flow control, not a failure: ``approve`` catches it and denies the call the way it does for a
-    switch it noticed earlier. It travels as an exception because the prompt callable is the only
-    code ``PendingRequest.ask`` runs while holding the lock that orders the askers, and that is where
-    the question has to be asked one last time.
+    No lock, unlike :class:`PendingRequest`: the lock there exists so two askers cannot write one
+    slot, and here each asker owns its own future, so there is nothing shared to guard. The map keeps
+    insertion order, which is what "the oldest" means for a reply that names no call (a terminal's
+    typed "y", or one typed into the web composer).
+
+    A denial is the answer for every way a call stops waiting without the user deciding: abandoned by
+    a switch, or cancelled with its turn.
+    """
+
+    def __init__(self) -> None:
+        self._ids = itertools.count(1)
+        self._waiting: dict[int, asyncio.Future] = {}
+
+    @property
+    def pending(self) -> bool:
+        return self.count > 0
+
+    @property
+    def count(self) -> int:
+        """Calls still waiting on an answer. An answered call stays registered until its asker resumes, and
+        is not counted: it is no longer waiting on anyone."""
+        return sum(1 for future in self._waiting.values() if not future.done())
+
+    async def ask(
+        self,
+        prompt: Callable[[int], Awaitable[None]],
+        *,
+        retire: Optional[Callable[[int], Awaitable[None]]] = None,
+    ) -> bool:
+        """Show ``prompt`` for a fresh id and wait for that call's answer.
+
+        The future is registered before ``prompt`` runs, so a reply arriving the instant the prompt is
+        drawn already has something to resolve. ``retire`` takes the prompt back once the call stops
+        waiting, however it stopped, and is skipped when ``prompt`` itself raised (nothing was put up).
+        A failing ``retire`` is logged rather than raised: it runs in a ``finally``, where an exception
+        would replace the answer the user already gave.
+        """
+        prompt_id = next(self._ids)
+        future = asyncio.get_running_loop().create_future()
+        self._waiting[prompt_id] = future
+        prompted = False
+        try:
+            await prompt(prompt_id)
+            prompted = True
+            return await future
+        finally:
+            self._waiting.pop(prompt_id, None)
+            if prompted and retire is not None:
+                try:
+                    await retire(prompt_id)
+                except Exception:
+                    logger.warning("Could not retire an answered approval prompt", exc_info=True)
+
+    def resolve(self, allowed: bool, prompt_id: Optional[int] = None) -> bool:
+        """Answer call ``prompt_id``, or the oldest unanswered call when None. Returns whether one was answered.
+
+        "Unanswered" rather than "first in the map": an answered call stays registered until its asker
+        resumes, so two quick typed replies would otherwise both land on the first call, and the second
+        would fall through to the serve loop and start a turn saying "y".
+        """
+        if prompt_id is None:
+            prompt_id = next((key for key, future in self._waiting.items() if not future.done()), None)
+        future = self._waiting.get(prompt_id)
+        if future is None or future.done():
+            return False
+        future.set_result(allowed)
+        return True
+
+    def abandon(self) -> None:
+        """Deny every waiting call."""
+        for future in self._waiting.values():
+            if not future.done():
+                future.set_result(False)
+
+
+class _SwitchedAway(Exception):
+    """The viewed conversation moved on before a question could be put up.
+
+    Flow control, not a failure: ``approve`` and ``decide`` catch it and deny the way they do for a
+    switch noticed earlier. It travels as an exception because the prompt callable is where the
+    question has to be asked one last time: for a decision, the only code ``PendingRequest.ask`` runs
+    while holding the lock that orders the askers; for an approval, the first code
+    ``PendingApprovals.ask`` runs once the call is registered for ``abandon_all`` to reach.
     """
 
 
@@ -183,10 +267,10 @@ class HumanGate:
         # not-yet-wired sentinel: the feature ships off, and `policies is None` already refuses every
         # call made before wiring finishes, so one sentinel covers both.
         self.auto_approval: Optional[AutoApproval] = None
-        self.approval: PendingRequest[bool] = PendingRequest(default=False)
-        # One slot for whatever the running workflow asks. Single-slot and lock-guarded like approval:
-        # a second asker waits until the first is answered, so the serve loop can never resolve the
-        # wrong waiter.
+        self.approval = PendingApprovals()
+        # One slot for whatever the running workflow asks, single-slot and lock-guarded: a second asker
+        # waits until the first is answered, so the serve loop can never resolve the wrong waiter. Unlike
+        # approvals, one turn never raises two of these at once.
         self.decision: PendingRequest[Any] = PendingRequest(default=None)
 
     def abandon_all(self) -> None:
@@ -216,11 +300,12 @@ class HumanGate:
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
 
-        **That one question is asked at all three points where the answer can have gone stale**, and
-        each window is wider than the last: on arrival, after the review's model call, and once the
-        approval slot is finally held. The third exists because the slot is single and lock-guarded,
-        so a second gated call from the same concurrently dispatched round waits out the user's answer
-        to the first, and nothing bounds how long that is.
+        **That one question is asked at all three points where the answer can have gone stale**: on
+        arrival, after the review's model call, and as the call is registered to wait. After that last
+        one, a switch reaches the call through ``abandon_all``, which denies every waiting call at once,
+        so the question never needs asking again however long the user takes to answer. Every waiting
+        call is prompted immediately and answered on its own (``PendingApprovals``), so a gated call
+        never waits behind another call's prompt.
 
         A gated tool in the agent's ``review`` list is reviewed (when ``[security.auto_approval]`` is on) just before that prompt, and
         only there: both auto-denials above run first, so a review happens exactly where a human would
@@ -278,21 +363,17 @@ class HumanGate:
             if outcome.approved:
                 return True
 
-        async def prompt() -> None:
-            # Asked a third time, here rather than above, because this runs under the lock that orders
-            # the askers and the checks above are as old as the wait for it. Concurrent tool dispatch
-            # ([assistant].concurrent_tools) puts a second gated call from the same round behind this
-            # slot, where it waits out the user's answer to the first: an unbounded window in practice,
-            # far wider than the review's. A switch during it abandons only the request holding the
-            # slot, so without this the one behind would go on to ask, and ask the wrong reader: an
-            # `approval` frame is never muted, so the page draws it into whatever transcript is on
-            # screen, and an Allow there runs the tool on a turn nobody is watching. The conversation
-            # riding on that frame is the page's own backstop for the sliver of the window even this
-            # check cannot close; the check is what keeps the question from being asked at all.
+        async def prompt(prompt_id: int) -> None:
+            # Asked a third time, here rather than above, because `PendingApprovals.ask` registers this
+            # call and then runs this before any other await, so a switch either happened before the
+            # registration (caught here) or after it (reached by `abandon_all`). The card above is an
+            # await, and a switch landing in it would otherwise leave this call registered too late for
+            # `abandon_all` and prompting the wrong reader: an `approval` frame is never muted, so the
+            # page would draw it into whatever transcript is on screen.
             if self._turn_conversation() != self._active_id():
                 raise _SwitchedAway
             await self._ui.ask_approval(
-                self._label(agent, name), arguments, agent=agent, conversation_id=turn_conversation
+                self._label(agent, name), arguments, agent=agent, conversation_id=turn_conversation, prompt_id=prompt_id
             )
 
         try:
@@ -315,8 +396,8 @@ class HumanGate:
         firing.
 
         One method, three callers, because all three are the same event at different times: the switch
-        may have happened before the call reached the gate, during the review the gate ran, or while
-        the call waited behind another call's prompt for the approval slot.
+        may have happened before the call reached the gate, during the review the gate ran, or between
+        the review's card and the call being registered to wait.
         """
         await self._ui.alert(
             f"A turn you switched away from asked to run {name}. It was denied automatically, "
@@ -410,18 +491,27 @@ class HumanGate:
         )
         return default
 
-    def resolve_reply(self, raw: str, text: str) -> bool:
+    def resolve_reply(self, raw: str, text: str, *, approval_id: Optional[int] = None) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.
 
         ``text`` is the lowercased, stripped form; ``raw`` preserves the user's casing, which an edited
         plan needs. Approval takes precedence: the two are never outstanding at once in practice, and
         checking in a fixed order keeps that assumption from mattering.
 
+        ``approval_id`` is the prompt a control reply names (the web page's Allow and Deny send one).
+        Such a reply is always consumed, even when its call is no longer waiting: it was a click on a
+        prompt that closed meanwhile, and read as an ordinary message it would start a turn saying
+        "y". A reply naming no call answers the oldest one still waiting, which is what a typed "y"
+        means in a terminal.
+
         A decision's parser is the asker's code, not the core's, so it can raise on a reply it did not
         expect (a plugin workflow's parser is by design arbitrary). Left unguarded that would propagate
         out of the serve loop and take the whole assistant down over one bad reply; caught here, the
         request is abandoned (answered with its own default) and the loop keeps serving.
         """
+        if approval_id is not None:
+            self.approval.resolve(text in ("y", "yes"), approval_id)
+            return True
         if self.approval.pending:
             return self.approval.resolve(text in ("y", "yes"))
         if self.decision.pending:

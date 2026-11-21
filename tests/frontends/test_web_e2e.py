@@ -3688,11 +3688,44 @@ def test_a_retired_prompt_keeps_its_card_and_loses_its_buttons(page, live_server
     def frame(**payload):
         page.evaluate("(f) => handleFrame({ data: JSON.stringify(f) })", payload)
 
-    frame(type="approval", name="run_command", arguments={"command": "ls"}, conversation_id=active)
+    frame(type="approval", id=1, name="run_command", arguments={"command": "ls"}, conversation_id=active)
     card = page.locator(".bubble.approval")
     expect(card.locator("button").first).to_be_enabled()
 
-    frame(type="prompt_retired")
+    frame(type="prompt_retired", id=1)
     expect(card).to_have_count(1)
     expect(card.locator("button").first).to_be_disabled()
     expect(card.locator("button").last).to_be_disabled()
+
+
+def test_two_approvals_are_both_live_and_answered_independently(page, live_server):
+    """Several gated calls can wait at once, and a prompt the user has not reached must not hide or block
+    the ones after it: each card is live, a click answers its own call by id, and closing one leaves the
+    other's buttons alone."""
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+    page.evaluate(
+        "() => { window.__sent = []; const send = ws.send.bind(ws); ws.send = (d) => { window.__sent.push(d); send(d); }; }"
+    )
+
+    def frame(**payload):
+        page.evaluate("(f) => handleFrame({ data: JSON.stringify(f) })", payload)
+
+    frame(type="approval", id=1, name="run_command", arguments={"command": "one"}, conversation_id=active)
+    frame(type="approval", id=2, name="run_command", arguments={"command": "two"}, conversation_id=active)
+    cards = page.locator(".bubble.approval")
+    expect(cards).to_have_count(2)
+    first, second = cards.nth(0), cards.nth(1)
+    expect(first.locator("button").first).to_be_enabled()
+    expect(second.locator("button").first).to_be_enabled()
+
+    second.locator("button", has_text="Allow").click()
+    sent = page.evaluate("() => window.__sent.map((d) => JSON.parse(d))")
+    assert sent[-1] == {"type": "approval_reply", "id": 2, "allow": True}
+    expect(second.locator("button").first).to_be_disabled()
+    expect(first.locator("button").first).to_be_enabled()
+
+    frame(type="prompt_retired", id=1)
+    expect(cards).to_have_count(2)
+    expect(first.locator("button").first).to_be_disabled()
+    expect(first.locator("button").last).to_be_disabled()

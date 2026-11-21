@@ -46,6 +46,8 @@ class RichChannelDouble(BareChannel):
     def __init__(self):
         super().__init__()
         self.calls: list[tuple[str, tuple]] = []
+        self.prompt_ids: list[Optional[int]] = []
+        self.retired_ids: list[Optional[int]] = []
         self.active_conversation_id: Optional[str] = None
 
     async def send_conversations(self, items: list[dict]) -> None:
@@ -55,12 +57,14 @@ class RichChannelDouble(BareChannel):
         self.calls.append(("notification", (text, conversation_id, url, group)))
 
     async def send_approval_request(
-        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id=None
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id=None, prompt_id=None
     ) -> None:
         self.calls.append(("approval", (name, arguments, agent, conversation_id)))
+        self.prompt_ids.append(prompt_id)
 
-    async def send_prompt_retired(self) -> None:
+    async def send_prompt_retired(self, prompt_id=None) -> None:
         self.calls.append(("prompt_retired", ()))
+        self.retired_ids.append(prompt_id)
 
     async def send_auto_approval(
         self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None, agent=None
@@ -185,6 +189,17 @@ async def test_rich_approval_carries_the_agent_and_conversation_and_defaults_to_
         ("approval", ("run_command", {}, "coder", "c1")),
         ("approval", ("run_command", {}, None, None)),
     ]
+
+
+async def test_the_prompt_id_reaches_the_channel():
+    """The id is what lets a page with several prompts on screen close the right one, and reply to it."""
+    channel = RichChannelDouble()
+    ui = ChannelUI(channel)
+    await ui.ask_approval("run_command", {}, prompt_id=7)
+    await ui.retire_prompt(7)
+    await ui.retire_prompt()
+    assert channel.prompt_ids == [7]
+    assert channel.retired_ids == [7, None]
 
 
 async def test_retiring_a_prompt_is_silent_on_a_channel_that_printed_one():

@@ -548,6 +548,108 @@ async def test_stop_cancels_in_flight_turn(tmp_path):
     assert any(m.get("content") == "long task" for m in assistant._agent.model_client.messages)
 
 
+class _StreamsToolRequestOnce(_RequestsToolOnce):
+    """`_RequestsToolOnce` on the streamed path a reactive turn takes, so AIMU's own streamed dispatch
+    reaches the approval gate."""
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        await super()._chat(user_message, generate_kwargs, use_tools, stream, **kwargs)
+
+        async def nothing():
+            return
+            yield
+
+        return nothing()
+
+
+async def test_a_turn_stopped_while_a_call_awaits_approval_answers_that_call(tmp_path):
+    """A stop during tool dispatch used to save the assistant's tool call with no result after it, and
+    every later message in that conversation then failed: Anthropic rejects such a transcript with
+    ``tool_use ids were found without tool_result blocks``, and OpenAI-shaped providers likewise
+    require each call to be answered. Waiting on an approval is the long, ordinary way to be mid-dispatch.
+    """
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsToolRequestOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
+    asked = asyncio.Event()
+    channel = _StopChannel(asked)
+    assistant = await Assistant.create(cfg, channel, client=client)
+    await assistant.start()
+
+    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
+        asked.set()
+
+    assistant._ui.ask_approval = prompt_and_wait
+
+    await asyncio.wait_for(assistant._serve_channel(), timeout=5)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    stored = assistant._store.get(assistant._active_id).messages
+    answers = [m for m in stored if m.get("role") == "tool" and m.get("tool_call_id") == "x"]
+    assert len(answers) == 1
+    assert answers[0]["name"] == "update_config"
+    assert "stopped" in answers[0]["content"] and "may or may not have run" in answers[0]["content"]
+    assert stored.index(answers[0]) == next(i for i, m in enumerate(stored) if m.get("tool_calls")) + 1
+
+
+class _StreamsTwoToolRequests(MockAsyncModelClient):
+    """Requests two gated calls in one assistant message, on the streamed path, then never answers again."""
+
+    def __init__(self):
+        super().__init__([])
+        self._requested = False
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        if user_message is not None:
+            self.messages.append({"role": "user", "content": user_message})
+        if not self._requested:
+            self._requested = True
+            arguments = {"section": "planning", "key": "plan_review", "value": "true"}
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"type": "function", "function": {"name": "update_config", "arguments": arguments}, "id": i}
+                        for i in ("x", "y")
+                    ],
+                }
+            )
+
+        async def nothing():
+            return
+            yield
+
+        return nothing()
+
+
+async def test_a_stop_with_two_approvals_waiting_answers_both_calls(tmp_path):
+    """Both calls of a concurrently dispatched round are asked at once, and a stop leaves neither unanswered."""
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsTwoToolRequests()
+    both_asked = asyncio.Event()
+    channel = _StopChannel(both_asked)
+    assistant = await Assistant.create(cfg, channel, client=client)
+    await assistant.start()
+    asked: list[int] = []
+
+    async def prompt_and_wait(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
+        asked.append(prompt_id)
+        if len(asked) == 2:
+            both_asked.set()
+
+    assistant._ui.ask_approval = prompt_and_wait
+
+    await asyncio.wait_for(assistant._serve_channel(), timeout=5)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    stored = assistant._store.get(assistant._active_id).messages
+    for call_id in ("x", "y"):
+        assert len([m for m in stored if m.get("role") == "tool" and m.get("tool_call_id") == call_id]) == 1
+
+
 class _RecordingClient(MockAsyncModelClient):
     """MockAsyncModelClient never reaches AIMU's request seam, so emit the pair a real provider would."""
 
@@ -2018,6 +2120,61 @@ async def test_stopping_a_firing_reports_nothing_as_finished(tmp_path):
     assert not any("finished" in text for text in channel.sent)
 
 
+class _RequestsToolThenHangsClient(MockAsyncModelClient):
+    """Leaves an assistant tool call unanswered, then hangs: the state a stop mid-dispatch saves."""
+
+    def __init__(self):
+        super().__init__([])
+        self.started = asyncio.Event()
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        if user_message is not None:
+            self.messages.append({"role": "user", "content": user_message})
+        self.messages.append(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"type": "function", "function": {"name": "get_web_content", "arguments": {}}, "id": "w"}
+                ],
+            }
+        )
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+async def test_a_stopped_firing_answers_the_call_it_was_making(tmp_path):
+    """A scheduled run stopped mid tool call must not save a transcript every later request is refused for."""
+    client = _RequestsToolThenHangsClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+    await asyncio.wait_for(client.started.wait(), timeout=2.0)
+    assistant.stop_task_runs("t1")
+    await asyncio.wait_for(run, timeout=2.0)
+
+    stored = assistant._store.get(conversation_id).messages
+    assert [m.get("tool_call_id") for m in stored if m.get("role") == "tool"] == ["w"]
+
+
+async def test_a_turn_that_fails_mid_dispatch_answers_the_call_it_was_making(tmp_path):
+    """Any ending saves the transcript, so any ending must leave it one a provider accepts, not only a stop."""
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsToolRequestOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.start()
+
+    async def broken_prompt(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
+        raise RuntimeError("the channel could not show the prompt")
+
+    assistant._ui.ask_approval = broken_prompt
+    await asyncio.wait_for(
+        assistant._handle(ChannelMessage(text="go", channel="fake"), conversation_id=assistant._active_id), timeout=5
+    )
+
+    stored = assistant._store.get(assistant._active_id).messages
+    assert [m.get("tool_call_id") for m in stored if m.get("role") == "tool"] == ["x"]
+
+
 async def test_a_firings_conversation_is_listed_as_running_and_cleared_when_it_ends(tmp_path):
     """What the task panel's Stop button hangs off. The row also has to reach the sidebar at all: the
     firing used to push its conversation only once it had succeeded, so a run in flight was invisible."""
@@ -2778,8 +2935,8 @@ async def test_a_message_that_starts_a_turn_is_not_reported_as_joining_one(tmp_p
 async def test_a_pending_approval_still_takes_the_message_rather_than_the_running_turn(tmp_path, track_running_turn):
     """Priority: `HumanGate.resolve_reply` consumes the next message and always has."""
 
-    async def noop_prompt() -> None:
-        """A prompt that sends nothing: what this exercises is the pending-request slot."""
+    async def noop_prompt(prompt_id) -> None:
+        """A prompt that sends nothing: what this exercises is the pending approval."""
 
     channel = FakeChannel(["y"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))

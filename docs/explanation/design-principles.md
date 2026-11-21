@@ -247,9 +247,10 @@ operation belongs on follows from its reach rather than from whether it mutates 
 mutates and still reads, taking only the deleted conversation's slot).
 [`AgentRegistry`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agent_registry.py) gives each conversation its own agent and
 model client, with LRU eviction and a pin held for the duration of any in-flight turn. A background
-or scheduled turn auto-denies a gated tool because nobody is watching it. Every human decision is a
-lock-guarded single slot ([`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)), so concurrent
-turns cannot clobber each other's prompt. The web front end refuses a second connection.
+or scheduled turn auto-denies a gated tool because nobody is watching it. Every human decision has a
+waiter of its own ([`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)): a workflow decision is a
+lock-guarded single slot, and each gated tool call waits under its own prompt id, so concurrent calls
+cannot clobber each other's prompt and none waits behind another's. The web front end refuses a second connection.
 `config/store.py` states last-writer-wins rather than adding file locking.
 
 ## 6. Security is explicit and user controlled

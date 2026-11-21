@@ -48,6 +48,15 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
 
 ### Conversations and turns
 
+- **A turn that ends mid tool call no longer breaks the conversation.** A stop that landed while a
+  call waited for approval, or while one ran (a scheduled run's included), or a failure during dispatch,
+  saved the assistant's tool call with no result after it. No provider accepts that transcript, so every
+  later message in the conversation failed (Anthropic: `tool_use ids were found without tool_result
+  blocks`). `TurnRunner._persist`, which every ending saves through, now answers each pending call
+  (`core.messages.answer_stranded_tool_calls`) first. The answer
+  says the call may or may not have run, because a running call may have finished, and concurrent
+  dispatch records no result until every call in the round returns. A conversation saved in the broken
+  state before this fix is not repaired; retry from the last message that worked.
 - **System prompts in the export, and `kokua export --turn N`.** The conversation export now shows each
   agent's system prompt the first time it appears and again whenever it changes, read from the recorded
   request payloads (never the payloads themselves), in every route: the command, the web download, and
@@ -2128,13 +2137,17 @@ notice on startup.
   `config.update_config`, `documents.save_document`, and `documents.edit_document`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. **That question is asked again at every point the answer can have gone stale**,
-  and the widest window is the one easiest to miss: a round's tool calls are dispatched concurrently
-  while the approval slot is single, so its second gated call waits inside the slot for as long as you
-  take to answer the first, and a switch during that wait leaves the question behind it pointed at a
-  reader who is now looking somewhere else. It is denied and raises the card below instead. The prompt
-  frame carries its conversation for the same reason an auto-approval card does, so a page can drop one
-  that raced the last check rather than draw it into the wrong transcript. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
+  are currently viewing. **That question is asked again at every point the answer can have gone stale**:
+  on arrival, after an auto-approval review, and as the call is registered to wait, after which a
+  switch denies every waiting call at once. The prompt frame carries its conversation for the same
+  reason an auto-approval card does, so a page can drop one that raced the last check rather than draw
+  it into the wrong transcript. **Every waiting gated call shows its own Allow/Deny at once.** A round's
+  tool calls are dispatched concurrently, and they used to queue behind one approval slot that showed
+  only the oldest prompt, so a prompt you had scrolled past held every call behind it, with reviewer
+  cards for the later calls on screen and no buttons to answer them. Each now waits under its own
+  prompt id (`core.interaction.PendingApprovals`), the page's buttons send an `approval_reply` frame
+  naming it, and a typed `y` or `n` answers the oldest call still waiting. A breaking change for a
+  third-party rich channel: `send_approval_request` and `send_prompt_retired` take a `prompt_id`. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
@@ -2147,13 +2160,15 @@ notice on startup.
   approves an unattended call, so that promise was false. Before, the model saw only that the call was not approved, which reads like a call
   worth retrying and left the report the user reads afterwards with nothing to say about it.
   The reply is routed through the single channel reader, so it is safe alongside
-  `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
-  cannot overwrite each other. **A prompt's controls are retired when its question closes**, which is
-  not always something the page can see: a typed `y` answers without touching the buttons, and a
-  `/stop` cancels the turn the question belonged to. A reply matching no outstanding request is an
-  ordinary message, so a button outliving its question turns a `y` into a turn saying "y". The
-  `prompt_retired` frame is sent from the one place that knows all four endings (`PendingRequest.ask`'s
-  `finally`: answered here, answered by a typed reply, abandoned by a switch, cancelled with the turn),
+  `/stop`. Each approval has its own waiter and plan review a lock-guarded slot, so two concurrent
+  requests cannot overwrite each other. **A prompt's controls are retired when its question closes**,
+  which is not always something the page can see: a typed `y` answers without touching the buttons, and
+  a `/stop` cancels the turn the question belonged to. A typed reply matching no outstanding request is
+  an ordinary message, so a button outliving its question would turn a `y` into a turn saying "y"; a
+  button's reply names its prompt and is consumed whether or not that prompt is still waiting. The
+  `prompt_retired` frame (carrying the prompt id for an approval) is sent from the one place that knows
+  all four endings (the `finally` in `PendingApprovals.ask` and `PendingRequest.ask`: answered here,
+  answered by a typed reply, abandoned by a switch, cancelled with the turn),
   and the page disables the card's controls while keeping the card, which is the record of what was
   asked. A terminal prompt is a printed line with nothing to take back, so it degrades to silence.
 - **A gate names its toolset, and one that would gate nothing fails startup.** A `[security]

@@ -144,9 +144,10 @@ class Assistant:
         # Kept distinct from it because the two need opposite handling in the serve loop: one runs the
         # workflow, the other must not run a plain turn on the literal "/word ..." text.
         self._undeclared_workflow_commands: dict[str, str] = {}
-        # Tool approval and a workflow's own decision: each a single-slot request the serve loop
-        # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
-        # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
+        # Tool approval and a workflow's own decision, which the serve loop resolves with the user's
+        # reply. Each gated call waits under its own prompt id, so concurrent tool calls are all asked at
+        # once; a workflow decision is a lock-guarded single slot, so concurrent workflow turns can never
+        # clobber the slot the serve loop is about to resolve.
         self._policies_lock = threading.Lock()
         self._human = HumanGate(
             self._ui,
@@ -851,8 +852,8 @@ class Assistant:
                     continue
                 # While an approval or a workflow decision is outstanding, the next message is its
                 # answer, not a new turn. (A `/stop` above still takes priority, cancelling the waiting
-                # turn.)
-                if self._human.resolve_reply(raw, text):
+                # turn.) A web button's reply names the approval it answers; a typed one does not.
+                if self._human.resolve_reply(raw, text, approval_id=msg.metadata.get("approval")):
                     continue
                 # A workflow command runs this one turn through that workflow (the web UI's Plan
                 # toggle sends "/plan <task>", which is exactly this path). Any other message runs a
@@ -1105,7 +1106,7 @@ class Assistant:
             self._gate,
             config=self._config,
             models=self.current_models(),
-            pending_approval=self._human.approval.pending,
+            pending_approvals=self._human.approval.count,
             pending_decision=self._human.decision.pending,
         )
 

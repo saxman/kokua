@@ -174,7 +174,10 @@ That single line is what makes `/stop` possible. The channel is still reading wh
 [AIMU's `RunHandle`](https://saxman.info/aimu/how-to/cancel-a-run/) doing the work. What you already
 read is not lost when that lands: the agent snapshots the partial turn in a `finally` of its own, and
 `turns.py`'s cancelled branch persists that snapshot before returning, so stopping a turn costs you the
-rest of the answer and not the part that had already arrived. (Invariant 5, which the same branch also
+rest of the answer and not the part that had already arrived. A stop that lands during tool dispatch
+(a call waiting for approval is the common case) leaves the model's tool calls with no results, which
+every provider rejects on the next request, so the save every ending goes through first answers each
+pending call with a result saying it may or may not have run. (Invariant 5, which the same branch also
 obeys, is about a different thing: recording the turn's sub-agent events *before* the "(stopped)"
 notice, since a second cancellation racing that send would propagate straight past a record placed
 after it.)

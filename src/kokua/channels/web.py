@@ -430,14 +430,24 @@ class WebChannel(BaseWebChannel):
         """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, the
         page's own id for the bubble it drew, or any combination (the web pump's ``input`` frame).
 
-        ``/stop`` and approval replies still arrive through the base string ``feed``; only a message
-        the page composed uses this richer path, so ``receive`` can populate ``ChannelMessage.images``
-        and ``ChannelMessage.metadata``."""
+        ``/stop`` still arrives through the base string ``feed`` and an approval reply through
+        ``feed_approval``; only a message the page composed uses this richer path, so ``receive`` can
+        populate ``ChannelMessage.images`` and ``ChannelMessage.metadata``."""
         await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking, "token": token})
+
+    async def feed_approval(self, prompt_id: int, allowed: bool) -> None:
+        """Enqueue the page's answer to one approval prompt (the web pump's ``approval_reply`` frame).
+
+        It travels as the "y" or "n" a terminal user would type, so the serve loop reads both the same
+        way, with the prompt's id in ``ChannelMessage.metadata["approval"]``: several prompts can be on
+        screen at once, and the id is what makes a click answer the call it was drawn for rather than
+        the oldest one waiting."""
+        await self._inbound.put({"text": "y" if allowed else "n", "approval": prompt_id})
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
         """Yield inbound turns; a dict item carries attached image paths, a per-turn reasoning effort, a
-        bubble token, or any combination, a string is a plain text turn.
+        bubble token, or any combination, or is an approval reply naming its prompt; a string is a plain
+        text turn.
 
         Overrides the base (string-only) receive so uploaded images reach the agent. ``None`` remains the
         socket-closed sentinel."""
@@ -450,7 +460,7 @@ class WebChannel(BaseWebChannel):
                 # None: the core reads a missing effort as "use the configured one" and a missing token
                 # as "no bubble is waiting on this", and a present-but-None key would be a second
                 # spelling of the same thing for every reader to remember.
-                metadata = {key: item[key] for key in ("thinking", "token") if item.get(key) is not None}
+                metadata = {key: item[key] for key in ("thinking", "token", "approval") if item.get(key) is not None}
                 yield ChannelMessage(
                     text=item.get("text", ""),
                     images=item.get("images") or None,
@@ -652,9 +662,15 @@ class WebChannel(BaseWebChannel):
         await self.send_frame({"type": "download", "name": name, "url": url})
 
     async def send_approval_request(
-        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        agent: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        prompt_id: Optional[int] = None,
     ) -> None:
-        """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
+        """Ask the browser to approve a tool call; the page replies with an ``approval_reply`` frame.
 
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
@@ -662,28 +678,33 @@ class WebChannel(BaseWebChannel):
         Never muted (``approval`` is not in ``_TURN_FRAMES``), and it carries its conversation
         instead, for the reasons ``send_auto_approval`` below carries one: the core only prompts for
         the conversation being viewed, and muting the question a turn is blocked on would hang that
-        turn until something abandoned it. The id is what lets the page drop a prompt that raced a
-        switch, rather than asking one conversation's reader about another conversation's call.
+        turn until something abandoned it. The conversation id is what lets the page drop a prompt that
+        raced a switch, rather than asking one conversation's reader about another conversation's call.
         """
-        await self.send_frame(
-            {
-                "type": "approval",
-                "name": name,
-                "arguments": arguments,
-                "agent": agent,
-                "conversation_id": conversation_id,
-            }
-        )
+        frame: dict[str, Any] = {
+            "type": "approval",
+            "name": name,
+            "arguments": arguments,
+            "agent": agent,
+            "conversation_id": conversation_id,
+        }
+        if prompt_id is not None:
+            frame["id"] = prompt_id
+        await self.send_frame(frame)
 
-    async def send_prompt_retired(self) -> None:
-        """Tell the page the question it is showing is closed, whichever way it closed.
+    async def send_prompt_retired(self, prompt_id: Optional[int] = None) -> None:
+        """Tell the page a question it is showing is closed, whichever way it closed.
 
         Never muted (``prompt_retired`` is not in ``_TURN_FRAMES``) and carrying no conversation,
-        unlike the prompt it retires: the page keeps one outstanding prompt, because the core allows
-        one, and a switch has already replaced the whole transcript by the time anything could
-        arrive for the wrong one.
+        unlike the prompt it retires: a switch has already replaced the whole transcript by the time
+        anything could arrive for the wrong one. ``id`` names the approval prompt it closes, since
+        several can be on screen at once; a frame without one closes the plan review, of which the
+        core allows one.
         """
-        await self.send_frame({"type": "prompt_retired"})
+        frame: dict[str, Any] = {"type": "prompt_retired"}
+        if prompt_id is not None:
+            frame["id"] = prompt_id
+        await self.send_frame(frame)
 
     async def send_auto_approval(
         self,

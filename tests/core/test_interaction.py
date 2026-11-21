@@ -11,7 +11,7 @@ from aimu.tools import Denied
 from kokua.config.schema import AssistantConfig, ReviewerConfig
 from kokua.core.approval import DEFAULT_POLICY, ApprovalPolicies, ApprovalPolicy
 from kokua.core.auto_approval import AutoApproval, Outcome, Review, ReviewContext, current_review_context
-from kokua.core.interaction import UNATTENDED_DENIAL, HumanGate, PendingRequest
+from kokua.core.interaction import UNATTENDED_DENIAL, HumanGate, PendingApprovals, PendingRequest
 
 
 async def _noop() -> None:
@@ -207,6 +207,64 @@ async def test_a_channel_that_cannot_be_told_does_not_lose_the_answer():
     assert await task == "yes"
 
 
+async def test_cancelling_one_waiting_approval_leaves_the_other_waiting():
+    """A `/stop` cancels the tool calls of one round together, but each owns its own answer and its own retire."""
+    approvals = PendingApprovals()
+    retired: list[int] = []
+    asked: list[int] = []
+
+    async def prompt(prompt_id):
+        asked.append(prompt_id)
+
+    async def retire(prompt_id):
+        retired.append(prompt_id)
+
+    first = asyncio.create_task(approvals.ask(prompt, retire=retire))
+    second = asyncio.create_task(approvals.ask(prompt, retire=retire))
+    await asyncio.sleep(0)
+    assert approvals.count == 2
+
+    first.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await first
+    assert approvals.count == 1 and retired == [asked[0]]
+
+    assert approvals.resolve(True) is True  # the oldest left is the second
+    assert await second is True
+    assert retired == asked and not approvals.pending
+
+
+async def test_two_quick_unnamed_replies_answer_two_calls():
+    """An answered call stays registered until its asker resumes; a second typed reply must skip it."""
+    approvals = PendingApprovals()
+    first = asyncio.create_task(approvals.ask(_ignore_id))
+    second = asyncio.create_task(approvals.ask(_ignore_id))
+    await asyncio.sleep(0)
+
+    assert approvals.resolve(True) is True
+    assert approvals.resolve(False) is True  # no yield in between: the first is answered, not yet gone
+    assert await first is True and await second is False
+
+
+async def _ignore_id(prompt_id) -> None:
+    pass
+
+
+async def test_an_approval_whose_prompt_raised_retires_nothing():
+    approvals = PendingApprovals()
+    retired: list[int] = []
+
+    async def prompt(prompt_id):
+        raise RuntimeError("the channel could not show it")
+
+    async def retire(prompt_id):
+        retired.append(prompt_id)
+
+    with pytest.raises(RuntimeError):
+        await approvals.ask(prompt, retire=retire)
+    assert retired == [] and not approvals.pending
+
+
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
@@ -216,14 +274,18 @@ class _UI:
         self.auto_approval_agents: list[str | None] = []
         self.alerts: list[str] = []
         self.retired = 0
+        self.prompt_ids: list[int | None] = []
+        self.retired_ids: list[int | None] = []
 
-    async def retire_prompt(self):
+    async def retire_prompt(self, prompt_id=None):
         self.retired += 1
+        self.retired_ids.append(prompt_id)
 
-    async def ask_approval(self, name, arguments, *, agent=None, conversation_id=None):
+    async def ask_approval(self, name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
         self.asked.append(f"approve:{name}")
         self.asked_by.append(agent)
         self.asked_for.append(conversation_id)
+        self.prompt_ids.append(prompt_id)
 
     async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None, agent=None):
         self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
@@ -730,40 +792,85 @@ async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatc
     assert "denied automatically" in ui.alerts[0]
 
 
-async def test_a_switch_while_queued_behind_another_prompt_denies_instead_of_asking(in_turn):
-    """The check in front of the prompt is as old as the wait for the slot, which the user's answer bounds.
+async def _wait_for_prompts(gate, count: int) -> None:
+    """Wait, bounded, until `count` approvals are waiting at once. Raises `TimeoutError` if they never are."""
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while gate.approval.count < count:
+            await asyncio.sleep(0.001)
 
-    AIMU dispatches a round's tool calls concurrently (`[assistant].concurrent_tools`, on by default),
-    so two gated calls reach the gate at once and the second blocks inside `PendingRequest.ask` until
-    the first is answered. Its switched-away check was made before that wait, and a switch during the
-    wait abandons only the request that holds the slot. Asking anyway would put the question in front
-    of the wrong reader: an `approval` frame is never muted, so the page draws it into the conversation
-    now on screen, and a yes there runs the tool on a turn nobody is watching. The same reasoning as
-    the review above, over a window the user's own reading time sets rather than a model call.
+
+async def test_a_switch_denies_every_waiting_approval(in_turn):
+    """A conversation switch reaches every waiting call at once, so none can be answered by the wrong reader.
+
+    AIMU dispatches a round's tool calls concurrently (`[assistant].concurrent_tools`, on by default), so
+    two gated calls reach the gate at once and both are asked. A switch abandons both: an `approval` frame
+    is never muted, so a prompt left live would sit in the conversation now on screen, and a yes there
+    would run the tool on a turn nobody is watching.
     """
     viewing = {"id": "c1"}
     ui = _UI()
     gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
     gate.policies = _policies(confirm={"run_command"})
 
-    holds_the_slot = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
-    queued = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
-    await _wait_for_prompt(gate)
+    first = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
+    second = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
+    await _wait_for_prompts(gate, 2)
 
     viewing["id"] = "c2"
-    gate.abandon_all()  # what a conversation switch does, and it reaches only the outstanding request
+    gate.abandon_all()  # what a conversation switch does
 
-    assert await holds_the_slot is False
-    try:
-        assert await asyncio.wait_for(queued, timeout=_SETTLE_TIMEOUT) is False
-    except TimeoutError:
-        raise AssertionError("the queued call asked the conversation the user had switched to") from None
+    assert await asyncio.wait_for(first, timeout=_SETTLE_TIMEOUT) is False
+    assert await asyncio.wait_for(second, timeout=_SETTLE_TIMEOUT) is False
+    assert ui.asked_for == ["c1", "c1"]  # both filed against the turn's conversation, not the reader's
+    assert sorted(ui.retired_ids) == sorted(ui.prompt_ids)  # each prompt retired, by its own id
+    assert not gate.approval.pending
 
-    assert ui.asked == ["approve:run_command"]  # the one prompt, raised before the switch
-    assert ui.asked_for == ["c1"]  # and filed against the turn's conversation, not the reader's
-    assert ui.retired == 1  # the one prompt, retired when the switch abandoned it, and nothing else
-    assert len(ui.alerts) == 1
-    assert "denied automatically" in ui.alerts[0]
+
+async def test_two_waiting_approvals_are_both_asked_before_either_is_answered(in_turn):
+    """A prompt the user has not seen must not hide the ones behind it, and answering one answers only it."""
+    ui = _UI()
+    gate = _gate(ui)
+    gate.policies = _policies(confirm={"run_command"})
+
+    first = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
+    second = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
+    await _wait_for_prompts(gate, 2)
+
+    assert ui.asked == ["approve:run_command", "approve:run_command"]
+    assert len(set(ui.prompt_ids)) == 2 and None not in ui.prompt_ids
+    assert gate.resolve_reply("y", "y", approval_id=ui.prompt_ids[1]) is True
+    assert await asyncio.wait_for(second, timeout=_SETTLE_TIMEOUT) is True
+    await asyncio.sleep(0)
+    assert not first.done() and gate.approval.count == 1
+    assert ui.retired_ids == [ui.prompt_ids[1]]
+
+    assert gate.resolve_reply("n", "n") is True  # no id: the oldest, which is now the only one
+    assert await asyncio.wait_for(first, timeout=_SETTLE_TIMEOUT) is False
+
+
+async def test_a_typed_reply_answers_the_oldest_waiting_approval(in_turn):
+    """A terminal, or a "y" typed into the composer, carries no id; the oldest question is the one it answers."""
+    ui = _UI()
+    gate = _gate(ui)
+    gate.policies = _policies(confirm={"run_command"})
+
+    first = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
+    second = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
+    await _wait_for_prompts(gate, 2)
+
+    assert gate.resolve_reply("y", "y") is True
+    assert await asyncio.wait_for(first, timeout=_SETTLE_TIMEOUT) is True
+    await asyncio.sleep(0)
+    assert not second.done()
+    gate.resolve_reply("n", "n")
+    assert await asyncio.wait_for(second, timeout=_SETTLE_TIMEOUT) is False
+
+
+async def test_a_reply_naming_no_waiting_approval_is_consumed():
+    """A click on a prompt already answered (by a typed "y", say) must not become a turn saying "y"."""
+    gate = _gate(_UI())
+    assert gate.resolve_reply("y", "y", approval_id=999) is True
+    assert gate.resolve_reply("y", "y") is False  # nothing waiting and no id: an ordinary message
 
 
 async def test_a_gate_with_no_auto_approval_prompts_as_before(monkeypatch, in_turn):

@@ -313,6 +313,7 @@ from kokua.core.errors import describe_error
 from kokua.core.artifacts import ArtifactSink, current_artifacts
 from kokua.core.messages import (
     PROVENANCE_MIXED,
+    answer_stranded_tool_calls,
     derive_title,
     last_assistant_index,
     resolve_message_indices,
@@ -1611,6 +1612,18 @@ class TurnRunner:
         made of. It defaults to None for the callers where that is the honest answer: a proactive turn
         and a scheduled firing are nobody's typed message.
         """
+        # Every ending saves through here (answered, stopped, failed, a scheduled run's), and a turn that
+        # ended during tool dispatch leaves the model's calls with no results, a transcript no provider
+        # accepts, so every later message in the conversation would fail. Appended at the end, so no index
+        # stored turn metadata is keyed by moves.
+        stranded = answer_stranded_tool_calls(self._book.agent_for(conversation_id).model_client.messages)
+        if stranded:
+            logger.warning(
+                "conversation %s ended with %d tool call(s) pending (%s); recorded as unanswered",
+                conversation_id,
+                len(stranded),
+                ", ".join(stranded),
+            )
         title_derived = self._book.persist(conversation_id)
         # The store now holds what the catch-up record stood in for. Dropped here, between the write and
         # the next await, rather than in the caller's `finally`: a switch-in landing in between would
