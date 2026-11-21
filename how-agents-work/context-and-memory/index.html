@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1208,6 +1208,8 @@
       
         
       
+        
+      
     
     
     
@@ -1305,6 +1307,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1701,18 +1731,21 @@ what opens the store at all, and no agent declaring <code>memory</code> means no
 to disagree (<a href="../capability-is-declared/">capability is declared</a>). And <code>cross_cutting=True</code> marks it as
 something an agent holds to manage itself rather than to do domain work.</p>
 <p><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/documents.py"><code>toolsets/documents.py</code></a> is
-the same five lines over AIMU's document store, and it is worth knowing why there are two. Memory holds
-short facts, retrieved by similarity. Documents hold whole texts under paths, and the folder is one you
-can drop files into yourself, which is why that toolset's guidance runs to four sentences telling the
-model to call <code>list_documents</code> before assuming the store is empty: asked about papers the user had just
-copied in, an earlier version reported an empty store while the files sat there.</p>
+the same idea over AIMU's document stores, and it is worth knowing why there are two. Memory holds
+short facts, retrieved by similarity. Documents hold whole texts under paths, in folders you can drop
+files into yourself (Kokua's own, plus any <a href="../../explanation/retrieval/">collection</a> you declare, such as a
+notes vault), which is why that toolset's guidance tells the model to call <code>list_documents</code> before
+assuming a document is missing: asked about papers the user had just copied in, an earlier version
+reported an empty store while the files sat there. Searching them is passage retrieval, with its own
+machinery and its own page, <a href="../../explanation/retrieval/">Retrieval</a>.</p>
 <p><strong>On disk.</strong> Everything lives under <code>$KOKUA_HOME</code> (default <code>~/.kokua</code>), and every leaf is a derived
 property on the config rather than a new path function: <code>data/sessions.json</code>, <code>data/memory/</code>,
 <code>data/documents/</code>, <code>data/images/</code>, <code>data/pages/</code>. <a href="../../explanation/design-principles/#4-all-state-under-one-directory-the-user-owns">Principle
 4</a> is why.</p>
 <p>Kokua's README says that state is "plain files under <code>~/.kokua</code>, so you can read what it remembers while
 it is still running", and the transcript above is the honest reading of that. <code>sessions.json</code> is JSON.
-<code>documents/</code> is a folder of UTF-8 text files. <code>data/memory/</code> is not a plain file: it is a SQLite
+<code>documents/</code> is a folder of Markdown, text, and PDF files, and <code>index/</code> beside it is the search index
+built from them, a SQLite database you can delete and Kokua will rebuild. <code>data/memory/</code> is not a plain file: it is a SQLite
 database plus binary index directories, and <code>cat</code> on it prints <code>SQLite format 3</code> and then garbage.
 Local, inspectable, and yours, all three of which are the point, and <code>sqlite3</code> is the tool rather than
 <code>cat</code>. It does not mean readable in a text editor, and this page would rather say so than repeat the

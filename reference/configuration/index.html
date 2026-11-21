@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1777,6 +1777,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [documents]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentscollection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [[documents.collection]]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#toolset-sections" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1847,6 +1869,8 @@
       
         
           
+        
+      
         
       
         
@@ -1954,6 +1978,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -2771,6 +2823,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [documents]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentscollection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [[documents.collection]]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#toolset-sections" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2864,6 +2938,7 @@ from its name.</p>
   <a href="#logging"><code>[logging]</code></a> · <a href="#email"><code>[email]</code></a> · <a href="#scheduling"><code>[scheduling]</code></a> ·
   <a href="#schedulingtaskname"><code>[scheduling.task.&lt;name&gt;]</code></a> · <a href="#planning"><code>[planning]</code></a> ·
   <a href="#capabilities"><code>[capabilities]</code></a> · <a href="#github_backup"><code>[github_backup]</code></a> · <a href="#compute"><code>[compute]</code></a> ·
+  <a href="#documents"><code>[documents]</code></a> · <a href="#documentscollection"><code>[[documents.collection]]</code></a> ·
   <a href="#toolset-sections">toolset sections in general</a></li>
 <li><a href="#environment-variables">Environment variables</a></li>
 <li><a href="#command-line-flags">Command-line flags</a></li>
@@ -2914,7 +2989,8 @@ by a tool outlives the conversation that wrote it.</p>
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"reviewers.*"</span><span class="p">,</span>
 </span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
 </span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="p">]</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="s2">"documents.embedding_model"</span><span class="p">,</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="p">]</span>
 </span></code></pre></div>
 <p>A pattern takes one of three forms:</p>
 <table>
@@ -2993,6 +3069,10 @@ assistant, because the shipped <code>security.*</code> pattern was the only thin
 <td><code>compute.command_env_passthrough</code></td>
 <td>lets the assistant name its own credentials for a <code>run_command</code> child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command</td>
 </tr>
+<tr>
+<td><code>documents.embedding_model</code></td>
+<td>lets the assistant point the model that embeds your document collections at a remote endpoint, which would receive every passage of every collection at the next restart's indexing</td>
+</tr>
 </tbody>
 </table>
 <p>A flat agent key (<code>model</code>, <code>thinking</code>, <code>system_message</code>, <code>description</code>, <code>delegates_to</code>) is
@@ -3014,7 +3094,9 @@ that it starts.</p>
 there. That is deliberate, for the reason <code>[assistant].model</code> is unlocked: the key is startup-only, so
 no write escalates the session doing the writing, and what it moves is cost rather than reach.</p>
 <p><code>[[mcp.server]]</code> is not in the list and is not writable by <code>update_config</code> either way; it is appended by
-<code>add_mcp_server</code>, which connects the server as well as recording it.</p>
+<code>add_mcp_server</code>, which connects the server as well as recording it. <code>[[documents.collection]]</code> is not in
+the list either, and <code>update_config</code> refuses it whatever the list says: a collection names a folder on disk
+the assistant may read, so declaring one is a hand-edit.</p>
 <h2 id="which-keys-apply-live">Which keys apply live<a class="headerlink" href="#which-keys-apply-live" title="Permanent link">&para;</a></h2>
 <p>A <strong>hot</strong> key takes effect on the next turn, with no restart, and is written back to <code>config.toml</code>
 immediately. Everything else is <strong>startup-only</strong>: change it, then restart.</p>
@@ -3036,7 +3118,7 @@ immediately. Everything else is <strong>startup-only</strong>: change it, then r
 </tr>
 <tr>
 <td><code>[capabilities].max_depth</code></td>
-<td>all of <code>[agents.*]</code> (including each <code>[agents.&lt;name&gt;.tools]</code>), <code>[assistant.tools]</code>, and <code>[reviewers.*]</code>, <code>[mcp]</code> (including <code>[[mcp.server]]</code>), <code>[security]</code> (including <code>[security.auto_approval]</code>), <code>[paths]</code>, <code>[frontend]</code>, <code>[web]</code>, <code>[logging]</code>, <code>[email]</code></td>
+<td>all of <code>[agents.*]</code> (including each <code>[agents.&lt;name&gt;.tools]</code>), <code>[assistant.tools]</code>, and <code>[reviewers.*]</code>, <code>[mcp]</code> (including <code>[[mcp.server]]</code>), <code>[security]</code> (including <code>[security.auto_approval]</code>), <code>[paths]</code>, <code>[frontend]</code>, <code>[web]</code>, <code>[logging]</code>, <code>[email]</code>, <code>[documents]</code> (including <code>[[documents.collection]]</code>)</td>
 </tr>
 <tr>
 <td><code>[scheduling].max_task_conversations</code></td>
@@ -3306,8 +3388,14 @@ worker (see <a href="#capabilities"><code>[capabilities]</code></a>) always uses
 <code>assistant.tools.*</code>, so only a hand-edit changes it. For why approval is its own axis, see
 <a href="../../explanation/tool-access/">Tool access</a>.</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[assistant.tools]</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config.update_config"</span><span class="p">]</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="s2">"config.update_config"</span><span class="p">,</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="s2">"documents.save_document"</span><span class="p">,</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="s2">"documents.edit_document"</span><span class="p">,</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">]</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span>
 </span></code></pre></div>
 <table>
 <thead>
@@ -3322,7 +3410,7 @@ worker (see <a href="#capabilities"><code>[capabilities]</code></a>) always uses
 <tr>
 <td><code>confirm</code></td>
 <td>list of strings</td>
-<td>six entries, see below</td>
+<td>eight entries, see below</td>
 <td>calls that ask you</td>
 </tr>
 <tr>
@@ -3333,11 +3421,19 @@ worker (see <a href="#capabilities"><code>[capabilities]</code></a>) always uses
 </tr>
 </tbody>
 </table>
-<p>The block above is what <code>config.example.toml</code> ships. A config that sets neither key gets the schema
-default instead: all six tools the old <code>confirm_tools</code> gated (those three plus <code>compute.execute_python</code>,
-<code>compute.run_command</code>, and <code>fs_write</code>) in <code>confirm</code>, and an empty <code>review</code>, so it gates exactly what it
-always did. Enabling auto-approval on that default is a startup error until you move entries into
-<code>review</code>, since a reviewer with nothing to answer for would do nothing.</p>
+<p>The block above is what <code>config.example.toml</code> ships. A config that sets neither key gets the code
+default instead: the same eight tools, all in <code>confirm</code> (the five above plus <code>compute.execute_python</code>,
+<code>compute.run_command</code>, and <code>fs_write</code>), and an empty <code>review</code>. Enabling auto-approval on that default is
+a startup error until you move entries into <code>review</code>, since a reviewer with nothing to answer for would
+do nothing.</p>
+<p>The default is checked like an entry you wrote, so it only fits a config whose agents declare every
+toolset it names: <code>skills</code>, <code>mcp</code>, <code>compute</code>, <code>fs_write</code>, <code>config</code>, and <code>documents</code>. An agent set that
+leaves one out (say, no agent declares <code>documents</code>) fails startup naming the entry, the same
+<a href="#an-entry-that-would-gate-nothing-fails-startup">gate-nothing error</a> a hand-written one gets. Write an
+<code>[assistant.tools]</code> table listing only what your agents hold. A <code>config.toml</code> whose table predates the
+document writers keeps saving and editing documents without asking until you add both entries to its
+<code>confirm</code>; once such an agent can reach a <code>writable = true</code> collection, startup raises a notice naming
+the table and the two lines.</p>
 <p>This table holds only those two keys. <code>available</code> or <code>resident</code> here is a startup error, because
 availability is declared per agent and never defaulted. The two lists must not name the same tool.</p>
 <h3 id="confirm"><code>confirm</code><a class="headerlink" href="#confirm" title="Permanent link">&para;</a></h3>
@@ -3346,8 +3442,12 @@ UI. Set to <code>[]</code> to clear this list; calls in <code>review</code> stil
 starts unprompted) <strong>auto-deny</strong> a gated call regardless, since there is no one at the keyboard to ask.
 <code>--confirm-tools</code> overrides this key for one run.</p>
 <p>The default entries each reach past the model: <code>config.update_config</code> rewrites this file (except the
-locked keys it can never change, and this table is one of them by default), and <code>skills.add_skill_script</code>
-and <code>mcp.add_mcp_server</code> each install something that will run later.</p>
+locked keys it can never change, and this table is one of them by default), <code>skills.add_skill_script</code>
+and <code>mcp.add_mcp_server</code> each install something that will run later, and <code>documents.save_document</code> and
+<code>documents.edit_document</code> change a file in a folder that may be your own vault. The gate decides by tool
+name, so it cannot tell a write to Kokua's own <code>kokua</code> collection from one to a vault you marked
+writable; both ask. Name the toolset, never a part: <code>work_write.edit_document</code> is refused with the entry
+to write instead (see <a href="#documentscollection"><code>[[documents.collection]]</code></a>).</p>
 <h3 id="review"><code>review</code><a class="headerlink" href="#review" title="Permanent link">&para;</a></h3>
 <p>Tools that ask a model reviewer first, and you when the reviewer does not approve. With
 <a href="#securityauto_approval"><code>[security.auto_approval]</code></a> off (the shipped state) a <code>review</code> entry prompts
@@ -3488,7 +3588,7 @@ decides what a reviewer may never answer for.</p>
 <h3 id="locked_config_keys"><code>locked_config_keys</code><a class="headerlink" href="#locked_config_keys" title="Permanent link">&para;</a></h3>
 <p>A list of patterns naming which keys <code>update_config</code> refuses. Default:
 <code>["security.*", "email.to", "paths.data_dir", "agents.*", "assistant.tools.*", "reviewers.*",
-"scheduling.task.*", "compute.command_env_passthrough"]</code>. Startup-only, and
+"scheduling.task.*", "compute.command_env_passthrough", "documents.embedding_model"]</code>. Startup-only, and
 always locked against <code>update_config</code> regardless of its own value. See
 <a href="#who-may-change-which-key">Who may change which key</a> for the pattern forms and what each shipped
 pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
@@ -3759,7 +3859,10 @@ key; either way the toolset is the agent's to call. The one alternative to writi
 one of Kokua's optional toolsets (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>, which
 <code>--list-toolsets</code> groups with the rest of Kokua's as built-in toolsets), a third-party plugin toolset, a
 skill in your skills folder
-named by its own name, or an MCP server configured under <code>[[mcp.server]]</code>, named by its <code>name</code>. The list
+named by its own name, or an MCP server configured under <code>[[mcp.server]]</code>, named by its <code>name</code>. A name
+may also be a <em>part</em> of a toolset, a narrower grant derived from the config: each
+<a href="#documentscollection"><code>[[documents.collection]]</code></a> adds <code>&lt;name&gt;</code> (that collection, read-only) and, when it
+is writable, <code>&lt;name&gt;_write</code> (read and write), both parts of <code>documents</code>. The list
 does not say which kind a name is. Run <code>kokua --list-toolsets</code> for every name this install accepts,
 grouped by what provides it, and <code>kokua agents</code> for what each declared agent holds.</p>
 <p>An unknown name is a startup error listing the valid ones, so a typo can never quietly leave an agent
@@ -3823,6 +3926,9 @@ every available toolset is resident. Why the axis exists, and what a load costs 
   until you fix the entry and restart.</li>
 <li><strong>A deferred MCP server that is not connected refuses to load</strong>, and stays loadable for a retry once it
   is, where a resident one builds empty.</li>
+<li><strong>Parts are resident or deferred with their toolset.</strong> Every part an agent names builds as that one
+  toolset, so <code>resident</code> naming the part <code>work</code> while <code>available</code> also grants <code>personal</code>, or <code>documents</code>
+  whole, is a startup error: name every part <code>available</code> grants for that toolset, or none of them.</li>
 </ul>
 <p>The shipped <code>[agents.assistant]</code> keeps <code>memory</code>, <code>config</code>, <code>conversations</code>, <code>planning</code>, <code>capabilities</code>,
 <code>time</code>, and <code>messaging</code> resident and defers <code>documents</code>, <code>skills</code>, <code>mcp</code>, <code>scheduling</code>, and <code>benchmark</code>;
@@ -4061,7 +4167,8 @@ server an agent defers. It must be a string.</p>
 </span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Stock quotes and fundamentals, and placing trades."</span>
 </span></code></pre></div>
 <p>Servers added at runtime with the <code>add_mcp_server</code> tool are appended here automatically, with a <code>name</code>
-derived from the host and a numeric suffix if that name is taken, so the file always loads. Nothing can
+derived from the host and a numeric suffix if that name is taken (by another server, or by any toolset,
+skill, or collection), so the file always loads. Nothing can
 use that server in the session that added it, since the toolset namespace and the agent tables are both
 read only at startup. <strong>After a restart</strong> it reaches every agent declaring <code>available = "all"</code>, and any
 other agent once you add its name to that agent's <code>available</code> list. A server added with a bearer token is
@@ -4116,12 +4223,13 @@ Locked by default.</p>
 </span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>  data/                  &lt;- data_dir
 </span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>    sessions.json        conversations
 </span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    memory/              the memory store
-</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    documents/           the document store
-</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    skills/              installed skills
-</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    images/              uploaded and generated images, served at /images
-</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>    payloads/            oversized sub-agent tool responses, served at /payloads
-</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
-</span><span id="__span-17-11"><a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>    logs/kokua.log       the rotating diagnostic log
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    documents/           the built-in `kokua` document collection
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    index/&lt;collection&gt;/  each document collection's search index, a cache rebuilt from the folder
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    skills/              installed skills
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>    images/              uploaded and generated images, served at /images
+</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>    payloads/            oversized sub-agent tool responses, served at /payloads
+</span><span id="__span-17-11"><a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
+</span><span id="__span-17-12"><a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>    logs/kokua.log       the rotating diagnostic log
 </span></code></pre></div>
 <p>To move the whole tree including <code>config.toml</code>, set <code>$KOKUA_HOME</code> instead. That one is an environment
 variable rather than a setting because the config file lives inside it, so it has to resolve before the
@@ -4420,7 +4528,8 @@ repository's history with it.</p>
 <p>The push token is <strong>not</strong> a config key. It is read from the <code>GITHUB_BACKUP_TOKEN</code> environment variable,
 fixed rather than named in <code>config.toml</code>, so that repointing <code>repo</code> (which <code>update_config</code> can do unless
 you lock the key yourself with <code>"github_backup.repo"</code> in <a href="#locked_config_keys"><code>locked_config_keys</code></a>, as
-no toolset section is locked by default) can never widen the capability past whatever repository that one
+the shipped list locks only two toolset keys, <code>compute.command_env_passthrough</code> and
+<code>documents.embedding_model</code>) can never widen the capability past whatever repository that one
 token already writes. Scope the token, a fine-grained GitHub PAT with <code>contents: write</code>, to the backup
 repository alone.</p>
 <p>The repository must be private. Kokua checks before it ever pushes and refuses to back up into a public
@@ -4478,6 +4587,154 @@ suites, and applying one to a shell child needs <code>preexec_fn</code>, which i
 alongside threads. Neither tool confines the filesystem, the network, or process signalling: a command
 runs as you, reads what you can read, and can signal Kokua's own process. The approval gate is the
 control; reach for a container if you need containment.</p>
+<h2 id="documents"><code>[documents]</code><a class="headerlink" href="#documents" title="Permanent link">&para;</a></h2>
+<p>Declared by the <code>documents</code> toolset, so read only when some agent declares <code>documents</code> or one of its
+parts. Both keys are startup-only: they decide how every collection's index is built.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Hot</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>embedding_model</code></td>
+<td>string</td>
+<td><code>"hf:BAAI/bge-base-en-v1.5"</code></td>
+<td>no</td>
+<td>the embedding model every collection's index uses for semantic search; <code>""</code> for keyword search only</td>
+</tr>
+<tr>
+<td><code>rerank</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>no</td>
+<td>rerank each search's fused results with a cross-encoder</td>
+</tr>
+</tbody>
+</table>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">[documents]</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">embedding_model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"hf:BAAI/bge-base-en-v1.5"</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="n">rerank</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</span></code></pre></div>
+<p><strong><code>embedding_model</code></strong> is any embedding model AIMU can build, as a <code>provider:model_id</code> string. The default
+runs locally: nothing is fetched at startup, and the first search downloads the model (about 440 MB)
+while indexing begins in the background, so early searches say their results may be incomplete. Set it to
+<code>""</code> to search by keyword alone: no model, no download, and no vectors. A string AIMU cannot build as an
+embedding model fails when the documents toolset is first built, naming the value and both fixes. One
+AIMU can build but not load (the download fails, say) leaves keyword search working, and each search says
+so in its result.
+Changing it re-embeds every collection on the next search.</p>
+<p>A remote embedding model (AIMU accepts <code>openai:</code> ones) reads every passage of every collection while it
+indexes, not just what a search returns, which is why this key is locked by default in
+<a href="#locked_config_keys"><code>locked_config_keys</code></a>: <code>update_config</code> refuses it, so only a hand-edit changes
+where your collections are embedded. A <code>config.toml</code> scaffolded before that lock writes the list out in
+full, so add <code>"documents.embedding_model"</code> to it. <a href="../../explanation/retrieval/#privacy">Retrieval</a> covers
+what the chat model reads as well.</p>
+<p><strong><code>rerank</code></strong> reorders the top fused results with a cross-encoder, a model that reads the query and each
+passage together. It is slower than fusion alone and downloads a model of its own on first use.</p>
+<p>How search works, from chunking to rank fusion, is <a href="../../explanation/retrieval/">Retrieval</a>.</p>
+<h2 id="documentscollection"><code>[[documents.collection]]</code><a class="headerlink" href="#documentscollection" title="Permanent link">&para;</a></h2>
+<p>Folders of your own documents, such as an Obsidian vault or a folder of papers, for the <code>documents</code>
+toolset to search, read, and, where you allow it, write. An array of tables: one
+<code>[[documents.collection]]</code> header per folder.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>yes</td>
+<td>how the collection is named in <code>available</code> lists, tool calls, and search results</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>yes</td>
+<td>the folder, absolute or starting with <code>~</code></td>
+</tr>
+<tr>
+<td><code>writable</code></td>
+<td>no</td>
+<td><code>true</code> to allow <code>save_document</code> and <code>edit_document</code> here. Default <code>false</code></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>no</td>
+<td>what the collection holds, shown to the model beside its name in <code>list_documents</code></td>
+</tr>
+</tbody>
+</table>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">[[documents.collection]]</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"personal"</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"~/Obsidian/Personal"</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="n">writable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Personal research notes and papers."</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="k">[[documents.collection]]</span>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"work"</span>
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"~/Obsidian/Work"</span>
+</span></code></pre></div>
+<p>Every install also has the built-in collection <code>kokua</code>, the folder at <code>data/documents</code> the assistant saves
+into, always writable. Files count as documents when they end in <code>.md</code>, <code>.markdown</code>, <code>.txt</code>, or <code>.pdf</code>;
+anything else in the folder is not listed or searched, and dot-files and dot-directories (<code>.obsidian/</code>,
+<code>.trash/</code>) are skipped. PDFs are read-only. Each collection's index lives under <code>data/index/&lt;name&gt;/</code>,
+never in the folder itself.</p>
+<p><strong>Granting a collection.</strong> A collection reaches an agent only by being named in its
+<a href="#available"><code>available</code></a> list, as a part of the <code>documents</code> toolset:</p>
+<table>
+<thead>
+<tr>
+<th>In <code>available</code></th>
+<th>Grants</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"documents"</code></td>
+<td>every collection, each writable where <code>writable = true</code> (and <code>kokua</code>, always writable)</td>
+</tr>
+<tr>
+<td><code>"&lt;name&gt;"</code></td>
+<td>that collection, read-only, whatever <code>writable</code> says</td>
+</tr>
+<tr>
+<td><code>"&lt;name&gt;_write"</code></td>
+<td>that collection, read and write; exists only when it is <code>writable = true</code></td>
+</tr>
+</tbody>
+</table>
+<p>An agent granted only read-only collections gets <code>list_documents</code>, <code>read_document</code>, and
+<code>search_documents</code>, and no write tool at all. <code>kokua --list-toolsets</code> lists every part under <code>documents</code>.
+Approval entries name the toolset (<code>documents.edit_document</code>), however the agent was granted it.</p>
+<p><strong>What startup checks.</strong> Each of these fails startup, naming the collection:</p>
+<ul>
+<li>a <code>name</code> that is not lowercase letters, digits, underscores, and hyphens starting with a letter, that
+  ends in <code>_write</code>, that is <code>kokua</code> or <code>documents</code>, or <code>core</code> or <code>all</code> (both reserved for every name an
+  agent declares), or that is declared twice;</li>
+<li>a <code>name</code>, or its <code>&lt;name&gt;_write</code>, that is already the name of a toolset, a skill, or an MCP server;</li>
+<li>a <code>path</code> that is absent or relative, or names something that does not exist or is not a folder;</li>
+<li>a <code>path</code> that is, is inside, or holds Kokua's data directory, since indexing it would index Kokua's own
+  state;</li>
+<li>two collections whose paths resolve to the same folder (symlinks are resolved first);</li>
+<li>a read-only collection whose folder is inside a writable collection's, since its files could be written
+  through the outer one and <code>writable = false</code> would protect nothing;</li>
+<li><code>writable</code> or <code>description</code> of the wrong type, or any other key;</li>
+<li>an agent declaring <code>&lt;name&gt;_write</code> for a collection that is not writable, with the error naming the
+  <code>writable = true</code> to set.</li>
+</ul>
+<p>Any other nesting is allowed: a read-only folder inside a read-only one, or a writable folder inside
+either kind. Startup-only, like <code>[[mcp.server]]</code>, because a new
+collection is a new set of files the assistant may read; and refused by <code>update_config</code> for the same
+reason, whatever <a href="#locked_config_keys"><code>locked_config_keys</code></a> says.</p>
 <h2 id="toolset-sections">Toolset sections<a class="headerlink" href="#toolset-sections" title="Permanent link">&para;</a></h2>
 <p><code>[scheduling]</code>, <code>[planning]</code>, and <code>[capabilities]</code> are not special cases in the config layer. A section
 named after a toolset is how <em>any</em> toolset ships its settings, including a third party's:</p>
@@ -4585,9 +4842,9 @@ reference, not inline data.</p>
 </tbody>
 </table>
 <p>Introspection, which exits without running the assistant:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name an available list may use, grouped by provider</span>
-</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>kokua<span class="w"> </span>agents<span class="w">              </span><span class="c1"># each declared agent's availability, residency, and approval lists, from the config alone</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name an available list may use, grouped by provider</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>kokua<span class="w"> </span>agents<span class="w">              </span><span class="c1"># each declared agent's availability, residency, and approval lists, from the config alone</span>
 </span></code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

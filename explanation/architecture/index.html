@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1103,6 +1103,8 @@
       
         
       
+        
+      
     
     
     
@@ -1682,6 +1684,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -2327,7 +2357,7 @@ questions -- which providers, which tools, which models support vision -- are an
 </span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    messaging.py         MessageBus: what the user types into a turn that is already running, and
 </span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>                          what one of that turn's own agents sends another; the roster of addresses
 </span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>                          it mints per run, and the two sources that decide who has read it
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    interaction.py       HumanGate: tool approvals keyed by prompt id, and a workflow's own decision in one slot
 </span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
 </span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>                          place, and the code that decides whether it did (explanation/auto-approval.md)
 </span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    settings_runtime.py  SettingsApplier: read, apply live, persist
@@ -2368,7 +2398,7 @@ questions -- which providers, which tools, which models support vision -- are an
 </span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
 </span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
 </span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>  registry/      the machinery a toolset is built against, and no toolsets
-</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
+</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `with_parts`, `select`, `build_tools`
 </span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>    context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
 </span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
 </span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
@@ -2389,8 +2419,9 @@ serve loop, and little else. It owns:</p>
   conversation is being viewed. These move together on a switch, which is why they are one object.</li>
 <li><strong><code>TurnRunner</code></strong> -- reactive turns (the user sent something) and proactive turns (a scheduled task
   fired). The ten concurrency invariants are documented at the top of that module.</li>
-<li><strong><code>HumanGate</code></strong> -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
-  the serve loop resolves with the user's next message. With
+<li><strong><code>HumanGate</code></strong> -- tool approval and a workflow's own decision, which the serve loop resolves with the
+  user's reply. Every waiting gated call is asked at once under its own prompt id (<code>PendingApprovals</code>);
+  a workflow decision is a lock-guarded single slot, since one turn never asks two. With
   <a href="../../reference/configuration/#securityauto_approval"><code>[security.auto_approval]</code></a> on, a gated call
   named there is reviewed by a declared model reviewer just before that prompt, and only there.</li>
 <li><strong><code>SettingsApplier</code></strong> -- reading, applying, and persisting the runtime-mutable settings.</li>
@@ -2409,16 +2440,17 @@ an <code>approval</code> one and would otherwise put one turn's question to anot
 that cannot ask takes the safe answer it named for an abandoned request, and says so on a card in the
 words the workflow supplied, since only the asker knows what it was asking.</p>
 <p>For a gated call, <code>HumanGate.approve</code> asks at each of the three points the answer can have gone
-stale, and each window is wider than the last: when the call arrives, after the reviewer's model
-call, and once the single approval slot is finally held. The third is the one that is easy to miss.
-Tool calls in a round are dispatched concurrently (<code>[assistant].concurrent_tools</code>) while the approval
-slot is single and lock-guarded, so a round's second gated call waits inside <code>PendingRequest.ask</code> for
-as long as the user takes to answer the first. A switch during that wait abandons only the request
-holding the slot, and without the third check the call queued behind it would go on to ask: an
-<code>approval</code> frame is never muted, so the page would draw that question into whatever transcript is now
-on screen, and an Allow there would run the tool on a turn nobody is watching. The frame carries its
-conversation for the reason an <code>auto_approval</code> card does, so a prompt that raced even that last check
-is dropped by the page rather than shown to the wrong reader.</p>
+stale: when the call arrives, after the reviewer's model call, and as the call is registered to wait.
+After that a switch reaches it through <code>abandon_all</code>, which denies every waiting call at once, so the
+question never needs asking again however long the user takes. Tool calls in a round are dispatched
+concurrently (<code>[assistant].concurrent_tools</code>), and every gated call among them is asked at once, each
+under its own prompt id. They used to queue behind one approval slot, which showed only the oldest
+prompt, so a prompt the user had scrolled past held every call behind it with nothing on screen to
+answer. Now a button's reply names the call it answers, a typed <code>y</code> answers the oldest one waiting,
+and a reply naming a call that is no longer waiting is consumed rather than read as a turn saying
+"y". An <code>approval</code> frame is never muted, so it carries its conversation for the reason an
+<code>auto_approval</code> card does: a prompt that raced the last check is dropped by the page rather than shown
+to the wrong reader.</p>
 <p>The approval gate has one optional layer above it, off by default:
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py"><code>core/auto_approval.py</code></a>.
 A declared reviewer answers three questions and writes one sentence about a gated call, and
@@ -2788,11 +2820,20 @@ and step 6 its <em>approval</em> axis:</p>
    agent's <code>spawn_subagent</code>. That is why a skill reaches an <code>"all"</code> worker on its next spawn while a server
    <code>add_mcp_server</code> connected waits for a restart. A <code>Toolset</code> is a frozen dataclass:
    <code>name</code>, <code>description</code>, <code>build</code>, <code>guidance</code>, <code>cross_cutting</code>, <code>entry_point_only</code>, <code>workflow</code>,
-   <code>settings</code>.</li>
+   <code>settings</code>, and three fields for a toolset granted in narrower <em>parts</em>: <code>parts</code> (the config to the
+   names it can be granted as), <code>build_parts</code> (the tools for a set of them), and <code>writable_part_remedy</code>
+   (what to change when an agent names a <code>&lt;part&gt;_write</code> that does not exist). <code>registry.with_parts</code> runs
+   last, because part names come from the config: it resolves every toolset's parts into
+   <code>ToolsetRegistry.parts</code> and refuses one colliding with a toolset, another part, <code>core</code>, or <code>all</code>.
+   <code>documents</code> is the one toolset with parts, one or two per document collection (see
+   <a href="../retrieval/#granting-collections-parts-of-one-toolset">Retrieval</a>).</li>
 <li><strong>Validate.</strong> <code>agents.validate_agents</code> runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
-   <code>skills</code> on a worker, or an <code>"all"</code> agent's <code>resident</code> entry outside the expansion fails with nothing
-   written and nothing connected.</li>
+   <code>skills</code> on a worker, an <code>"all"</code> agent's <code>resident</code> entry outside the expansion, or a <code>resident</code> list
+   naming some of a toolset's parts and not the rest (<code>_check_resident_parts</code>) fails with nothing
+   written and nothing connected. <code>agents.validate_document_collections</code> checks each
+   <code>[[documents.collection]]</code> against the disk and the registry in the same pass: the folder exists, is
+   not the data directory or inside or around it, is not declared twice, and its name is no toolset's.</li>
 <li><strong>Select.</strong> The names come from <code>agents.available_for(config, registry, agent)</code>, the one reader of an
    agent's availability: its list as written, or for <code>available = "all"</code> every registered toolset sorted
    by <code>TRUST_ORDER</code> (registration order kept within a provider), minus <code>entry_point_only</code> toolsets on any
@@ -2800,7 +2841,12 @@ and step 6 its <em>approval</em> axis:</p>
    iterated, so a reader that forgot to expand it fails loudly instead of walking the letters of <code>"all"</code>.
    <code>registry.select(names, registry, agent=, entry_point=)</code> returns those toolsets in that
    order, deduplicated, raising on an unknown name (with the available ones listed) or an
-   <code>entry_point_only</code> toolset declared elsewhere. It never drops: dropping is what the previous per-role
+   <code>entry_point_only</code> toolset declared elsewhere. A part name resolves to its toolset at that toolset's
+   first mention, and every part named is collected into one copy whose <code>build</code> is <code>build_parts</code> bound to
+   them; naming the toolset itself anywhere grants it whole. Every later step, residency and approval
+   included, therefore sees the toolset's own name (<code>registry.canonical_names</code> is how a caller asking
+   <em>which</em> toolsets an agent holds, rather than at what scope, gets it), so a narrow grant builds one
+   toolset and is gated by one vocabulary. It never drops: dropping is what the previous per-role
    lists did, and a typo silently produced a smaller toolset. For the entry agent, skill names are held
    back first (<code>agents.without_skill_names</code>), since its <code>SkillAgent</code> already advertises every skill.</li>
 <li><strong>Split by residency.</strong> <code>agents.split_by_residency</code> divides the selection into what the agent holds
@@ -2829,9 +2875,12 @@ and step 6 its <em>approval</em> axis:</p>
    a toolset scopes itself to its own holder (<code>benchmark</code> asks the config what <code>agent_name</code> runs on).
    At wiring this runs over the resident toolsets only; a deferred one reaches the same function later,
    through its group. <code>build</code> must create only closures, never process state: every shared singleton
-   (the memory store, the document store, the <code>SkillManager</code>, the <code>TaskService</code>) is a lazy property on
-   <code>LiveState</code>, so two agents declaring one toolset share one rather than constructing two, and the two
+   (the memory store, each document collection's store, the <code>SkillManager</code>, the <code>TaskService</code>) is lazy on
+   <code>LiveState</code>, so two agents declaring one toolset share one rather than constructing two, and the
    stores are opened only because some agent declared them (and, for a deferred toolset, loaded it). The
+   document stores are built together on the first documents build, whatever parts that agent was
+   granted, so an agent holding one collection and another holding all of them share one index per
+   folder. The
    <code>SkillManager</code> and the <code>TaskService</code> are the exceptions to that
    last half, and not by accident: every agent is a <code>SkillAgent</code> and so takes the manager regardless, and
    <code>tasks.arm_all()</code> has to fire a persisted scheduled task whether or not any agent can talk about
@@ -2995,7 +3044,7 @@ loads it:</p>
 </tr>
 <tr>
 <td><code>save_document</code>, <code>read_document</code>, <code>edit_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
-<td>AIMU <code>make_document_tools</code></td>
+<td>AIMU <code>make_collection_tools</code>, over every collection's store (<code>LiveState.document_stores</code>)</td>
 <td><code>documents</code></td>
 <td>deferred</td>
 </tr>
@@ -3570,14 +3619,20 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.40.0</code></strong>, and the probe is a name lookup on <code>aimu.context.compaction.chain</code>, from
+<p>The floor is now <strong><code>aimu&gt;=0.41.0</code></strong>, and the probe is a name lookup on
+<code>aimu.tools.builtin.make_collection_tools</code>, the factory the <code>documents</code> toolset binds to every collection
+an agent holds. The name dates a checkout; what it cannot see stays with the floor and is pinned in
+<code>tests/test_aimu_compat.py</code>: that <code>DocumentStore</code> reads a PDF's text rather than listing the file
+unreadable, that its index ranks passages and reports its <code>problems</code>, and that the factory takes the
+<code>descriptions</code> each collection declares.</p>
+<p>Before it, the floor was <code>aimu&gt;=0.40.0</code>, and the probe was a name lookup on <code>aimu.context.compaction.chain</code>, from
 the module that bundles AIMU's compaction strategies, which a spawned worker compacts with. That release
 carries three capabilities Kokua depends on, and the probe ran ahead of it through each in turn while only
 AIMU's main branch had them: <code>StreamingContentType.TOOL_REQUESTED</code> (the phase the web page draws a running
 tool call from), then <code>aimu.tools.ToolResult</code> (so <code>generate_image</code> hands the model its image), then the
 compaction module. Each landed after the one before, so each probe subsumed the last, and throughout the
 floor read 0.39.0 so a sibling on main could start, with <code>_PROBE_UNRELEASED</code> keeping the refusal from
-recommending a PyPI install that could not yet work. With 0.40.0 published, <code>_PROBE_UNRELEASED</code> is None.</p>
+recommending a PyPI install that could not yet work. With 0.40.0 published, <code>_PROBE_UNRELEASED</code> went back to None.</p>
 <p>Before it, the floor was <code>aimu&gt;=0.39.0</code>, and the probe was a name lookup on <code>aimu.tools.builtin.make_page_tools</code>,
 the factory the <code>web</code> toolset builds <code>fetch_page</code>, <code>read_page</code>, and <code>find_in_page</code> from. The probe moved
 there before 0.39.0 was published, while the floor still read 0.38.0 so a sibling on AIMU main could start;
@@ -3758,7 +3813,10 @@ built out of bounded parts.</p>
 <h2 id="state">State<a class="headerlink" href="#state" title="Permanent link">&para;</a></h2>
 <p>Everything lives under <code>~/.kokua</code> (override with <code>KOKUA_HOME</code>). <code>config.toml</code> sits at the root;
 <code>data/</code> holds only content: <code>sessions.json</code>, <code>skills/</code>, <code>memory/</code>, <code>documents/</code>, <code>downloads/</code>,
-<code>images/</code>, <code>payloads/</code>. Scheduled tasks are the one declared, user-editable exception to that split:
+<code>images/</code>, <code>payloads/</code>, and <code>index/</code>, one search index per document collection. The index is the one
+leaf that is a cache rather than content: derived from a collection's folder, rebuilt if deleted, and
+kept here rather than in the folder so nothing Kokua derives ever lands in your vault (see
+<a href="../retrieval/#the-index-is-a-cache-and-never-lives-in-a-vault">Retrieval</a>). Scheduled tasks are the one declared, user-editable exception to that split:
 they live in <code>config.toml</code> as <code>[scheduling.task.&lt;name&gt;]</code> tables, not under <code>data/</code>.</p>
 <h2 id="images">Images<a class="headerlink" href="#images" title="Permanent link">&para;</a></h2>
 <p><code>images.py</code> owns the on-disk store and the <code>/images/&lt;name&gt;</code> reference. Input images (web upload/paste,
@@ -3946,21 +4004,25 @@ agent's call ids against their toolsets when the turn ends (<code>metadata["tool
 like every other turn record), and <code>replay_items</code> rejoins them by id. The key is absent, never <code>None</code>,
 when nothing recorded the tool, so a call is shown bare rather than under a guess.</p>
 <p>The page sends an <code>input</code> frame (<code>{"type": "input", "text", "token", "images"?, "thinking"?}</code>) for
-<strong>every</strong> message the composer sends, text-only ones included, and the bare string only for its own
-control replies: the Stop button's <code>/stop</code>, an approval's Allow/Deny, and a plan review's verdict. It
+<strong>every</strong> message the composer sends, text-only ones included; an <code>approval_reply</code> frame
+(<code>{"type": "approval_reply", "id", "allow"}</code>) for an approval's Allow/Deny, naming the prompt it answers
+because several can be on screen at once; and the bare string only for its other control replies: the
+Stop button's <code>/stop</code> and a plan review's verdict. It
 used to be the other way round, a frame only for a message carrying images or an effort, and the <code>token</code>
 is what changed it (<a href="#which-of-the-messages-it-drew-became-a-turn">below</a>): a token has nowhere to ride
 on a plain string, and the commonest message of all is the one that most needs naming.
 <code>frontends/web.py</code>'s <code>_parse_input</code> decodes it and <code>WebChannel.feed_input</code> queues it; both shapes
 converge on one <code>ChannelMessage</code> in <code>receive</code>, so nothing downstream knows which path a message took,
 and a frame's text is read exactly as a bare one's, commands and all.</p>
-<p>A reply that matches no outstanding request is not an error, it is an ordinary message, so a control
-that outlives its question is a real hazard rather than a dead button: clicking Allow on a closed prompt
-turns <code>y</code> into a turn saying "y". The <code>prompt_retired</code> frame is what closes one. It is sent from
-<code>PendingRequest.ask</code>'s <code>finally</code>, so it covers all four ways a question stops waiting (answered by a
-click, answered by a typed reply, abandoned by a switch, cancelled with its turn by <code>/stop</code>) rather than
-the one the page can see for itself, and the page disables the card's controls without removing the card,
-which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
+<p>A bare reply that matches no outstanding request is not an error, it is an ordinary message, so a
+control that outlives its question is a real hazard rather than a dead button: a plan review's Approve on
+a closed prompt would become a turn saying "approve". An approval's reply names its prompt instead, and is
+consumed whether or not that prompt is still waiting, so a stale Allow does nothing. The <code>prompt_retired</code>
+frame is what closes a card, carrying the prompt id for an approval. It is sent from the <code>finally</code> in
+<code>PendingApprovals.ask</code> and <code>PendingRequest.ask</code>, so it covers all four ways a question stops waiting
+(answered by a click, answered by a typed reply, abandoned by a switch, cancelled with its turn by
+<code>/stop</code>) rather than the one the page can see for itself, and the page disables the card's controls
+without removing the card, which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
 so <code>ChannelUI.retire_prompt</code> is silence there.</p>
 <h3 id="reading-the-socket-and-applying-what-arrives">Reading the socket, and applying what arrives<a class="headerlink" href="#reading-the-socket-and-applying-what-arrives" title="Permanent link">&para;</a></h3>
 <p><code>pump</code> is two tasks over one queue: one reads the WebSocket, one applies frames in arrival order. They are

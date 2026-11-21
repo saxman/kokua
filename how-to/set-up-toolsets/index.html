@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1292,6 +1292,8 @@
       
         
       
+        
+      
     
     
     
@@ -1389,6 +1391,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1821,7 +1851,7 @@ let deduplication quietly pick one.</p>
 <tr>
 <td><code>documents</code></td>
 <td><code>save_document</code>, <code>read_document</code>, <code>edit_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
-<td>likewise. <code>read_document</code> windows a long document; change one with <code>edit_document</code>, since <code>save_document</code> replaces the whole thing and refuses to replace one it has not shown the model in full</td>
+<td>likewise, over Kokua's own folder and every <a href="../../reference/configuration/#documentscollection"><code>[[documents.collection]]</code></a> you declare; name one collection (<code>work</code>, or <code>work_write</code> to write it) instead of <code>documents</code> to grant only that one, and see <a href="../../explanation/retrieval/">Retrieval</a> for how search ranks passages. <code>read_document</code> windows a long document; change one with <code>edit_document</code>, since <code>save_document</code> replaces the whole thing and refuses to replace one it has not shown the model in full. Both writers ask first in the shipped config</td>
 </tr>
 <tr>
 <td><code>skills</code></td>

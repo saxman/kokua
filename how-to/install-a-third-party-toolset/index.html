@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1241,6 +1241,8 @@
       
         
       
+        
+      
     
     
     
@@ -1338,6 +1340,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1713,8 +1743,15 @@ That is exactly what an approval policy exists for, so add it to <code>confirm</
 Declaring <code>confirm</code> replaces the default pair whole, so write out the entries you want to keep, and keep
 <code>review</code> too, or its entries stop being gated at all:</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[assistant.tools]</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config.update_config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"jobme.tailor_application"</span><span class="p">]</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="s2">"config.update_config"</span><span class="p">,</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="s2">"documents.save_document"</span><span class="p">,</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="s2">"documents.edit_document"</span><span class="p">,</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="s2">"jobme.tailor_application"</span><span class="p">,</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">]</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span>
 </span></code></pre></div>
 <p>Every entry names the toolset providing the tool, which for a third party's is the same name your agent
 declared: <code>jobme.tailor_application</code> for the one tool, or a bare <code>jobme</code> for everything the toolset

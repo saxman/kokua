@@ -16,14 +16,14 @@
         <link rel="prev" href="../architecture/">
       
       
-        <link rel="next" href="../auto-approval/">
+        <link rel="next" href="../retrieval/">
       
       
         
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1103,6 +1103,8 @@
       
         
       
+        
+      
     
     
     
@@ -1262,6 +1264,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Availability: fixed by the host, never by the model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parts-one-toolset-granted-narrower" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parts: one toolset, granted narrower
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1508,6 +1527,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../auto-approval/" class="md-nav__link">
         
   
@@ -1652,6 +1699,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Availability: fixed by the host, never by the model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parts-one-toolset-granted-narrower" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parts: one toolset, granted narrower
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1937,16 +2001,17 @@ same three questions show up in other frameworks under other names.</p>
 default for the approval half. The whole reference is
 <a href="../../reference/configuration/#agentsnametools"><code>[agents.&lt;name&gt;.tools]</code></a>; this page is the argument.</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[assistant.tools]</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config.update_config"</span><span class="p">]</span><span class="w">  </span><span class="c1"># asks you</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">              </span><span class="c1"># asks a reviewer, then you</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">[agents.researcher.tools]</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">   </span><span class="c1"># inherits [assistant.tools]'s confirm and review</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="k">[agents.assistant.tools]</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"documents"</span><span class="p">,</span><span class="w"> </span><span class="s2">"skills"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"scheduling"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">             </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"benchmark"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">resident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span><span class="w"> </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">  </span><span class="c1"># the rest load on demand</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config.update_config"</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">           </span><span class="s2">"documents.save_document"</span><span class="p">,</span><span class="w"> </span><span class="s2">"documents.edit_document"</span><span class="p">]</span><span class="w">                     </span><span class="c1"># asks you</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">review</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">              </span><span class="c1"># asks a reviewer, then you</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">[agents.researcher.tools]</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">   </span><span class="c1"># inherits [assistant.tools]'s confirm and review</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="k">[agents.assistant.tools]</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"documents"</span><span class="p">,</span><span class="w"> </span><span class="s2">"skills"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"scheduling"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">             </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"benchmark"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">resident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span><span class="w"> </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">  </span><span class="c1"># the rest load on demand</span>
 </span></code></pre></div>
 <h2 id="availability-fixed-by-the-host-never-by-the-model">Availability: fixed by the host, never by the model<a class="headerlink" href="#availability-fixed-by-the-host-never-by-the-model" title="Permanent link">&para;</a></h2>
 <p><code>available</code> is the list of toolsets an agent can call, and nothing else: no code path adds a tool to an
@@ -1981,6 +2046,27 @@ AIMU 0.31.0, when the <code>fs</code> group gained <code>write_file</code> and <
 declared. Kokua instead split the group by reach into two toolsets, <code>fs</code> (reads) and <code>fs_write</code>
 (writes), so "read a file and do not write one" is something an agent's list can say. The shipped
 <code>introspector</code> holds <code>fs</code> for exactly that reason.</p>
+<h3 id="parts-one-toolset-granted-narrower">Parts: one toolset, granted narrower<a class="headerlink" href="#parts-one-toolset-granted-narrower" title="Permanent link">&para;</a></h3>
+<p>Some capabilities cannot be split by hand into toolsets ahead of time, because their shape comes from your
+config. Document collections are the case: each <code>[[documents.collection]]</code> is a folder, and "read the
+work vault, and no other" has to be sayable in a list. A toolset may therefore declare <strong>parts</strong>, names
+derived from the config that each grant some of it (<code>Toolset.parts</code>, with <code>build_parts</code> building the tools
+for a set of them). <code>documents</code> declares two per collection, <code>work</code> (read it) and <code>work_write</code> (read and
+write it, only when the collection is <code>writable</code>), so:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[agents.researcher.tools]</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"work"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span><span class="w">   </span><span class="c1"># searches and reads the work vault, writes nothing</span>
+</span></code></pre></div>
+<p>A part is a narrower availability, not a new capability. <code>select</code> resolves every part an agent names back
+into the one toolset, built only over those parts, so the researcher above holds <code>list_documents</code>,
+<code>read_document</code>, and <code>search_documents</code> bound to one folder, and no write tool at all. Naming the toolset
+and a part grants the whole. A part grant does not limit an agent that also holds <code>capabilities</code>, since
+<code>compose_subagent</code> draws from the whole registry and can hand a composed worker any part, or the toolset
+whole. Part names share the namespace toolset names live in, so a part, a toolset, a
+skill, and an MCP server can never be one name, and <code>kokua --list-toolsets</code> and <code>list_capabilities</code> print
+each toolset's parts beneath it. Why parts rather than a toolset per collection, which the <code>fs</code> /
+<code>fs_write</code> precedent might suggest, is argued in <a href="../retrieval/#granting-collections-parts-of-one-toolset">Retrieval</a>:
+tools of one name from two toolsets lose to first-wins deduplication, and the approval vocabulary would
+fork.</p>
 <p>One name inside the approval lists, <code>core</code>, is reserved for the tools no toolset provides:
 <code>spawn_subagent</code> and <code>activate_skill</code>, plus <code>available_tools</code> and <code>load_tools</code> once any agent defers a
 toolset (see <a href="#residency-what-is-in-context-and-what-loads-on-demand">Residency</a>), and <code>get_message</code> once
@@ -2003,6 +2089,11 @@ workers are declared. A <code>resident</code> entry that <code>available</code> 
 resident toolset is one the agent already holds. The order you write <code>resident</code> in changes nothing:
 tools are presented in <code>available</code> order either way (for <code>available = "all"</code>, in trust order). <code>kokua agents</code> prints each agent's resident list,
 or "every available toolset" when it declares none.</p>
+<p>A toolset granted in <a href="#parts-one-toolset-granted-narrower">parts</a> builds once, however many parts grant
+it, so it is resident or deferred whole. <code>resident</code> may name its parts, but it must then name every part
+<code>available</code> grants for that toolset; naming <code>work</code> while <code>available</code> also grants <code>personal</code>, or
+<code>documents</code> whole, is a startup error (<code>_check_resident_parts</code> in <code>core/agents.py</code>), since honoring it
+would make more resident than the list says.</p>
 <p>Note what residency cannot do: widen anything. A deferred toolset is one the agent's own <code>available</code>
 list already names, so loading it is the model choosing <em>when</em> to pay for a capability the host granted,
 never acquiring one. That is the same line Anthropic's <code>defer_loading</code> draws, for the same reason.</p>
@@ -2011,15 +2102,15 @@ never acquiring one. That is the same line Anthropic's <code>defer_loading</code
 from any toolset: <code>available_tools</code>, which lists every toolset the agent holds or can load, and
 <code>load_tools(name)</code>, which loads one. Its system prompt gains a single line naming what it can load, and
 only the names:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Also available, load before use: documents, skills, mcp, scheduling, benchmark.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Also available, load before use: documents, skills, mcp, scheduling, benchmark.
 </span></code></pre></div>
 <p>This is what <code>available_tools</code> returns for the shipped entry agent, abridged:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>memory [resident]: Facts about the user, remembered across conversations.
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>config [resident]: Read config.toml and change a runtime setting, persisted back to the file. Asks first: update_config.
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>...
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>skills [loadable]: Author skills, revise them, and attach runnable scripts to them. Asks first: add_skill_script.
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>mcp [loadable]: Connect and disconnect remote MCP servers at runtime. Asks first: add_mcp_server.
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>scheduling [loadable]: Schedule, list, edit, and cancel recurring or one-off proactive tasks.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>memory [resident]: Facts about the user, remembered across conversations.
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>config [resident]: Read config.toml and change a runtime setting, persisted back to the file. Asks first: update_config.
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>...
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>skills [loadable]: Author skills, revise them, and attach runnable scripts to them. Asks first: add_skill_script.
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>mcp [loadable]: Connect and disconnect remote MCP servers at runtime. Asks first: add_mcp_server.
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>scheduling [loadable]: Schedule, list, edit, and cancel recurring or one-off proactive tasks.
 </span></code></pre></div>
 <p>The description is the toolset's own (for an MCP server, its
 <a href="../../reference/configuration/#mcpserver"><code>description</code></a> key), and the <code>Asks first</code> note comes from the
@@ -2033,8 +2124,9 @@ the result says so.</p>
 <h3 id="what-a-load-costs-the-build-paid-when-it-happens">What a load costs: the build, paid when it happens<a class="headerlink" href="#what-a-load-costs-the-build-paid-when-it-happens" title="Permanent link">&para;</a></h3>
 <p>A resident toolset is built when the agent is wired. A deferred one is built when it is loaded, through
 the same <code>build_tools</code> call, in a worker thread so the event loop keeps serving other conversations
-meanwhile. So whatever building a toolset does (opening the document store, for <code>documents</code>) is paid
-only by an agent that loads it.</p>
+meanwhile. So whatever building a toolset does (opening each collection's document store, for
+<code>documents</code>) is paid only by an agent that loads it. A store's search index waits longer still, for the
+first search (<a href="../retrieval/#the-first-build-and-saying-when-results-are-partial">Retrieval</a>).</p>
 <p>A build that fails, fails at load. The model reads AIMU's <code>Could not load '&lt;name&gt;': &lt;error&gt;</code> as the
 tool's result, you get an alert naming the toolset and the agent, and the toolset stays loadable, so a
 retry after the cause is fixed works. A deferred MCP server that is not connected refuses to load,
@@ -2105,15 +2197,15 @@ and <code>messaging</code> resident, the toolsets it reaches for on most turns, 
 <code>mcp</code>, <code>scheduling</code>, and <code>benchmark</code> on demand. Measured as the JSON of every tool spec the model is
 sent, its tool block went from 30,560 bytes for all 37 tools to 16,244 bytes for nineteen (seventeen
 resident, plus the two loaders): 46.8% smaller, on every round of every turn that loads nothing. The
-approval gate covers the same seven tools it did. What it costs is a round: a turn that needs a deferred
+approval gate covers the same tools whether they are resident or deferred. What it costs is a round: a turn that needs a deferred
 toolset spends one model call on <code>load_tools</code> before it can use it. Each model call in the web UI still
 shows its <code>N tools</code> count, which is residency as the model experienced it.</p>
 <h2 id="available-all-every-installed-toolset-still-declared"><code>available = "all"</code>: every installed toolset, still declared<a class="headerlink" href="#available-all-every-installed-toolset-still-declared" title="Permanent link">&para;</a></h2>
 <p><code>available</code> takes one other value besides a list: the string <code>"all"</code>, meaning every toolset this install
 registers. It needs a <code>resident</code> list, for a reason the section below gives.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[agents.researcher.tools]</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"all"</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">resident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">   </span><span class="c1"># the rest load on demand</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[agents.researcher.tools]</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"all"</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">resident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"messaging"</span><span class="p">]</span><span class="w">   </span><span class="c1"># the rest load on demand</span>
 </span></code></pre></div>
 <p>The shipped config does not use it. The entry agent keeps its list, with a commented
 <code># available = "all"</code> line beside it, because an entry agent holding everything would undo the lean
@@ -2175,7 +2267,7 @@ as a group only when it was itself loaded (<code>Not loaded, because the name is
 (by 'files').</code>); a resident holder reads <code>read_file (by a tool given to this agent directly)</code>.</p>
 <p>A resident tool that loses is reported, never dropped in silence. After every startup build, Kokua checks
 each agent's resident toolsets and raises one alert per hidden tool:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>researcher: read_file from 'files' is shadowed by 'fs' (the earlier resident toolset keeps the name).
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>researcher: read_file from 'files' is shadowed by 'fs' (the earlier resident toolset keeps the name).
 </span></code></pre></div>
 <p>The check runs on every declared agent, with a list or with <code>"all"</code>; on a list agent the order it
 reports against is the list's own. The <code>activate_skill</code> every skill carries is not counted: it is one
@@ -2285,6 +2377,18 @@ it asks first. Kokua has two buckets beyond "just runs":</p>
 <code>&lt;toolset&gt;.*</code>) for a whole capability, <code>&lt;toolset&gt;.&lt;tool&gt;</code> for one tool, <code>core.&lt;tool&gt;</code> for the reserved
 two. The shipped default names <code>fs_write</code> bare so a writer AIMU adds to that group later is gated on
 arrival, and names <code>compute.execute_python</code> explicitly because <code>compute</code> also holds <code>calculate</code>.</p>
+<p>An entry names the toolset, never a <a href="#parts-one-toolset-granted-narrower">part</a>.
+<code>documents.edit_document</code> gates every document edit, for an agent holding <code>documents</code> whole and for one
+holding only <code>work_write</code>, because both agents' tools were built by the one <code>documents</code> toolset and
+recorded under its name. What is recorded is what the <em>whole</em> toolset builds, not what one grant built
+(<code>build_tools</code> builds the whole beside a part grant, through <code>Toolset.whole</code>), so a gate on
+<code>documents.edit_document</code> still resolves when the only agent to build <code>documents</code> so far holds one
+read-only collection and no write tool at all. <code>work_write.edit_document</code> is refused at startup with the
+entry to write instead: a part narrows which folders a toolset's tools reach and may leave its write tools
+out, but it never adds a tool the toolset lacks, so a gate on a part could only ever hold back what the
+toolset's own entry does. The cost is that the gate cannot tell a
+write to one collection from a write to another, which is why the shipped default asks before every
+document write.</p>
 <p>The same name is what you watch. Every tool call Kokua shows (a card, a terminal line, an approval
 prompt, a reload, an export) reads <code>toolset.tool</code>, so the entry you would write to gate a call is printed
 on the call itself. The toolset is the one that gave <em>the calling agent</em> that tool, which matters when
@@ -2303,9 +2407,9 @@ Managed Agents' <code>auto</code>, where the model's verdict stands.</p>
 <p><code>confirm</code> and <code>review</code> are one policy written as two lists, so they are declared or inherited together.
 An agent whose <code>[agents.&lt;name&gt;.tools]</code> table declares neither inherits <code>[assistant.tools]</code>'s pair. An agent that
 declares either one declares its whole policy, and a key it leaves out is empty:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[agents.coder.tools]</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">        </span><span class="c1"># review is now empty, not inherited</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[agents.coder.tools]</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">        </span><span class="c1"># review is now empty, not inherited</span>
 </span></code></pre></div>
 <p>The reason is that inheriting each key independently lets an inherited <code>review</code> entry overlap a declared
 <code>confirm</code> entry, and neither "the declared one wins" nor "merge them" is something a reader could
@@ -2345,7 +2449,9 @@ these fails startup rather than warning:</p>
 is not a skill the entry agent already holds) is the one exception to "at startup": startup checks its shape, and the build checks the rest, refusing the toolset rather than letting it load ungated (see
 <a href="#what-a-load-checks-approval-before-any-tool-is-callable">What a load checks</a>).</p>
 <p>With auto-approval off, <code>review</code> entries prompt you exactly as <code>confirm</code> ones do: turning it off never
-ungates a call. Unattended turns still auto-deny every gated call, whichever list holds it.</p>
+ungates a call. Unattended turns still auto-deny every gated call, whichever list holds it, and the
+denial tells the model why (nobody is there to approve it, so carry on and report what it would have
+done), so a scheduled run does not retry a refused call or leave it out of its report.</p>
 <h2 id="where-the-old-keys-went">Where the old keys went<a class="headerlink" href="#where-the-old-keys-went" title="Permanent link">&para;</a></h2>
 <p>Before this split, one list per agent (<code>[agents.&lt;name&gt;].tools</code>) and two global lists
 (<code>[security].confirm_tools</code> and <code>[security.auto_approval].tools</code>) carried all three questions at once.

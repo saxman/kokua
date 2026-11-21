@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1208,6 +1208,8 @@
       
         
       
+        
+      
     
     
     
@@ -1305,6 +1307,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1682,7 +1712,10 @@ one as a background task and immediately goes back to reading input:</p>
 <a href="https://saxman.info/aimu/how-to/cancel-a-run/">AIMU's <code>RunHandle</code></a> doing the work. What you already
 read is not lost when that lands: the agent snapshots the partial turn in a <code>finally</code> of its own, and
 <code>turns.py</code>'s cancelled branch persists that snapshot before returning, so stopping a turn costs you the
-rest of the answer and not the part that had already arrived. (Invariant 5, which the same branch also
+rest of the answer and not the part that had already arrived. A stop that lands during tool dispatch
+(a call waiting for approval is the common case) leaves the model's tool calls with no results, which
+every provider rejects on the next request, so the save every ending goes through first answers each
+pending call with a result saying it may or may not have run. (Invariant 5, which the same branch also
 obeys, is about a different thing: recording the turn's sub-agent events <em>before</em> the "(stopped)"
 notice, since a second cancellation racing that send would propagate straight past a record placed
 after it.)</p>

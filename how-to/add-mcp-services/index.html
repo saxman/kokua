@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1269,6 +1269,8 @@
       
         
       
+        
+      
     
     
     
@@ -1366,6 +1368,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1860,7 +1890,8 @@ restart.</p>
 <ul>
 <li><strong>Finishing a runtime add takes a restart, and for an agent with a list, an edit too.</strong> Since every
   server needs a name, the write derives one from the server's host (<code>broker.example.com</code> becomes
-  <code>broker-example-com</code>, with a numeric suffix if that name is already taken), so the config it leaves
+  <code>broker-example-com</code>, with a numeric suffix if that name is already taken by a server, toolset, skill,
+  or collection), so the config it leaves
   behind always loads. Then:</li>
 <li>add that name (or rename it to something friendlier) to an agent's <code>available</code> list by hand, unless
      the agent you want declares <code>available = "all"</code>, which holds every configured server already.

@@ -1,0 +1,2111 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A personal AI assistant built to be understood and extended.">
+      
+      
+      
+        <link rel="canonical" href="https://saxman.info/kokua/explanation/retrieval/">
+      
+      
+        <link rel="prev" href="../tool-access/">
+      
+      
+        <link rel="next" href="../auto-approval/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/kokua-favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Retrieval - Kokua</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#retrieval" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kokua" class="md-header__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kokua
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Retrieval
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-agents-work/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How agents work
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kokua" class="md-nav__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    Kokua
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../how-agents-work/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How agents work
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How agents work
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/get-it-running/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get it running
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/the-turn-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The turn loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/tool-calling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool calling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/capability-is-declared/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Capability is declared
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/context-and-memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context and memory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/delegation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../how-to/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-up-toolsets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install-a-third-party-toolset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install a third-party toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-mcp-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add an MCP service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/back-up-to-github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Back up to GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-a-conversation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export a conversation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tool-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passages-cutting-documents-where-their-authors-did" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Passages: cutting documents where their authors did
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-rankings-for-two-kinds-of-question" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two rankings, for two kinds of question
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusing-them-reciprocal-rank-fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fusing them: reciprocal rank fusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keeping-up-with-edits-made-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping up with edits made elsewhere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-first-build-and-saying-when-results-are-partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first build, and saying when results are partial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-index-is-a-cache-and-never-lives-in-a-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The index is a cache, and never lives in a vault
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#granting-collections-parts-of-one-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Granting collections: parts of one toolset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writes-ask-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writes ask first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-approval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-approval
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../design-principles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#collections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#passages-cutting-documents-where-their-authors-did" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Passages: cutting documents where their authors did
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-rankings-for-two-kinds-of-question" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two rankings, for two kinds of question
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fusing-them-reciprocal-rank-fusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fusing them: reciprocal rank fusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keeping-up-with-edits-made-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keeping up with edits made elsewhere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-first-build-and-saying-when-results-are-partial" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The first build, and saying when results are partial
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-index-is-a-cache-and-never-lives-in-a-vault" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The index is a cache, and never lives in a vault
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#granting-collections-parts-of-one-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Granting collections: parts of one toolset
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writes-ask-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writes ask first
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#privacy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privacy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="retrieval">Retrieval<a class="headerlink" href="#retrieval" title="Permanent link">&para;</a></h1>
+<p>An agent answering from your notes and papers has to find the right passage before it can read it, and
+"find" is where most of the machinery is. A model cannot read a whole vault on every question, so
+something has to pick the few hundred words worth putting in its context. That something is retrieval,
+and this page walks through Kokua's: how documents are cut into passages, how two different rankings
+score them, how those rankings are combined, how the index keeps up with files you edit elsewhere, and
+how one set of tools reaches several folders at different levels of access.</p>
+<p>The indexing and ranking live in AIMU, under <code>DocumentStore</code>
+(<a href="https://saxman.info/aimu/how-to/search-document-folders/">Search document folders</a> is its how-to).
+Kokua's part is configuration, access, and the words the model reads:
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/documents.py"><code>toolsets/documents.py</code></a> (the
+toolset and its guidance),
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/registry/context.py"><code>registry/context.py</code></a>
+(<code>LiveState.document_stores</code>, one store per folder), and
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/registry/registry.py"><code>registry/registry.py</code></a> (the
+<em>parts</em> that let one agent hold less than every folder).</p>
+<h2 id="collections">Collections<a class="headerlink" href="#collections" title="Permanent link">&para;</a></h2>
+<p>A <strong>collection</strong> is a folder. Every install has one, <code>kokua</code>, the folder the assistant saves documents in
+(<code>data/documents/</code>). You declare more in <code>config.toml</code>, such as an Obsidian vault or a folder of papers:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[[documents.collection]]</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"work"</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"~/Obsidian/Work"</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">writable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Work projects: papers, meeting notes, and method write-ups."</span>
+</span></code></pre></div>
+<p>The folder stays the source of truth. Kokua never moves your files, never writes into a folder you did
+not mark <code>writable</code>, and keeps everything it derives from them somewhere else (see <a href="#the-index-is-a-cache-and-never-lives-in-a-vault">The index is a
+cache</a>). A file counts as a document when its suffix is
+<code>.md</code>, <code>.markdown</code>, <code>.txt</code>, or <code>.pdf</code> (<code>DOCUMENT_EXTENSIONS</code> in <code>registry/context.py</code>). A vault holds more
+than notes: Obsidian keeps canvases, attachments, and its own settings beside them, and a file that is
+not a document, reported as unreadable on every search, would crowd out the ones that are. Dot-files and
+dot-directories (<code>.obsidian/</code>, <code>.trash/</code>, <code>.git/</code>) are skipped, and so is a symlink leading out of the
+folder.</p>
+<p>Collections may nest, with one exception: a read-only collection inside a writable one fails startup,
+naming both. Its files are the outer collection's files too, and the outer one can write them, so
+<code>writable = false</code> there would protect nothing while reading as though it did. A writable folder inside a
+read-only one, or a read-only one inside another read-only one, says exactly what it does.</p>
+<p>The model reaches every collection it holds through five tools AIMU's <code>make_collection_tools</code> builds:
+<code>list_documents</code>, <code>read_document</code>, <code>search_documents</code>, and, only when it may write somewhere,
+<code>save_document</code> and <code>edit_document</code>. A search covers every held collection at once, and each result
+names where it came from:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[work] /papers/sampling-review.pdf (page 3)
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Temperature sampling rescales the logits before ...
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>[personal] /Notes/Methods.md (Methods &gt; Sampling)
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>...
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>also in: work:/archive/Methods.md
+</span></code></pre></div>
+<p>That is the shape of the output, built in AIMU's <code>search_documents</code>; a result longer than an excerpt
+ends with the <code>read_document</code> call that returns the rest. The guidance in <code>toolsets/documents.py</code> sets
+the order. <code>list_documents</code> first, with no collection, because it is where the model learns which
+collections it holds, what each is for, and which it may change, and because files you copied into a
+folder are documents it did not put there. Then search, and then read the document a result came from
+before summarizing it, because a result is one passage and an answer built from passages alone is an
+answer built from fragments.</p>
+<h2 id="passages-cutting-documents-where-their-authors-did">Passages: cutting documents where their authors did<a class="headerlink" href="#passages-cutting-documents-where-their-authors-did" title="Permanent link">&para;</a></h2>
+<p>A whole document is the wrong unit to rank and the wrong unit to hand a model. Ranking a 40-page paper
+as one item lets a single relevant paragraph drown in the rest, and returning it whole spends the
+context on 39 pages nobody asked about. So a document is indexed as <strong>passages</strong>: chunks of at most
+1,200 characters, with 150 repeated between neighbors so a sentence cut at a boundary is whole in one of
+them (<code>chunk_document</code> in AIMU's <code>aimu/memory/_index.py</code>).</p>
+<p>Where the cuts fall matters as much as their size. A Markdown file is first split at its headings, and
+each section is chunked on its own, so a passage never straddles two sections and carries its heading
+path (<code>Methods &gt; Sampling</code>) as its location. A PDF is read as text with one <code>## Page N</code> marker per page
+and split at those, so its passages cite a page. Two details keep the locations honest: YAML
+frontmatter (an Obsidian note's <code>---</code> block) is metadata and is dropped, and a <code>#</code> line inside fenced
+code is code, not a heading. A PDF's extracted text has no structure of its own, so in a PDF the page
+marker is the only heading recognized, and a line beginning <code># of samples</code> stays text.</p>
+<h2 id="two-rankings-for-two-kinds-of-question">Two rankings, for two kinds of question<a class="headerlink" href="#two-rankings-for-two-kinds-of-question" title="Permanent link">&para;</a></h2>
+<p>A research question usually needs both of these at once.</p>
+<p><strong>Keyword ranking finds the exact terms.</strong> A gene name, a method, an author: if the passage contains the
+word, it should rank. The index is SQLite's FTS5 full-text engine, whose built-in ranking function is
+BM25, the standard term-weighting formula: a word counts for more the rarer it is across all passages,
+and for less in a long passage than a short one. It needs no model and nothing beyond Python's standard
+library. Your query is not FTS5 syntax, so <code>CRISPR-Cas13</code> would otherwise parse as a column filter and a
+<code>NOT</code>; the index keeps only the query's words, drops common English ones, quotes each, and joins them with
+<code>OR</code>, so any query is accepted and a passage matching more of the words ranks higher
+(<code>_match_expression</code>). FTS5 was chosen over AIMU's in-memory <code>aimu.rag.bm25_scores</code> because that function
+rescans the corpus on every query, which does not survive tens of thousands of passages.</p>
+<p><strong>Vector ranking finds the same idea in other words.</strong> A note that says "the model picks less likely
+tokens when it is hotter" shares no keyword with "temperature sampling". An <strong>embedding</strong> model turns a
+passage into a list of numbers placed so that texts meaning similar things land near each other, and a
+query is embedded the same way and compared by distance. Kokua's default is
+<code>hf:BAAI/bge-base-en-v1.5</code>, which runs on your machine. Passages and queries are embedded differently
+(<code>input_type="document"</code> and <code>"query"</code>), since retrieval models like it are trained to match a short
+question to a longer answer rather than two texts of a kind. The vectors live in a Chroma collection
+beside the keyword index. They are keyed by a hash of the document's text, not its path, so two copies of
+one file in a folder are embedded once, and changing <code>[documents].embedding_model</code> re-embeds the folder
+on its own rather than mixing two models' coordinates in one index.</p>
+<p>Set <code>embedding_model = ""</code> and there is no vector half: search is keyword-only, nothing downloads, and
+everything below still holds with one ranking instead of two.</p>
+<h2 id="fusing-them-reciprocal-rank-fusion">Fusing them: reciprocal rank fusion<a class="headerlink" href="#fusing-them-reciprocal-rank-fusion" title="Permanent link">&para;</a></h2>
+<p>Two rankings have to become one list, and their scores cannot be compared: a BM25 score and a cosine
+distance are on scales with nothing in common, and any normalization of either is a guess. <strong>Reciprocal
+rank fusion</strong> sidesteps the scores entirely and uses only positions. Each passage scores
+<code>1 / (k + rank)</code> in every ranking that holds it, summed, with <code>k = 60</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Passage</th>
+<th>Keyword rank</th>
+<th>Vector rank</th>
+<th>Fused score</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>1</td>
+<td>4</td>
+<td>1/61 + 1/64 = 0.0320</td>
+</tr>
+<tr>
+<td>C</td>
+<td>(absent)</td>
+<td>1</td>
+<td>1/61 = 0.0164</td>
+</tr>
+<tr>
+<td>B</td>
+<td>2</td>
+<td>(absent)</td>
+<td>1/62 = 0.0161</td>
+</tr>
+</tbody>
+</table>
+<p>A passage both rankings like beats one that only one ranking loves, which is usually what a
+mixed-vocabulary question wants. <code>k</code> damps the advantage of the very top ranks; 60 is the value the
+method's authors (Cormack, Clarke, and Buettcher, 2009) found robust. The whole function is a dozen lines,
+<code>reciprocal_rank_fusion</code> in AIMU's <code>aimu/rag/fusion.py</code>, and it is worth reading.</p>
+<p>Fusion runs twice. Within one collection it merges the keyword and vector rankings, each contributing a
+pool of candidates several times larger than the answer, so a passage ranked modestly by both can still
+surface. Across collections, <code>search_collections</code> (AIMU's <code>aimu/memory/document_store.py</code>) fuses each collection's own ranking the same way, which is why a small
+folder and a large one need no common scale either. A passage held verbatim by two collections (one
+paper filed in both vaults) comes back once, at its best rank, with the other copy in <code>also in</code>.
+<code>[documents].rerank = true</code> adds a cross-encoder pass over the fused top results, a model that reads the
+query and each passage together; it is slower, and off by default.</p>
+<h2 id="keeping-up-with-edits-made-elsewhere">Keeping up with edits made elsewhere<a class="headerlink" href="#keeping-up-with-edits-made-elsewhere" title="Permanent link">&para;</a></h2>
+<p>You edit a vault in Obsidian, not through Kokua, so the index has to notice. There is no file watcher.
+Before each search the store walks the folder's metadata, comparing each file's modification time and
+size with what it recorded, and re-chunks only the files that differ; a file that is gone has its
+passages deleted. At the scale of a personal vault the walk is cheap, and it means a note saved a second
+ago is searchable on the next query with no background process to keep alive. A file whose metadata
+changed but whose text did not (a <code>touch</code>, a sync tool rewriting it) keeps its passages and vectors,
+because the text's hash is compared before anything is redone. A file that could not be opened, such as a
+cloud-synced one not downloaded yet, is tried again a minute later whether or not it changed.</p>
+<h2 id="the-first-build-and-saying-when-results-are-partial">The first build, and saying when results are partial<a class="headerlink" href="#the-first-build-and-saying-when-results-are-partial" title="Permanent link">&para;</a></h2>
+<p>The first search over a folder of several hundred papers has a lot to do: extract every PDF, cut tens of
+thousands of passages, and embed them all. A search cannot wait minutes for that. So a search indexes
+changed files itself for about two seconds, then hands the rest to one background thread per collection,
+which also does all the embedding (<code>PassageIndex.refresh</code> in <code>aimu/memory/_index.py</code>). On a fresh install
+that first embedding is also when the default model downloads, about 440 MB.</p>
+<p>Meanwhile a search answers from what is indexed so far, which raises the design question this page cares
+most about: a half-built index that silently returns a short list reads to the model exactly like a
+search that found little. So the tool says so, in the result the model reads:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Note: indexing in progress (412 of 1870 files embedded); results may be incomplete.
+</span></code></pre></div>
+<p>The same honesty covers failures. An embedding model that fails to load leaves keyword search working and
+says <code>semantic search is unavailable (...); these are keyword matches only</code>; a file the index could not
+process is named. A file that changed and has not been re-indexed yet is left out rather than returned
+with text it no longer contains. And <code>list_documents</code> names the files it could not read and why, a
+scanned PDF with no extractable text among them, so the model can tell you instead of reporting the file
+missing. The list is capped (AIMU's <code>LIST_DOCUMENTS_LIMIT</code>) and says how many it left out (<code>... and N
+more</code>), so a folder of unreadable exports cannot fill the context either. Nothing is skipped in silence, because a skipped file is invisible to everyone involved.</p>
+<h2 id="the-index-is-a-cache-and-never-lives-in-a-vault">The index is a cache, and never lives in a vault<a class="headerlink" href="#the-index-is-a-cache-and-never-lives-in-a-vault" title="Permanent link">&para;</a></h2>
+<p>Each collection's index is a SQLite database and a Chroma directory under
+<code>$KOKUA_HOME/data/index/&lt;name&gt;/</code> (<code>AssistantConfig.index_dir</code>). It is derived from the folder and only
+from the folder: delete it and you lose nothing but the time to rebuild it, which is also why an index
+written by an older layout is dropped and rebuilt rather than migrated. Treating it as a cache is what lets
+the folder stay the one source of truth.</p>
+<p>It is kept out of the folder on purpose, enforced at both ends. AIMU refuses an index path inside the
+folder it indexes, and Kokua refuses a collection whose folder is, is inside, or holds its data
+directory, since indexing that would index the index and your conversations
+(<code>validate_document_collections</code> in
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py"><code>core/agents.py</code></a>). An index inside a
+vault would be synced to your other devices, shown in Obsidian, and, if it were ever read as documents,
+searched. For the same reason the <a href="../../how-to/back-up-to-github/">GitHub backup</a> leaves <code>data/index/</code>
+out. It holds only the built-in <code>kokua</code> collection's folder, which the index can be rebuilt from; a folder
+you declared lives outside <code>$KOKUA_HOME</code>, is yours rather than Kokua's state, and is not backed up at all.</p>
+<p>The stores themselves are opened lazily and shared. <code>LiveState.document_stores</code> builds one per collection
+the first time any agent's documents toolset is built, so two agents holding one collection share one
+index, and an install where no agent declares <code>documents</code> opens nothing. Building a store embeds nothing;
+that waits for the first search.</p>
+<h2 id="granting-collections-parts-of-one-toolset">Granting collections: parts of one toolset<a class="headerlink" href="#granting-collections-parts-of-one-toolset" title="Permanent link">&para;</a></h2>
+<p>An agent's capability is its <code>available</code> list (<a href="../tool-access/">Tool access</a>), so a collection reaches an
+agent only by being named there. Each collection adds names to that list:</p>
+<table>
+<thead>
+<tr>
+<th>In <code>available</code></th>
+<th>The agent holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"documents"</code></td>
+<td>every collection, each writable where it is declared <code>writable</code></td>
+</tr>
+<tr>
+<td><code>"work"</code></td>
+<td>the <code>work</code> collection, read-only, even when it is declared writable</td>
+</tr>
+<tr>
+<td><code>"work_write"</code></td>
+<td>the <code>work</code> collection, read and write; this name exists only when <code>work</code> is <code>writable = true</code></td>
+</tr>
+</tbody>
+</table>
+<p>These names are <strong>parts</strong> of the one <code>documents</code> toolset, not toolsets of their own. A toolset that
+declares <code>parts</code> (a function from the config to the names it can be granted as) and <code>build_parts</code> (how to
+build the tools for a given set of them) can be granted narrower than whole, and <code>select</code> resolves part
+names back into that single toolset, its build bound to the parts named. A researcher declaring
+<code>available = ["work"]</code> therefore holds <code>list_documents</code>, <code>read_document</code>, and <code>search_documents</code> over
+<code>work</code> alone, and no write tool at all: with no collection writable, AIMU builds none, so a read-only
+grant holds nothing that could write rather than tools that refuse. An agent naming both <code>documents</code> and
+a part gets the whole toolset, since the whole already holds every part. A part grant does not limit an
+agent that also holds <code>capabilities</code>: its <code>compose_subagent</code> draws from the whole registry, so it can
+compose a worker holding <code>documents</code> whole, or any <code>_write</code> part.</p>
+<p>Per-collection tools (<code>search_work</code>, <code>read_personal</code>) would have needed no new mechanism, and were rejected
+for three reasons, each worth knowing for a toolset of your own:</p>
+<ul>
+<li><strong>First-wins deduplication.</strong> <code>build_tools</code> keeps the first tool of a name among toolsets built
+  together. Two toolsets each providing <code>search_documents</code> would silently lose the second one's, so a
+  collection per toolset with shared tool names cannot work, and distinct names are the next problem.</li>
+<li><strong>Context size.</strong> About five tool schemas per collection, sent on every request, against a local
+  model's window that long conversations already fill. And a search across three vaults would become
+  three calls merged by the model instead of one ranking fused by code built to do it.</li>
+<li><strong>One approval vocabulary.</strong> However an agent was granted its collections, its tools were built by one
+  toolset under one name, so <code>documents.edit_document</code> gates every document edit for every agent. An
+  approval entry naming a part (<code>work_write.edit_document</code>) is refused at startup with the entry to write
+  instead, because a part narrows what a toolset's tools reach, never which tools it has.</li>
+</ul>
+<p>Residency follows the same rule: since every part builds as one toolset, the toolset is resident or
+deferred whole. A <code>resident</code> list naming <code>work</code> while <code>available</code> also grants <code>personal</code>, or <code>documents</code>
+whole, is a startup error (<code>_check_resident_parts</code> in <code>core/agents.py</code>) rather than a declaration that
+silently made more resident than it said. <code>kokua --list-toolsets</code> and <code>list_capabilities</code> list each toolset's
+parts beneath it, <code>kokua agents</code> shows the parts an agent was granted, and a part name shares the namespace every toolset name lives in, so a collection, a skill,
+and an MCP server can never take one name.</p>
+<h2 id="writes-ask-first">Writes ask first<a class="headerlink" href="#writes-ask-first" title="Permanent link">&para;</a></h2>
+<p>The shipped <code>config.example.toml</code> puts <code>documents.save_document</code> and <code>documents.edit_document</code> in
+<code>[assistant.tools].confirm</code>, and so does the code default a config without that table gets, so every
+document write asks you, in Kokua's own folder as much as in a
+vault. That is coarser than it might be, and on purpose for now: the gate decides by tool name, so it
+cannot tell a write to <code>kokua</code> from one to your personal vault, and the safe reading of "cannot tell" is
+"ask". Loosen it in your own config if Kokua's folder is the only one you mark writable. A
+<code>config.toml</code> whose <code>[assistant.tools]</code> table predates these entries has neither, so startup raises a
+notice when an agent can reach a <code>writable = true</code> collection and its policy names neither writer, with
+the two lines to add (<code>ungated_document_writes</code> in <code>core/approval.py</code>). It is a notice and not an error,
+because leaving a tool ungated is a choice a policy may make; what the notice catches is the choice
+nobody made. A scheduled task
+that tries to write a document is refused, and told that nobody is there to approve it, so it reports what
+it would have written instead.</p>
+<h2 id="privacy">Privacy<a class="headerlink" href="#privacy" title="Permanent link">&para;</a></h2>
+<p>Everything above runs on your machine by default: the index is local files, and the default embedding
+model runs locally once downloaded. But retrieval exists to put your documents in front of a model, so
+what leaves the machine is decided by which models you configure.</p>
+<ul>
+<li><strong>The chat model reads every passage a search returns.</strong> That is the point of searching. Run Kokua on
+  a cloud model (<code>anthropic:</code>, <code>openai:</code>, or any remote endpoint) and each search sends excerpts of your
+  vault to that provider, along with whatever the model then reads in full with <code>read_document</code>. A
+  sub-agent granted a collection sends its excerpts to whichever model <em>it</em> runs on.</li>
+<li><strong>The embedding model reads every passage of every collection.</strong> <code>hf:</code> models run locally. Naming a
+  remote embedding model instead (AIMU accepts <code>openai:</code> ones) would send the whole of every collection
+  to that provider during indexing, not only what a search turns up.</li>
+<li><strong>Anything a collection holds can be steered out of the machine.</strong> A passage is text the model reads,
+  and text can carry instructions: a note clipped from the web, a PDF someone sent you, or a page fetched
+  mid-turn can ask the model to send what it found somewhere. Any tool that reaches the network is a
+  route: a URL passed to <code>get_web_content</code> (the query string is the payload), the <code>email-report</code> skill's
+  send script (locked to your own address, but still a send), an MCP server's tools, and a delegated or
+  composed worker holding <code>web</code>. The shipped config gates none of those routes, and the approval gate
+  decides by tool name, not by what an argument carries. So grant collections to the agents that need
+  them rather than to every agent, keep network tools off an agent that holds a private vault where you
+  can, and gate the routes you care about (<code>web.get_web_content</code>, a skill, an MCP server by name) in that
+  agent's <code>confirm</code> list.</li>
+<li><strong><code>update_config</code> cannot change <code>[documents].embedding_model</code> by default.</strong> The shipped
+  <a href="../../reference/configuration/#locked_config_keys"><code>[security].locked_config_keys</code></a> locks it, for the
+  reason it locks <code>compute.command_env_passthrough</code>: a write pointing it at a remote endpoint would send
+  every collection there at the next restart's indexing. A <code>config.toml</code> scaffolded before the lock
+  existed writes its lock list out in full, so add <code>"documents.embedding_model"</code> to it by hand.
+  <code>[[documents.collection]]</code> is refused by <code>update_config</code> whatever the lock list says, since it names
+  folders the assistant may read.</li>
+</ul>
+<h2 id="what-it-does-not-do">What it does not do<a class="headerlink" href="#what-it-does-not-do" title="Permanent link">&para;</a></h2>
+<p>No OCR, so a scanned PDF is reported as having no extractable text. No Obsidian structure: wikilinks,
+backlinks, tags as a query language. PDF text comes from pypdf, which handles two-column layouts,
+hyphenation, and equations imperfectly, and a passage from such a page can read out of order. And no file
+watcher: the metadata walk runs when a search does, which is the right trade at the size of a personal
+vault and would not be at the size of a company's.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../reference/configuration/#documents">Configuration reference</a>: every <code>[documents]</code> and
+  <code>[[documents.collection]]</code> key, and what startup checks.</li>
+<li><a href="../tool-access/">Tool access</a>: availability, residency, and approval, which parts narrow rather than
+  replace.</li>
+<li><a href="https://saxman.info/aimu/how-to/search-document-folders/">Search document folders</a>: the AIMU side,
+  <code>DocumentStore.search_passages</code>, <code>index_status</code>, and <code>make_collection_tools</code>.</li>
+<li><a href="../architecture/#how-an-agents-tools-resolve">Architecture</a>: where parts are resolved among the steps
+  that build an agent's tools.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/saxman/kokua" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://saxman.info/aimu/" target="_blank" rel="noopener" title="saxman.info" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

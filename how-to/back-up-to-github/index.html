@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1285,6 +1285,8 @@
       
         
       
+        
+      
     
     
     
@@ -1382,6 +1384,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1768,6 +1798,10 @@ nothing to interpret.</p>
 <td>pages the <code>web</code> toolset's <code>fetch_page</code> stored, a cache of pages that are still on the web</td>
 </tr>
 <tr>
+<td><code>data/index/</code></td>
+<td>the document search indexes, a cache rebuilt from the folders they index</td>
+</tr>
+<tr>
 <td><code>data/mcp-oauth/</code></td>
 <td>the OAuth tokens Kokua holds for your MCP servers, which are credentials</td>
 </tr>
@@ -1781,6 +1815,9 @@ nothing to interpret.</p>
 </tr>
 </tbody>
 </table>
+<p>A folder you declared as a <a href="../../reference/configuration/#documentscollection"><code>[[documents.collection]]</code></a>
+is not copied either. It lives outside <code>$KOKUA_HOME</code> and is yours, not Kokua's state, so back it up the
+way you already do (an Obsidian vault usually has its own sync).</p>
 <p>No credential is copied. Kokua keeps none in <code>config.toml</code> to begin with (your model API keys, your
 mail password, and the backup token itself are all environment variables, and an MCP server's
 <code>token_env</code> names a variable rather than holding its value), and the one place it does persist a

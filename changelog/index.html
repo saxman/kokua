@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/kokua-favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1101,6 +1101,8 @@
       
         
       
+        
+      
     
     
     
@@ -1198,6 +1200,34 @@
     
   
     Tool access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../explanation/retrieval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Retrieval
   
 
     
@@ -1840,7 +1870,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.14+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.40.0 or newer. Apache-2.0.</p>
+<p>Requires Python 3.14+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.41.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -1880,6 +1910,15 @@ The pre-release development history is in the git log.</p>
 </ul>
 <h3 id="conversations-and-turns">Conversations and turns<a class="headerlink" href="#conversations-and-turns" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A turn that ends mid tool call no longer breaks the conversation.</strong> A stop that landed while a
+  call waited for approval, or while one ran (a scheduled run's included), or a failure during dispatch,
+  saved the assistant's tool call with no result after it. No provider accepts that transcript, so every
+  later message in the conversation failed (Anthropic: <code>tool_use ids were found without tool_result
+  blocks</code>). <code>TurnRunner._persist</code>, which every ending saves through, now answers each pending call
+  (<code>core.messages.answer_stranded_tool_calls</code>) first. The answer
+  says the call may or may not have run, because a running call may have finished, and concurrent
+  dispatch records no result until every call in the round returns. A conversation saved in the broken
+  state before this fix is not repaired; retry from the last message that worked.</li>
 <li><strong>System prompts in the export, and <code>kokua export --turn N</code>.</strong> The conversation export now shows each
   agent's system prompt the first time it appears and again whenever it changes, read from the recorded
   request payloads (never the payloads themselves), in every route: the command, the web download, and
@@ -2650,10 +2689,13 @@ The pre-release development history is in the git log.</p>
   nothing against a transcript accepts it as <code>conversation_id=None</code> and ignores it. <code>send_prompt_retired()</code>
   is new and optional, like every rich frame: a channel without it gets no retirement, which is right
   for one whose prompt is a printed line.
-- <strong>The AIMU floor is 0.40.0</strong>, for the <code>TOOL_REQUESTED</code> phase that draws a tool call's card as it starts,
+- <strong>The AIMU floor is 0.41.0</strong>, for document collections: <code>DocumentStore</code>'s passage index and PDF reading,
+  and <code>make_collection_tools</code>, which binds the <code>documents</code> toolset's tools to every collection an agent
+  holds (see "Document collections" under Toolsets). Before it the floor was 0.40.0, for the
+  <code>TOOL_REQUESTED</code> phase that draws a tool call's card as it starts,
   for <code>ToolResult</code> so <code>generate_image</code> can hand the model the image it made, and for
   <code>aimu.context.compaction</code>, which a spawned worker compacts with (<code>chain(mask(...), trim(...))</code>, and the
-  <code>get_message</code> tool that comes with it). Before it the floor was 0.39.0, for the page tools the <code>web</code>
+  <code>get_message</code> tool that comes with it). Before that it was 0.39.0, for the page tools the <code>web</code>
   toolset builds (<code>make_page_tools</code>) and for a compaction that keeps a worker's task (see <code>context_length</code>
   under Configuration). Before that it was 0.38.0, for a <code>calculate</code> that evaluates arithmetic and nothing else (it was an
   escapable <code>eval</code>, and the shipped policy leaves it ungated) and for the note a spawn now puts in front
@@ -3018,6 +3060,70 @@ the window and answered <code>Saved</code>. A 3,000-line document came back 51 l
 written in as content. <code>toolsets/documents.py</code> names <code>edit_document</code> in its guidance rather than leaving
 the refusal to do the teaching, because a refusal arrives only after the model has spent a turn deciding,
 and it tells the model that <code>read_document</code> windows at all, which nothing else would.</p>
+<p><strong>Document collections: your own folders, searched by passage.</strong> <code>[[documents.collection]]</code> declares a
+folder (an Obsidian vault, a folder of papers) with a <code>name</code>, a <code>path</code>, <code>writable</code> (default <code>false</code>), and
+an optional <code>description</code> the model reads beside the name in <code>list_documents</code>. Kokua's own
+<code>data/documents</code> is the built-in collection <code>kokua</code>, always writable. One <code>search_documents</code> call ranks
+passages across every collection an agent holds and cites each by collection, file, and heading or PDF
+page: Markdown is chunked by heading and PDFs by page, ranked by SQLite FTS5's BM25 and by a local
+embedding model, the two fused by reciprocal rank fusion. The index lives under <code>data/index/&lt;name&gt;/</code>,
+never in the folder; a metadata walk before each search picks up files edited elsewhere, a background
+thread finishes a large first build, and a search during one says its results may be incomplete. The
+tools are AIMU's <code>make_collection_tools</code>, under the names <code>make_document_tools</code> used, so existing agents
+and approval entries keep working. <a href="https://saxman.info/kokua/explanation/retrieval/">Retrieval</a> explains
+the machinery, and the <a href="https://saxman.info/kokua/reference/configuration/#documentscollection">configuration reference</a>
+lists what startup checks. Like <code>[[mcp.server]]</code>, collections are startup-only, and <code>update_config</code>
+refuses <code>documents.collection</code> whatever the lock list says, since a collection names folders the
+assistant may read.</p>
+<ul>
+<li><strong>An agent can be granted one collection.</strong> In <code>available</code>, <code>"documents"</code> grants every collection at
+  its declared access, <code>"work"</code> reads the <code>work</code> collection only, and <code>"work_write"</code> reads and writes it
+  (only for a <code>writable = true</code> collection; naming it otherwise fails startup saying what to set). An
+  agent holding only read-only collections has no write tool at all. These names are <em>parts</em> of the one
+  <code>documents</code> toolset, so approval entries still name <code>documents.&lt;tool&gt;</code>; an entry naming a part is
+  refused with the entry to write instead, and a <code>resident</code> list must name all of a toolset's parts that
+  <code>available</code> grants, or none.</li>
+<li><strong>Two changes on a default install.</strong> The first document search downloads the embedding model,
+  <code>hf:BAAI/bge-base-en-v1.5</code> (about 440 MB), and builds the index; set <code>[documents] embedding_model = ""</code>
+  to search by keyword alone, with no download. And saving or editing a document now asks first in the
+  shipped config, which adds <code>documents.save_document</code> and <code>documents.edit_document</code> to
+  <code>[assistant.tools].confirm</code>, and in the code default a config with no such table gets. Like every
+  default entry, the code default's two fail startup naming the gate when no agent declares
+  <code>documents</code>; write an <code>[assistant.tools]</code> table for such a config. <strong>An existing install keeps
+  writing documents ungated</strong> if its <code>config.toml</code> has its own <code>[assistant.tools]</code> table, and startup
+  says so with a notice once a <code>writable = true</code> collection is reachable by an agent whose policy names
+  neither document writer (a notice, not an error: your own policy wins). Add these two lines to its
+  <code>confirm</code>:</li>
+</ul>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="w">    </span><span class="s2">"documents.save_document"</span><span class="err">,</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="s2">"documents.edit_document"</span><span class="err">,</span>
+</span></code></pre></div>
+<p>The gate decides by tool name, so it cannot tell a write to <code>kokua</code> from a write to a vault: both ask.
+- <strong>A read-only collection nested inside a writable one fails startup</strong>, naming both: the outer
+  collection can write every file in it, so its <code>writable = false</code> would protect nothing. Any other
+  nesting is allowed.
+- <strong>Kokua's own document folder now ignores files outside <code>.md</code>, <code>.markdown</code>, <code>.txt</code>, and <code>.pdf</code>.</strong>
+  Every collection takes the same suffixes, because a vault holds canvases, attachments, and settings
+  beside its notes, and a file that is not a document, reported unreadable on every search, crowds out
+  the ones that are. A file of another kind already in <code>data/documents</code> is no longer listed or searched;
+  rename it to a listed suffix, or export it, to bring it back. Saving under any other suffix is refused.
+  PDFs are searchable and read-only.
+- <strong><code>[documents]</code> has two keys</strong>, <code>embedding_model</code> and <code>rerank</code> (a cross-encoder pass over the fused
+  results, default <code>false</code>), both startup-only. <strong><code>documents.embedding_model</code> is locked by default</strong>:
+  a remote embedding model reads every passage of every collection while indexing, so <code>update_config</code>
+  refuses it, for the reason it refuses <code>compute.command_env_passthrough</code>. A <code>config.toml</code> scaffolded
+  earlier writes its lock list out in full, so add <code>"documents.embedding_model"</code> to
+  <code>[security].locked_config_keys</code> by hand.
+- <strong>A server <code>add_mcp_server</code> records is named clear of every registry name</strong>, not only other servers',
+  so a server on a host named like a collection, a skill, or a toolset gets a numeric suffix instead of a
+  name the next start would refuse.
+- <strong>For plugin authors: <code>Toolset.parts</code>, <code>build_parts</code>, and <code>writable_part_remedy</code>.</strong> A toolset can be
+  granted narrower than whole. <code>parts</code> maps the config to the names an agent may declare and what each
+  grants, <code>build_parts</code> builds the tools for the parts named, and <code>writable_part_remedy</code> is the sentence
+  telling a user how to make a <code>&lt;part&gt;_write</code> exist (only <code>{part}</code> is substituted). <code>select</code> collects
+  every part an agent names into one copy of the toolset, whose gate vocabulary is still what the whole
+  toolset builds, <code>registry.with_parts</code> refuses a part name that collides with any other name,
+  and <code>kokua --list-toolsets</code>, <code>kokua agents</code>, and <code>list_capabilities</code> show the parts.</p>
 <p><strong>The <code>compute</code> toolset now carries a shell tool, <code>run_command</code>, alongside <code>calculate</code> and
 <code>execute_python</code>.</strong> It runs a command line through <code>/bin/sh -c</code> and returns the exit code with stdout
 and stderr labelled separately; a nonzero exit comes back as output rather than an error, since <code>pytest</code>
@@ -3912,33 +4018,44 @@ notice on startup.</p>
   agent capability boundaries, the web front end's download and image routes, the <code>[email].to</code>
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).</li>
-<li><strong>Tool approval.</strong> Configured risky tools require confirmation before each call -- terminal <code>y/N</code>, web
-  Allow/Deny -- built on AIMU's <code>ToolApproval</code> gate. The default set is <code>skills.add_skill_script</code>,
-  <code>mcp.add_mcp_server</code>, <code>compute.execute_python</code>, <code>compute.run_command</code>, <code>fs_write</code>, and
-  <code>config.update_config</code>; adjust with <code>[security] confirm_tools</code> or <code>--confirm-tools</code> (empty disables).
+<li><strong>Tool approval.</strong> Configured risky tools require confirmation before each call (terminal <code>y/N</code>, web
+  Allow/Deny), built on AIMU's <code>ToolApproval</code> gate. The default set is <code>skills.add_skill_script</code>,
+  <code>mcp.add_mcp_server</code>, <code>compute.execute_python</code>, <code>compute.run_command</code>, <code>fs_write</code>,
+  <code>config.update_config</code>, <code>documents.save_document</code>, and <code>documents.edit_document</code>; adjust with <code>[security] confirm_tools</code> or <code>--confirm-tools</code> (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. <strong>That question is asked again at every point the answer can have gone stale</strong>,
-  and the widest window is the one easiest to miss: a round's tool calls are dispatched concurrently
-  while the approval slot is single, so its second gated call waits inside the slot for as long as you
-  take to answer the first, and a switch during that wait leaves the question behind it pointed at a
-  reader who is now looking somewhere else. It is denied and raises the card below instead. The prompt
-  frame carries its conversation for the same reason an auto-approval card does, so a page can drop one
-  that raced the last check rather than draw it into the wrong transcript. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
+  are currently viewing. <strong>That question is asked again at every point the answer can have gone stale</strong>:
+  on arrival, after an auto-approval review, and as the call is registered to wait, after which a
+  switch denies every waiting call at once. The prompt frame carries its conversation for the same
+  reason an auto-approval card does, so a page can drop one that raced the last check rather than draw
+  it into the wrong transcript. <strong>Every waiting gated call shows its own Allow/Deny at once.</strong> A round's
+  tool calls are dispatched concurrently, and they used to queue behind one approval slot that showed
+  only the oldest prompt, so a prompt you had scrolled past held every call behind it, with reviewer
+  cards for the later calls on screen and no buttons to answer them. Each now waits under its own
+  prompt id (<code>core.interaction.PendingApprovals</code>), the page's buttons send an <code>approval_reply</code> frame
+  naming it, and a typed <code>y</code> or <code>n</code> answers the oldest call still waiting. A breaking change for a
+  third-party rich channel: <code>send_approval_request</code> and <code>send_prompt_retired</code> take a <code>prompt_id</code>. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task
   calling a gated tool every firing would otherwise raise a card every firing. Parking a backgrounded
   call for the user to answer later, instead of denying it, is
   <a href="https://github.com/saxman/kokua/issues/7">#7</a>.
+  <strong>An unattended turn's denial tells the model why</strong>, for every gated tool: the tool result says nobody
+  is there to approve the call, that it did not run, not to retry it, and to say in the report what it
+  would have done, so the user can do it. It no longer adds "or approve it next time": nothing ever
+  approves an unattended call, so that promise was false. Before, the model saw only that the call was not approved, which reads like a call
+  worth retrying and left the report the user reads afterwards with nothing to say about it.
   The reply is routed through the single channel reader, so it is safe alongside
-  <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
-  cannot overwrite each other. <strong>A prompt's controls are retired when its question closes</strong>, which is
-  not always something the page can see: a typed <code>y</code> answers without touching the buttons, and a
-  <code>/stop</code> cancels the turn the question belonged to. A reply matching no outstanding request is an
-  ordinary message, so a button outliving its question turns a <code>y</code> into a turn saying "y". The
-  <code>prompt_retired</code> frame is sent from the one place that knows all four endings (<code>PendingRequest.ask</code>'s
-  <code>finally</code>: answered here, answered by a typed reply, abandoned by a switch, cancelled with the turn),
+  <code>/stop</code>. Each approval has its own waiter and plan review a lock-guarded slot, so two concurrent
+  requests cannot overwrite each other. <strong>A prompt's controls are retired when its question closes</strong>,
+  which is not always something the page can see: a typed <code>y</code> answers without touching the buttons, and
+  a <code>/stop</code> cancels the turn the question belonged to. A typed reply matching no outstanding request is
+  an ordinary message, so a button outliving its question would turn a <code>y</code> into a turn saying "y"; a
+  button's reply names its prompt and is consumed whether or not that prompt is still waiting. The
+  <code>prompt_retired</code> frame (carrying the prompt id for an approval) is sent from the one place that knows
+  all four endings (the <code>finally</code> in <code>PendingApprovals.ask</code> and <code>PendingRequest.ask</code>: answered here,
+  answered by a typed reply, abandoned by a switch, cancelled with the turn),
   and the page disables the card's controls while keeping the card, which is the record of what was
   asked. A terminal prompt is a printed line with nothing to take back, so it degrades to silence.</li>
 <li><strong>A gate names its toolset, and one that would gate nothing fails startup.</strong> A <code>[security]
@@ -3989,7 +4106,23 @@ notice on startup.</p>
   <a href="https://saxman.info/kokua/explanation/auto-approval/">docs/explanation/auto-approval.md</a>: no
   sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most
   prompts with no model at all, and the reviewer's own token cost is not counted (AIMU's structured
-  path returns before a turn event is emitted, so no metrics sink can see it).</li>
+  path returns before a turn event is emitted, so no metrics sink can see it).
+  <strong>The shipped reviewer prompt judges a call as one step toward the request.</strong> Asked whether a call
+  "plainly serves" the request, a small reviewer read it as "completes" it, so a read-only data call
+  toward "investigate and recommend trades" was escalated as out of scope because one lookup cannot
+  recommend anything, and every call of a research turn reached the user anyway. The prompt now says a
+  call that gathers what the request needs, or does part of it, is in scope even though it cannot finish
+  the request alone; reaching beyond what was asked is still out of scope. An existing
+  <code>[reviewers.approval]</code> in your own <code>config.toml</code> keeps its old wording until you edit it.
+  <strong>The shipped prompt also says whose words each fenced field is.</strong> The user's request sits inside the
+  same <code>&lt;untrusted&gt;</code> fence as the model's arguments (it can quote anything pasted into it), and the
+  prompt used to describe everything fenced as model-written text, flagging any that "asks for a
+  verdict". So an imperative request ("recommend trades I should absolutely make today") read as text
+  instructing the reviewer and was flagged as injection, and so was a request that simply did not match
+  the call. The prompt now says the request is the user's message to the assistant, whose instructions
+  and urgency are the task itself; injection means text addressing the reviewer (a review policy, a
+  claimed approval, a verdict asked for); and a mismatch between request and call is a scope question.
+  The fence stays, so text the user pasted is still data to the reviewer.</li>
 <li><strong><code>[security].never_auto_approve</code>: tools no reviewer may ever approve.</strong> Ships as
   <code>config.update_config</code>, <code>skills.add_skill_script</code>, and <code>mcp.add_mcp_server</code>, and naming one of them
   in <code>[security.auto_approval].tools</code> is a startup error. These three change what may act <em>later</em>
@@ -4125,7 +4258,11 @@ notice on startup.</p>
   key, whether both drivers drained all three branches a steered turn could take, whether the three
   stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
   whether a misbehaving host source was caught rather than trusted. <code>Inbox</code> joins the probe's job.
-  Today the floor is <strong>0.40.0</strong>, and the check probes <code>aimu.context.compaction.chain</code>, from the module a
+  Today the floor is <strong>0.41.0</strong>, and the check probes <code>aimu.tools.builtin.make_collection_tools</code>, the
+  factory the <code>documents</code> toolset builds its tools from: a plain name lookup on a new export. What it
+  cannot see is the floor's job: that a store reads a PDF's text, that the index ranks passages and
+  reports its problems, and that the factory takes each collection's <code>descriptions</code>.
+  Before it the floor was <strong>0.40.0</strong>, and the check probed <code>aimu.context.compaction.chain</code>, from the module a
   spawned worker compacts with. 0.40.0 carries three capabilities Kokua depends on: the <code>TOOL_REQUESTED</code>
   phase a running tool call is drawn from, <code>ToolResult</code> so a generated image reaches the model, and the
   compaction module. The probe ran ahead of the release through all three in turn (each landed after the
