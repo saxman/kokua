@@ -2063,13 +2063,19 @@ is an anchor. Approving a tool call from a card was considered and rejected: the
 `execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread, which is the one thing the gate exists to prevent.
 
-Three properties of the layer are worth stating, because each answers a failure this shape can have:
+Four properties of the layer are worth stating, because each answers a failure this shape can have:
 
 - **Non-blocking.** The layer takes no pointer events; the cards do. A scheduled task fires whether or
   not anyone is at the keyboard, so a modal here would let an unattended process seize the composer.
 - **Grouped.** A card supersedes an earlier card with the same `group`: the task for a firing's report,
   the conversation for a completion, the conversation and tool name for a denial. Ungrouped, a task
   firing every ten minutes overnight greets the user with a card per firing.
+- **Retired when nothing waits on it.** `ChannelUI.retire_alert(group)` sends an `alert_retired` frame,
+  never muted, and the page drops that group's card. Nothing else expires, so a card pointing at
+  something already finished is one the user dismisses by hand for no reason. The MCP authorization card
+  is the case: `ChatOAuth` groups it per server, retires it when the callback arrives, and replaces it
+  with the reason when the flow times out or is refused. The token exchange after the callback can still
+  fail; that is reported where any connect failure is, since by then the card has nothing to ask.
 - **Anchors are built from the `url` field, never from the text.** The authorization URL comes from a
   remote MCP server's own metadata, and the page checks its scheme is `http(s)` before making a link of
   it. Linkifying the sentence instead would let any text that ever reaches a card become a link.

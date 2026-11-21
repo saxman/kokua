@@ -461,9 +461,15 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
     its own, so an unattended task can never block the composer. A later card supersedes an earlier one
     with the same `group` (a task, a conversation, a conversation and tool pair), which keeps a task
     firing all night from greeting you with one card per firing; a card whose conversation has since
-    been pruned keeps its text and drops its Open control. The terminal has no such layer, so
-    `ChannelUI.alert` prints the sentence there instead, which is why an alert's text always carries
-    its link in words.
+    been pruned keeps its text and drops its Open control. A card can also be retired: an
+    `alert_retired` frame (`ChannelUI.retire_alert`, an optional `send_alert_retired` on a rich channel)
+    takes down the card raised under its group. The MCP authorization card uses it, grouped per server:
+    it leaves when the callback arrives, whether you clicked its link or approved in the tab that opened
+    on its own, and a flow that times out or is refused replaces it with the reason, since a link to an
+    abandoned flow leads nowhere. Before this the card stayed until dismissed, still offering to
+    authorize a connection already made. The terminal has no such layer, so `ChannelUI.alert` prints the
+    sentence there instead, which is why an alert's text always carries its link in words, and
+    `retire_alert` is silence there.
   - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.

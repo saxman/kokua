@@ -56,6 +56,9 @@ class RichChannelDouble(BareChannel):
     async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
         self.calls.append(("notification", (text, conversation_id, url, group)))
 
+    async def send_alert_retired(self, group: str) -> None:
+        self.calls.append(("alert_retired", (group,)))
+
     async def send_approval_request(
         self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id=None, prompt_id=None
     ) -> None:
@@ -253,6 +256,7 @@ async def test_rich_channel_receives_every_frame():
     await ui.push_conversations([{"id": "a"}])
     await ui.notify("done")
     await ui.alert("a scheduled task finished")
+    await ui.retire_alert("Digest")
     await ui.ask_approval("execute_python", {"code": "1"})
     await ui.retire_prompt()
     await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="m")
@@ -269,6 +273,7 @@ async def test_rich_channel_receives_every_frame():
         "conversations",
         "notification",  # notify
         "notification",  # alert: one frame, two methods, differing only in their fallback
+        "alert_retired",
         "approval",
         "prompt_retired",
         "auto_approval",
@@ -380,6 +385,19 @@ async def test_alert_carries_the_group_that_supersedes_an_earlier_card():
     channel = RichChannelDouble()
     await ChannelUI(channel).alert("Scheduled task 'Digest' finished.", conversation_id="c7", group="Digest")
     assert channel.calls == [("notification", ("Scheduled task 'Digest' finished.", "c7", None, "Digest"))]
+
+
+async def test_retire_alert_names_the_group_it_takes_down():
+    channel = RichChannelDouble()
+    await ChannelUI(channel).retire_alert("mcp-auth:https://svc/mcp")
+    assert channel.calls == [("alert_retired", ("mcp-auth:https://svc/mcp",))]
+
+
+async def test_retire_alert_is_silence_on_a_plain_text_channel():
+    """The printed line is already in the scrollback, and nothing could take it back."""
+    channel = BareChannel()
+    await ChannelUI(channel).retire_alert("mcp-auth:https://svc/mcp")
+    assert channel.sent == []
 
 
 # --- auto-approval: the one frame with no silent degradation --------------------------------------

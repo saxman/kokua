@@ -2721,6 +2721,28 @@ def test_alert_cards_group_and_guard_their_controls(page, live_server):
     expect(cards.first.locator(".alert-link")).to_have_attribute("href", "https://auth.example/x")
 
 
+def test_an_alert_retired_frame_takes_down_only_its_own_card(page, live_server):
+    """An MCP authorization card leaves once the callback arrives, the way an answered approval's
+    controls do, while a task's card beside it stays until the user dismisses it."""
+    _open(page, live_server(delay=0.0))
+
+    page.evaluate("(f) => raiseAlert(f)", {"text": "Digest finished", "group": "Digest"})
+    page.evaluate(
+        "(f) => raiseAlert(f)",
+        {"text": "authorize here", "url": "https://auth.example/x", "group": "mcp-auth:https://svc/mcp"},
+    )
+    cards = page.locator("#alerts .alert-card")
+    expect(cards).to_have_count(2)
+
+    page.evaluate(
+        "frame => handleFrame({data: JSON.stringify(frame)})",
+        {"type": "alert_retired", "group": "mcp-auth:https://svc/mcp"},
+    )
+    expect(cards).to_have_count(1)
+    expect(cards.first).to_contain_text("Digest finished")
+    expect(page.locator("#alerts-clear")).to_have_count(0)  # one card left, so no "Clear all"
+
+
 # --- What the model saw: round buttons, the round panel, the size-safe viewer, turn badges -------
 
 _REQUEST_BODY = {

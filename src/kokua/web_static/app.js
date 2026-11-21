@@ -28,9 +28,11 @@ const modelLabel = document.getElementById("model-label");
 // gated tool a backgrounded turn was denied), and each is a pointer rather than a place to act: the
 // deciding happens in the conversation, or in the browser tab the link opens.
 //
-// Newest first, and nothing expires. A card leaves when it is dismissed, or when a later card
-// supersedes it: same `group`, one card. That is what keeps a task firing every ten minutes overnight
-// from greeting the user with a wall of its own history.
+// Newest first, and nothing expires. A card leaves when it is dismissed, when a later card supersedes
+// it (same `group`, one card), or when an "alert_retired" frame names its group because nothing is
+// waiting on it any more. Superseding is what keeps a task firing every ten minutes overnight from
+// greeting the user with a wall of its own history; retiring is what takes an authorization link
+// down once the user has approved it.
 let alerts = [];
 
 function raiseAlert(frame) {
@@ -142,6 +144,11 @@ function renderAlerts() {
 
 function dismissAlert(index) {
   alerts.splice(index, 1);
+  renderAlerts();
+}
+
+function retireAlert(group) {
+  alerts = alerts.filter((a) => a.group !== group);
   renderAlerts();
 }
 
@@ -2310,6 +2317,8 @@ function handleFrame(event) {
     // task reported, an authorization is waiting, a backgrounded turn's gated tool was denied. It goes
     // to the alert layer, so this view and its working indicator are left exactly as they are.
     raiseAlert(frame);
+  } else if (frame.type === "alert_retired") {
+    retireAlert(frame.group);
   } else if (frame.type === "working") {
     setProcessing(!!frame.active);
     // `elapsed` is how long the turn has been running server-side, so switching into one that started

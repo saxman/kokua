@@ -79,6 +79,14 @@ class RichChannel(Protocol):
         conversation to open, the URL to follow, and the group whose next card supersedes this one.
         """
 
+    async def send_alert_retired(self, group: str) -> None:
+        """Take down the alert card raised under ``group``, because nothing is waiting on it any more.
+
+        Only a channel that keeps cards up needs it, which is the same channel that offers
+        ``send_notification``: a card that outlives what it pointed at (an authorization the user has
+        already approved) is one the user has to dismiss by hand for no reason.
+        """
+
     async def send_approval_request(
         self,
         name: str,

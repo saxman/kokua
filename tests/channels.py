@@ -156,6 +156,10 @@ class AlertCapturingChannel(_ConvCapturingChannel):
     def __init__(self):
         super().__init__()
         self.alerts: list[tuple[str, str | None, str | None, str | None]] = []
+        self.retired_groups: list[str] = []
 
     async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
         self.alerts.append((text, conversation_id, url, group))
+
+    async def send_alert_retired(self, group: str) -> None:
+        self.retired_groups.append(group)
