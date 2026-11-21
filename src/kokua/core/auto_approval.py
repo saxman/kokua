@@ -138,7 +138,10 @@ def build_packet(
     """The bounded review packet, or None when it cannot be built and the call must go to the user.
 
     ``tool`` and ``toolset`` are Kokua's own words, resolved at startup, so they are stated plainly.
-    Everything else came from a model and is fenced. The budget line is included because a reviewer
+    The other two are fenced: the arguments came from a model, and the request is the user's own message,
+    fenced too because it can quote anything the user pasted in. The shipped reviewer prompt says whose
+    words each one is, since a reviewer that reads the request as model output takes its imperatives
+    ("recommend trades I should make today") as text trying to instruct it. The budget line is included because a reviewer
     seeing the fifth review of one turn is looking at a retry loop, which is worth knowing about a
     call that has already been asked four times.
     """
