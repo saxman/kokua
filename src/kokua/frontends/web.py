@@ -23,7 +23,7 @@ from typing import Optional
 from starlette.applications import Starlette
 from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
-from starlette.websockets import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from kokua import images, payloads
 from kokua.core.assistant import Assistant, ModelClientError
@@ -668,7 +668,10 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
 
             async def read_socket() -> None:
                 try:
-                    while True:
+                    # Not `while True`: a send to a vanished tab marks the socket disconnected without
+                    # waking this loop, and Starlette's receive_text then raises RuntimeError rather than
+                    # WebSocketDisconnect. Nothing awaits between this check and Starlette's own.
+                    while websocket.application_state == WebSocketState.CONNECTED:
                         inbound.put_nowait(await websocket.receive_text())
                 except WebSocketDisconnect:
                     pass

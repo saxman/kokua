@@ -2512,6 +2512,12 @@ notice on startup.
   during a teardown waits for it, bounded by `TEARDOWN_WAIT_SECONDS` in `frontends/web.py`, and one that
   outwaits that bound is told the previous connection is still closing. A second tab open beside a live
   one is refused at once, as before.
+- **A tab that vanishes mid-send disconnects quietly.** Starlette answers a failed send by marking the
+  socket disconnected without waking the reader, and its `receive_text` then raises `RuntimeError`
+  ("Need to call 'accept' first") instead of `WebSocketDisconnect`. `pump`'s reader caught only the
+  latter, so a closed or reloaded tab could print an `ExceptionGroup` trace to the terminal, and the task
+  group cancelled `assistant.run()` instead of letting the sentinel end it. The reader now stops once
+  Starlette reports the socket disconnected.
 
 ### Known limitations
 
