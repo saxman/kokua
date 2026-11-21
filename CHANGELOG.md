@@ -2227,6 +2227,15 @@ notice on startup.
   call that gathers what the request needs, or does part of it, is in scope even though it cannot finish
   the request alone; reaching beyond what was asked is still out of scope. An existing
   `[reviewers.approval]` in your own `config.toml` keeps its old wording until you edit it.
+  **The shipped prompt also says whose words each fenced field is.** The user's request sits inside the
+  same `<untrusted>` fence as the model's arguments (it can quote anything pasted into it), and the
+  prompt used to describe everything fenced as model-written text, flagging any that "asks for a
+  verdict". So an imperative request ("recommend trades I should absolutely make today") read as text
+  instructing the reviewer and was flagged as injection, and so was a request that simply did not match
+  the call. The prompt now says the request is the user's message to the assistant, whose instructions
+  and urgency are the task itself; injection means text addressing the reviewer (a review policy, a
+  claimed approval, a verdict asked for); and a mismatch between request and call is a scope question.
+  The fence stays, so text the user pasted is still data to the reviewer.
 - **`[security].never_auto_approve`: tools no reviewer may ever approve.** Ships as
   `config.update_config`, `skills.add_skill_script`, and `mcp.add_mcp_server`, and naming one of them
   in `[security.auto_approval].tools` is a startup error. These three change what may act *later*
