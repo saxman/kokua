@@ -4399,6 +4399,12 @@ notice on startup.</p>
   during a teardown waits for it, bounded by <code>TEARDOWN_WAIT_SECONDS</code> in <code>frontends/web.py</code>, and one that
   outwaits that bound is told the previous connection is still closing. A second tab open beside a live
   one is refused at once, as before.</li>
+<li><strong>A tab that vanishes mid-send disconnects quietly.</strong> Starlette answers a failed send by marking the
+  socket disconnected without waking the reader, and its <code>receive_text</code> then raises <code>RuntimeError</code>
+  ("Need to call 'accept' first") instead of <code>WebSocketDisconnect</code>. <code>pump</code>'s reader caught only the
+  latter, so a closed or reloaded tab could print an <code>ExceptionGroup</code> trace to the terminal, and the task
+  group cancelled <code>assistant.run()</code> instead of letting the sentinel end it. The reader now stops once
+  Starlette reports the socket disconnected.</li>
 </ul>
 <h3 id="known-limitations">Known limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h3>
 <ul>
