@@ -192,6 +192,20 @@ def test_answer_stranded_tool_calls_answers_only_the_calls_with_no_result():
     assert messages[-1]["name"] == "get_portfolio" and messages[-1]["role"] == "tool"
 
 
+def test_answer_stranded_tool_calls_never_answers_across_a_user_message():
+    """A result must sit directly after its call; one appended after a later user message is a transcript
+    the provider rejects just the same. Calls stranded that far back are beyond this helper's reach."""
+    messages = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "tool_calls": [_call("a")]},
+        {"role": "user", "content": "next"},
+    ]
+    before = list(messages)
+
+    assert answer_stranded_tool_calls(messages) == []
+    assert messages == before
+
+
 def test_answer_stranded_tool_calls_leaves_a_settled_transcript_alone():
     answered = [
         {"role": "assistant", "tool_calls": [_call("a")]},

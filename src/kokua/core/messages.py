@@ -137,16 +137,23 @@ def answer_stranded_tool_calls(messages: list[dict]) -> list[str]:
     running when the stop landed may have finished, and concurrent dispatch appends no result until
     every call in the round returns. A model told "not run" could repeat a write that happened.
 
-    Only the newest assistant message is checked, because a stop can only strand the round it lands
-    in. Calls stranded further back (an older conversation where the user kept writing after a stop)
-    would need results inserted mid-transcript, which would shift every later index the stored turn
+    Only the round at the very end is checked: the trailing run of tool results and the assistant
+    message just before it, which is the shape a dispatch interrupted at any point leaves (some results
+    may already be appended). A result has to sit directly after its call, so calls stranded further
+    back (an older conversation where the user kept writing after a stop) are out of reach: answering
+    them would mean inserting mid-transcript, which would shift every later index the stored turn
     metadata is keyed by.
     """
-    index = last_assistant_index(messages)
-    if index < 0:
-        return []
-    answered = {message.get("tool_call_id") for message in messages[index + 1 :] if message.get("role") == "tool"}
-    stranded = [call for call in messages[index].get("tool_calls") or [] if call["id"] not in answered]
+    answered: set[str] = set()
+    tool_calls: list[dict] = []
+    for message in reversed(messages):
+        if message.get("role") == "tool":
+            answered.add(message.get("tool_call_id"))
+            continue
+        if message.get("role") == "assistant":
+            tool_calls = message.get("tool_calls") or []
+        break
+    stranded = [call for call in tool_calls if call["id"] not in answered]
     for call in stranded:
         name = call["function"]["name"]
         messages.append(

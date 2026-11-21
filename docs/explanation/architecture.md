@@ -1778,8 +1778,10 @@ like every other turn record), and `replay_items` rejoins them by id. The key is
 when nothing recorded the tool, so a call is shown bare rather than under a guess.
 
 The page sends an `input` frame (`{"type": "input", "text", "token", "images"?, "thinking"?}`) for
-**every** message the composer sends, text-only ones included, and the bare string only for its own
-control replies: the Stop button's `/stop`, an approval's Allow/Deny, and a plan review's verdict. It
+**every** message the composer sends, text-only ones included; an `approval_reply` frame
+(`{"type": "approval_reply", "id", "allow"}`) for an approval's Allow/Deny, naming the prompt it answers
+because several can be on screen at once; and the bare string only for its other control replies: the
+Stop button's `/stop` and a plan review's verdict. It
 used to be the other way round, a frame only for a message carrying images or an effort, and the `token`
 is what changed it ([below](#which-of-the-messages-it-drew-became-a-turn)): a token has nowhere to ride
 on a plain string, and the commonest message of all is the one that most needs naming.
@@ -1787,13 +1789,15 @@ on a plain string, and the commonest message of all is the one that most needs n
 converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took,
 and a frame's text is read exactly as a bare one's, commands and all.
 
-A reply that matches no outstanding request is not an error, it is an ordinary message, so a control
-that outlives its question is a real hazard rather than a dead button: clicking Allow on a closed prompt
-turns `y` into a turn saying "y". The `prompt_retired` frame is what closes one. It is sent from
-`PendingRequest.ask`'s `finally`, so it covers all four ways a question stops waiting (answered by a
-click, answered by a typed reply, abandoned by a switch, cancelled with its turn by `/stop`) rather than
-the one the page can see for itself, and the page disables the card's controls without removing the card,
-which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
+A bare reply that matches no outstanding request is not an error, it is an ordinary message, so a
+control that outlives its question is a real hazard rather than a dead button: a plan review's Approve on
+a closed prompt would become a turn saying "approve". An approval's reply names its prompt instead, and is
+consumed whether or not that prompt is still waiting, so a stale Allow does nothing. The `prompt_retired`
+frame is what closes a card, carrying the prompt id for an approval. It is sent from the `finally` in
+`PendingApprovals.ask` and `PendingRequest.ask`, so it covers all four ways a question stops waiting
+(answered by a click, answered by a typed reply, abandoned by a switch, cancelled with its turn by
+`/stop`) rather than the one the page can see for itself, and the page disables the card's controls
+without removing the card, which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
 so `ChannelUI.retire_prompt` is silence there.
 
 ### Reading the socket, and applying what arrives

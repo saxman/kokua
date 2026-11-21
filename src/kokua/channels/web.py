@@ -670,7 +670,7 @@ class WebChannel(BaseWebChannel):
         conversation_id: Optional[str] = None,
         prompt_id: Optional[int] = None,
     ) -> None:
-        """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
+        """Ask the browser to approve a tool call; the page replies with an ``approval_reply`` frame.
 
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
@@ -678,8 +678,8 @@ class WebChannel(BaseWebChannel):
         Never muted (``approval`` is not in ``_TURN_FRAMES``), and it carries its conversation
         instead, for the reasons ``send_auto_approval`` below carries one: the core only prompts for
         the conversation being viewed, and muting the question a turn is blocked on would hang that
-        turn until something abandoned it. The id is what lets the page drop a prompt that raced a
-        switch, rather than asking one conversation's reader about another conversation's call.
+        turn until something abandoned it. The conversation id is what lets the page drop a prompt that
+        raced a switch, rather than asking one conversation's reader about another conversation's call.
         """
         frame: dict[str, Any] = {
             "type": "approval",

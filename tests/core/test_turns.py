@@ -2120,6 +2120,61 @@ async def test_stopping_a_firing_reports_nothing_as_finished(tmp_path):
     assert not any("finished" in text for text in channel.sent)
 
 
+class _RequestsToolThenHangsClient(MockAsyncModelClient):
+    """Leaves an assistant tool call unanswered, then hangs: the state a stop mid-dispatch saves."""
+
+    def __init__(self):
+        super().__init__([])
+        self.started = asyncio.Event()
+
+    async def _chat(self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, **kwargs):
+        if user_message is not None:
+            self.messages.append({"role": "user", "content": user_message})
+        self.messages.append(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"type": "function", "function": {"name": "get_web_content", "arguments": {}}, "id": "w"}
+                ],
+            }
+        )
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+async def test_a_stopped_firing_answers_the_call_it_was_making(tmp_path):
+    """A scheduled run stopped mid tool call must not save a transcript every later request is refused for."""
+    client = _RequestsToolThenHangsClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+    await asyncio.wait_for(client.started.wait(), timeout=2.0)
+    assistant.stop_task_runs("t1")
+    await asyncio.wait_for(run, timeout=2.0)
+
+    stored = assistant._store.get(conversation_id).messages
+    assert [m.get("tool_call_id") for m in stored if m.get("role") == "tool"] == ["w"]
+
+
+async def test_a_turn_that_fails_mid_dispatch_answers_the_call_it_was_making(tmp_path):
+    """Any ending saves the transcript, so any ending must leave it one a provider accepts, not only a stop."""
+    cfg = _config(tmp_path, default_confirm=["config.update_config"])
+    client = _StreamsToolRequestOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.start()
+
+    async def broken_prompt(name, arguments, *, agent=None, conversation_id=None, prompt_id=None):
+        raise RuntimeError("the channel could not show the prompt")
+
+    assistant._ui.ask_approval = broken_prompt
+    await asyncio.wait_for(
+        assistant._handle(ChannelMessage(text="go", channel="fake"), conversation_id=assistant._active_id), timeout=5
+    )
+
+    stored = assistant._store.get(assistant._active_id).messages
+    assert [m.get("tool_call_id") for m in stored if m.get("role") == "tool"] == ["x"]
+
+
 async def test_a_firings_conversation_is_listed_as_running_and_cleared_when_it_ends(tmp_path):
     """What the task panel's Stop button hangs off. The row also has to reach the sidebar at all: the
     firing used to push its conversation only once it had succeeded, so a run in flight was invisible."""

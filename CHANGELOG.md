@@ -48,11 +48,12 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
 
 ### Conversations and turns
 
-- **Stopping a turn mid tool call no longer breaks the conversation.** A stop that landed while a call
-  waited for approval, or while one ran, saved the assistant's tool call with no result after it. No
-  provider accepts that transcript, so every later message in the conversation failed (Anthropic:
-  `tool_use ids were found without tool_result blocks`). The cancelled branch in `core/turns.py` now
-  answers each pending call (`core.messages.answer_stranded_tool_calls`) before it saves. The answer
+- **A turn that ends mid tool call no longer breaks the conversation.** A stop that landed while a
+  call waited for approval, or while one ran (a scheduled run's included), or a failure during dispatch,
+  saved the assistant's tool call with no result after it. No provider accepts that transcript, so every
+  later message in the conversation failed (Anthropic: `tool_use ids were found without tool_result
+  blocks`). `TurnRunner._persist`, which every ending saves through, now answers each pending call
+  (`core.messages.answer_stranded_tool_calls`) first. The answer
   says the call may or may not have run, because a running call may have finished, and concurrent
   dispatch records no result until every call in the round returns. A conversation saved in the broken
   state before this fix is not repaired; retry from the last message that worked.

@@ -396,8 +396,8 @@ class HumanGate:
         firing.
 
         One method, three callers, because all three are the same event at different times: the switch
-        may have happened before the call reached the gate, during the review the gate ran, or while
-        the call waited behind another call's prompt for the approval slot.
+        may have happened before the call reached the gate, during the review the gate ran, or between
+        the review's card and the call being registered to wait.
         """
         await self._ui.alert(
             f"A turn you switched away from asked to run {name}. It was denied automatically, "

@@ -144,9 +144,10 @@ class Assistant:
         # Kept distinct from it because the two need opposite handling in the serve loop: one runs the
         # workflow, the other must not run a plain turn on the literal "/word ..." text.
         self._undeclared_workflow_commands: dict[str, str] = {}
-        # Tool approval and a workflow's own decision: each a single-slot request the serve loop
-        # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
-        # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
+        # Tool approval and a workflow's own decision, which the serve loop resolves with the user's
+        # reply. Each gated call waits under its own prompt id, so concurrent tool calls are all asked at
+        # once; a workflow decision is a lock-guarded single slot, so concurrent workflow turns can never
+        # clobber the slot the serve loop is about to resolve.
         self._policies_lock = threading.Lock()
         self._human = HumanGate(
             self._ui,
