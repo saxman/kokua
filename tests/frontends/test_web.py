@@ -790,6 +790,31 @@ async def test_switching_back_mid_turn_replays_the_turn_so_far():
     assert items[2]["text"] == "seen unseen"  # both halves: the one the user saw and the muted one
 
 
+async def test_a_catch_up_user_item_carries_the_turns_token():
+    """The page registers a replayed bubble by its token, so `turn_saved` can stamp the turn's controls
+    on it: the only bubble a retried turn has is this one."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping", token="t-1")
+
+    await channel.send_history([], {})
+
+    [item] = ws.frames[-1]["items"]
+    assert (item["type"], item["text"], item["token"]) == ("user", "ping", "t-1")
+
+
+async def test_a_catch_up_user_item_without_a_token_carries_none():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping")
+
+    await channel.send_history([], {})
+
+    assert "token" not in ws.frames[-1]["items"][0]
+
+
 async def test_a_muted_turns_catch_up_keeps_the_tool_output():
     """A background turn's tool frames are recorded verbatim, so the switch-in that replays them shows
     the same output the user would have seen live."""

@@ -1676,6 +1676,224 @@ async def test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_tha
     await holder
 
 
+# A 1x1 PNG, the smallest valid image, so the retry's image path runs through real files.
+_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+def _capture_submits(assistant, monkeypatch, log=None):
+    """Replace the submit with a recorder, so a retry's rebuilt message can be read without a model."""
+    submitted = [] if log is None else log
+
+    def record(msg, conversation_id, workflow=None):
+        submitted.append(("submit", msg, conversation_id, workflow))
+
+    monkeypatch.setattr(assistant, "_submit_turn", record)
+    return submitted
+
+
+async def test_retry_turn_resends_the_opening_text_and_deletes_from_that_turn(tmp_path, monkeypatch):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    assert [m["content"] for m in assistant._store.get(parent.key).messages] == ["you are kokua"]
+    [(_, msg, conversation_id, workflow)] = submitted
+    assert (msg.text, conversation_id, workflow) == ("first question", parent.key, None)
+
+
+async def test_retry_turn_resends_only_the_opening_message(tmp_path, monkeypatch):
+    """A message typed into the turn while it ran steered a run that is being thrown away."""
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)  # the turn holding the mid-turn message at index 4
+
+    assert len(assistant._store.get(parent.key).messages) == 1
+    [(_, msg, _, _)] = submitted
+    assert msg.text == "plan the trip"
+
+
+async def _assistant_with_image_turn(tmp_path):
+    from kokua import images
+
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    reference = images.save_data_url(assistant._config.images_path, _PNG_DATA_URL)
+    parent.messages[1] = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "what is this"},
+            {"type": "image_url", "image_url": {"url": reference}},
+        ],
+    }
+    assistant._store.save(parent)
+    return assistant, parent, images.reference_to_path(assistant._config.images_path, reference)
+
+
+async def test_retry_turn_carries_the_turns_images_as_file_paths(tmp_path, monkeypatch):
+    assistant, parent, path = await _assistant_with_image_turn(tmp_path)
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, _)] = submitted
+    assert (msg.text, msg.images) == ("what is this", [str(path)])
+
+
+async def test_retry_turn_drops_an_image_whose_file_is_gone(tmp_path, monkeypatch):
+    assistant, parent, path = await _assistant_with_image_turn(tmp_path)
+    path.unlink()
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, _)] = submitted
+    assert msg.text == "what is this" and not msg.images
+
+
+async def test_retry_turn_reuses_a_requested_effort(tmp_path, monkeypatch):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, thinking={"1": "high"})
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, _)] = submitted
+    assert msg.metadata["thinking"] == "high"
+
+
+async def test_retry_turn_does_not_pass_a_boolean_effort(tmp_path, monkeypatch):
+    """A per-turn request off a message is always a level, so a boolean was declared, not requested."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, thinking={"1": False})
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, _)] = submitted
+    assert "thinking" not in msg.metadata
+
+
+async def test_retry_turn_reruns_the_recorded_workflow(tmp_path, monkeypatch):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, workflow={"1": "plan"})
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, workflow)] = submitted
+    assert workflow is assistant._workflows["plan"]
+    assert msg.text == "first question"
+
+
+async def test_retry_turn_refuses_a_workflow_no_longer_offered_and_deletes_nothing(tmp_path, monkeypatch):
+    """Rerunning it as a plain turn would change what was asked."""
+    from kokua.core.assistant import WorkflowUnavailable
+
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, workflow={"1": "plan"})
+    assistant._workflows = {}
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    with pytest.raises(WorkflowUnavailable) as raised:
+        await assistant.retry_turn(parent.key, 1)
+
+    assert raised.value.command == "plan"
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES
+    assert submitted == []
+
+
+async def test_retry_turn_refuses_an_index_that_is_not_a_user_turn(tmp_path, monkeypatch):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    with pytest.raises(TurnNotFound):
+        await assistant.retry_turn(parent.key, 2)
+
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES
+    assert submitted == []
+
+
+async def test_retry_turn_refuses_a_conversation_the_store_does_not_have(tmp_path, monkeypatch):
+    assistant, _ = await _assistant_with_branchable_parent(tmp_path)
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    with pytest.raises(ConversationNotFound):
+        await assistant.retry_turn("no-such-conversation", 1)
+
+    assert submitted == []
+
+
+async def test_retry_turn_refuses_while_that_conversation_has_a_turn_running(tmp_path):
+    import time
+
+    from aimu.aio import RunHandle
+
+    from kokua.core.turn_registry import TurnInfo
+
+    client = BlockingModelClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    conversation_id = assistant._active_id
+    handle = RunHandle.start(
+        assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=conversation_id)
+    )
+    assistant._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview="a long job"))
+    await asyncio.wait_for(client.started.wait(), timeout=5)
+
+    try:
+        with pytest.raises(TurnInFlight):
+            await asyncio.wait_for(assistant.retry_turn(conversation_id, 1), timeout=5)
+    finally:
+        client.release.set()
+        await handle.task
+
+    assert any(m.get("content") == "a long job" for m in assistant._store.get(conversation_id).messages)
+
+
+class _CatchUpRecordingChannel(FakeChannel):
+    def __init__(self):
+        super().__init__()
+        self.calls: list[tuple] = []
+
+    def begin_catch_up(self, conversation_id, text, image_paths=None, *, token=None):
+        self.calls.append(("begin_catch_up", conversation_id, text, image_paths, token))
+
+    def end_catch_up(self, conversation_id):
+        pass
+
+
+async def test_retry_turn_opens_the_catch_up_record_with_the_token_before_submitting(tmp_path, monkeypatch):
+    """The page draws a bubble only for a message it sent, so the history repaint a retry triggers has
+    to find the resent message in the catch-up record, which may be built before the turn's task runs."""
+    channel = _CatchUpRecordingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    parent = assistant._session
+    parent.messages = [dict(message) for message in BRANCH_MESSAGES]
+    assistant._store.save(parent)
+    _capture_submits(assistant, monkeypatch, log=channel.calls)
+
+    await assistant.retry_turn(parent.key, 1, token="t-1")
+
+    assert [call[0] for call in channel.calls] == ["begin_catch_up", "submit"]
+    assert channel.calls[0] == ("begin_catch_up", parent.key, "first question", [], "t-1")
+    assert channel.calls[1][1].metadata["token"] == "t-1"
+
+
+async def test_retry_turn_runs_the_resent_turn(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["again"]))
+    parent = assistant._session
+    parent.messages = [dict(message) for message in BRANCH_MESSAGES]
+    assistant._store.save(parent)
+
+    await assistant.retry_turn(parent.key, 1)
+    info = assistant._tracker.get(parent.key)
+    assert info is not None
+    await asyncio.wait_for(info.handle.task, timeout=5)
+
+    messages = assistant._store.get(parent.key).messages
+    assert [m["content"] for m in messages if m["role"] == "user"] == ["first question"]
+    assert messages[-1]["content"] == "again"
+
+
 async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
     """`resolve` and `matching_ids` answer from keys alone.
 

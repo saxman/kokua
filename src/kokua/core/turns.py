@@ -640,7 +640,7 @@ class TurnRunner:
         agent.events = record_event
         # Record this turn's output for a user who switches into its conversation before it finishes;
         # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
-        self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
+        self._ui.begin_catch_up(conversation_id, msg.text, msg.images, token=bubble_token)
         succeeded = False
         # Deliberately belt-and-braces: the `CancelledError` branch below `return`s before reaching the
         # re-submit block at the end of this method, so `undelivered and not stopped` is never evaluated

@@ -463,6 +463,20 @@ class ConversationBook:
         branchable = turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is not None
         return branchable, turn_numbers(session.messages, session.metadata).get(user_index)
 
+    def opening_message(self, conversation_id: str, user_index: int) -> tuple[dict, dict]:
+        """The user message that opens the turn at ``user_index``, and its conversation's metadata.
+
+        Copies, since a retry reads them to rebuild the request and then truncates the very session
+        they came from. Validity is asked through the same ``turn_end`` a branch and a truncation use,
+        so "there is a turn here" means one thing to every turn control.
+        """
+        if not self.exists(conversation_id):
+            raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
+        session = self._store.get(conversation_id)
+        if turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is None:
+            raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
+        return copy.deepcopy(session.messages[user_index]), copy.deepcopy(session.metadata)
+
     def branch(self, conversation_id: str, user_index: int) -> str:
         """Fork a conversation at one of its turns into a new one, switch to it, and return its id.
 

@@ -26,6 +26,7 @@ from aimu.aio import Channel, ModelConnectionError, ModelRefusalError, RunHandle
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session, TinyDBSessionStore
 
+from kokua import images
 from kokua.config.settings_sources import build_settings_table
 from kokua.core.agent_registry import AgentRegistry
 from kokua.channels.ui import ChannelUI
@@ -45,6 +46,7 @@ from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.messages import TITLE_MAX, first_user_text
+from kokua.core.transcripts import message_text
 from kokua.core.messaging import EVERYONE, USER
 from kokua.core.subagents import SubagentReporter
 from kokua.core import titles
@@ -61,7 +63,20 @@ logger = logging.getLogger(__name__)
 # Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build),
 # `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU), and
 # `assistant.ModelRefusalError` (the model was reached and declined, also from AIMU).
-__all__ = ["Assistant", "ModelClientError", "ModelConnectionError", "ModelRefusalError"]
+__all__ = ["Assistant", "ModelClientError", "ModelConnectionError", "ModelRefusalError", "WorkflowUnavailable"]
+
+
+class WorkflowUnavailable(Exception):
+    """A retry was refused because the turn ran through a workflow this assistant no longer offers.
+
+    Raised before anything is deleted. Rerunning the turn as a plain one would quietly change what was
+    asked, and the workflow can be gone for an ordinary reason: the entry agent's config stopped naming
+    the toolset that carries it. ``command`` is the word, so a front end can name it.
+    """
+
+    def __init__(self, command: str):
+        super().__init__(f"The /{command} workflow is not offered by this assistant.")
+        self.command = command
 
 
 def _slash_command(raw: str) -> tuple[str, str]:
@@ -573,6 +588,62 @@ class Assistant:
             raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
         return await self._book.truncate(conversation_id, message_index, turn_running=self.turn_running)
 
+    async def retry_turn(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
+        """Delete a turn and everything after it, then send its opening message again as a new turn.
+
+        For a turn whose answer was built on a result that failed for reasons outside the request (an
+        MCP server or a local service that was down): the whole turn reacted to the bad result, so it is
+        rerun rather than patched. The request is rebuilt here from the store rather than by the front
+        end, because the page keeps neither a turn's images nor its workflow once it has drawn it.
+
+        Everything is read before anything is cut, so every refusal lands with nothing deleted:
+        ``TurnInFlight`` and ``TurnNotFound`` / ``ConversationNotFound`` as ``truncate_conversation``
+        raises them, and ``WorkflowUnavailable`` for a turn whose recorded workflow this assistant no
+        longer offers, since rerunning it as a plain turn would change what was asked. A turn stored
+        before workflows were recorded has no record and reruns as a plain turn. The window between the
+        read and the cut is covered by the truncation's own re-validation inside its hold.
+
+        What is resent is the opening message alone: messages typed into the turn while it ran steered
+        a run that is being discarded. Its images are the stored ``/images/`` references resolved back to
+        files, which is what a typed turn carries; one whose file is gone is dropped rather than failing
+        the retry. Its reasoning effort is reused only when the record is a level, the form a per-turn
+        request takes (``config.file.thinking_request``); a boolean was the configured effort, so the
+        configured effort is left to apply again.
+
+        The catch-up record is opened here, before the submit, as well as by the turn itself. The front
+        end repaints from it right after this returns, possibly before the turn's task has first run,
+        and it is the only route a turn the server started has to put its user bubble on the page;
+        ``token`` rides it so ``turn_saved`` can stamp the turn's controls on that bubble.
+        """
+        if self.turn_running(conversation_id):
+            raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
+        message, metadata = self._book.opening_message(conversation_id, message_index)
+        key = str(message_index)
+        command = metadata.get("workflow", {}).get(key)
+        workflow = None
+        if command is not None:
+            workflow = self._workflows.get(command)
+            if workflow is None:
+                raise WorkflowUnavailable(command)
+        content = message.get("content")
+        text = message_text(content)
+        # Only the attached blocks: `transcripts.image_refs_of` also finds a reference mentioned in the
+        # text, which the user typed rather than attached.
+        image_paths = []
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                path = images.reference_to_path(self._config.images_path, block.get("image_url", {}).get("url", ""))
+                if path is not None:
+                    image_paths.append(str(path))
+        request: dict = {} if token is None else {"token": token}
+        recorded_effort = metadata.get("thinking", {}).get(key)
+        if workflow is None and isinstance(recorded_effort, str):
+            request["thinking"] = recorded_effort
+        msg = ChannelMessage(text=text, images=image_paths or None, metadata=request)
+        await self.truncate_conversation(conversation_id, message_index)
+        self._ui.begin_catch_up(conversation_id, text, image_paths, token=token)
+        self._submit_turn(msg, conversation_id, workflow)
+
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""
         if conversation_id == self._active_id:
@@ -905,21 +976,28 @@ class Assistant:
                     # follow-up turn carrying the same token (see `ChannelUI.message_taken`).
                     await self._ui.message_taken(msg.text or "", token=(msg.metadata or {}).get("token"))
                     continue
-                # Start the turn as a background task so the loop keeps reading and a `/stop` can
-                # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
-                # on this conversation can't interleave); different conversations' turns don't block
-                # each other. The target conversation is captured now, at submit time, so the turn
-                # persists to it even if the user switches _active_id away before the turn finishes.
-                conversation_id = self._active_id
-                tid = self._turn_seq
-                self._turn_seq += 1
-                preview = (msg.text or "").strip()[:120]
-                logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
-                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, workflow=workflow, tid=tid))
-                self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
-                handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
+                # The target conversation is captured now, at submit time, so the turn persists to it
+                # even if the user switches _active_id away before the turn finishes.
+                self._submit_turn(msg, self._active_id, workflow)
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
+
+    def _submit_turn(self, msg: ChannelMessage, conversation_id: str, workflow=None) -> None:
+        """Start a reactive turn as a background task and track it.
+
+        Background, so the serve loop keeps reading and a `/stop` can arrive mid-turn. The gate still
+        serializes same-conversation turns (a proactive turn on this conversation can't interleave);
+        different conversations' turns don't block each other. Tracked, so `/stop`, the page's spinner,
+        and a destructive edit's refusal all see it. The one route a reactive turn starts by, shared by a
+        typed message and a retried one, so the two cannot differ in how they are tracked or stopped.
+        """
+        tid = self._turn_seq
+        self._turn_seq += 1
+        preview = (msg.text or "").strip()[:120]
+        logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
+        handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, workflow=workflow, tid=tid))
+        self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
+        handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
 
     def _offer_message(self, msg: ChannelMessage, conversation_id: str) -> bool:
         """Hand this message to a turn already running on ``conversation_id``, if one will take it.

@@ -108,8 +108,13 @@ class RichChannelDouble(BareChannel):
         self.calls.append(("stream_activity", (show_answer,)))
         return "".join(parts)
 
-    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
-        self.calls.append(("begin_catch_up", (conversation_id, text, image_paths)))
+    def begin_catch_up(
+        self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None, *, token: Optional[str] = None
+    ) -> None:
+        recorded = (
+            (conversation_id, text, image_paths) if token is None else (conversation_id, text, image_paths, token)
+        )
+        self.calls.append(("begin_catch_up", recorded))
 
     def end_catch_up(self, conversation_id: str) -> None:
         self.calls.append(("end_catch_up", (conversation_id,)))
@@ -306,6 +311,30 @@ def test_mirrored_attributes_reach_a_rich_channel():
     ui.end_catch_up("c1")
     assert channel.active_conversation_id == "c1"
     assert channel.calls == [("begin_catch_up", ("c1", "hi", ["/tmp/a.png"])), ("end_catch_up", ("c1",))]
+
+
+def test_a_catch_up_token_reaches_a_rich_channel():
+    channel = RichChannelDouble()
+    ui = ChannelUI(channel)
+    ui.begin_catch_up("c1", "hi", None, token="t-1")
+    assert channel.calls == [("begin_catch_up", ("c1", "hi", None, "t-1"))]
+
+
+def test_a_tokenless_catch_up_still_reaches_a_channel_that_predates_the_token():
+    """The token is passed only when there is one, so a channel written before it existed keeps
+    working for every turn no page is waiting on."""
+
+    class OlderChannel(BareChannel):
+        def __init__(self):
+            super().__init__()
+            self.begun = []
+
+        def begin_catch_up(self, conversation_id, text, image_paths=None):
+            self.begun.append((conversation_id, text, image_paths))
+
+    channel = OlderChannel()
+    ChannelUI(channel).begin_catch_up("c1", "hi", None)
+    assert channel.begun == [("c1", "hi", None)]
 
 
 def test_catch_up_bookkeeping_is_a_no_op_on_a_bare_channel():
