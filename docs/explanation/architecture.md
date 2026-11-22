@@ -1037,6 +1037,38 @@ the window between the check and the gate. It is injected rather than looked up 
 the gate while the assistant owns the turn tracker, and `core`'s conversation layer must not reach upward
 for it.
 
+### Retrying a turn
+
+`Assistant.retry_turn(conversation_id, message_index)` is a truncation followed by a resubmit: it deletes
+the named turn and everything after it, then sends the turn's opening message again as a new turn. It
+exists for a turn whose answer was built on a tool result that failed for a reason outside the request
+(an MCP server or a local service that was down). Removing just the bad call was considered and
+rejected: every per-turn map is keyed by message index, so a cut in the middle of a transcript would need
+them remapped rather than filtered, and the turn's own reasoning and answer would still refer to the
+result that was gone. The whole turn reacted to it, so the whole turn is rerun.
+
+The message is **rebuilt on the server**, from `ConversationBook.opening_message`, because the page keeps
+neither a turn's images nor its workflow once it has drawn it, and has never held either for a turn
+replayed from history. Text comes from the stored content; images from its `image_url` blocks, each
+`/images/` reference resolved back to the file path a typed turn carries (a missing file is dropped); the
+workflow from `metadata["workflow"]`, which `record_turn_provenance` writes for every workflow turn
+because a workflow turn stores its bare task and `trace` exists only in verbose planning; and the
+reasoning effort from `metadata["thinking"]` when it is a level, the form a per-turn request takes.
+
+**Everything is read before anything is cut**, so every refusal leaves the conversation as it was: the
+truncation's own `TurnInFlight`, `TurnNotFound`, and `ConversationNotFound`, plus `WorkflowUnavailable`
+for a recorded workflow the entry agent no longer offers, since rerunning it as a plain turn would
+change what was asked. The resubmit goes through `Assistant._submit_turn`, the same method the serve
+loop starts a typed turn with, so a retried turn is tracked, stoppable, and backgroundable the same way.
+
+The page draws a user bubble only for a message it sent itself, so a turn the server starts would stream
+with nothing above it. The bubble comes from the **catch-up record** a switch-in replays: `retry_turn`
+opens it before submitting (the front end's repaint can be computed before the turn's task first runs),
+and its user item carries the turn's bubble token. The page registers a replayed bubble that carries a
+token the way it registers one it sent, so the turn's `turn_saved` stamps its controls. The same token
+now rides the record of every tokened turn, so a bubble seen after switching into a running turn gains
+its controls on save too, where it used to stay bare until the next repaint.
+
 ### Duplicating a conversation
 
 `ConversationBook.duplicate(conversation_id)` copies a whole conversation into a new one. It is the

@@ -26,7 +26,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from kokua import images, payloads
-from kokua.core.assistant import Assistant, ModelClientError
+from kokua.core.assistant import Assistant, ModelClientError, WorkflowUnavailable
 from kokua.core.conversations import ID_PREFIX_MIN, ConversationNotFound, TurnInFlight, TurnNotFound
 from kokua.core.messages import derive_title
 from kokua.channels.web import WebChannel
@@ -90,6 +90,7 @@ _CONTROL_TYPES = (
     "delete",
     "branch",
     "truncate",
+    "retry",
     "duplicate",
     "rename",
     "retitle",
@@ -106,7 +107,7 @@ APPROVAL_REPLY = "approval_reply"
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"duplicate"/
+    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"retry"/"duplicate"/
     "rename"/"retitle"/"settings"/"task"/"export"/...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop", a
@@ -664,6 +665,40 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                                 "That turn isn't in the saved conversation, so there was nothing to delete."
                             )
                             continue
+                    elif control["type"] == "retry":
+                        try:
+                            index = int(control.get("message_index", -1))
+                        except TypeError, ValueError:
+                            await channel.send("Sorry, that turn could not be read.")
+                            continue
+                        token = control.get("token")
+                        try:
+                            await assistant.retry_turn(
+                                str(control.get("id", "")), index, token=token if isinstance(token, str) else None
+                            )
+                        except TurnInFlight:
+                            await channel.send(
+                                "A turn is still running in that conversation, so nothing was retried. "
+                                "Stop the turn first, then try again."
+                            )
+                            continue
+                        except ConversationNotFound:
+                            await channel.send("That conversation is gone, so there was nothing to retry.")
+                            continue
+                        except TurnNotFound:
+                            await channel.send(
+                                "That turn isn't in the saved conversation, so there was nothing to retry."
+                            )
+                            continue
+                        except WorkflowUnavailable as error:
+                            await channel.send(
+                                f"That turn ran through /{error.command}, which this assistant no longer offers, "
+                                "so nothing was retried."
+                            )
+                            continue
+                        # Falls through to the repaint below, which is what puts the resent message on the
+                        # page: the catch-up record `retry_turn` opened carries its bubble, and the turn's
+                        # own frames stream in after it.
                     await _sync_view(channel, assistant)
 
             async def read_socket() -> None:

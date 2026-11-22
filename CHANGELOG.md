@@ -352,6 +352,20 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
   turn empties the conversation and returns it to "New conversation" rather than leaving it named after
   a turn that is gone. A conversation with a turn still running is refused rather than queued behind
   it, and says so. There is no undo, and no terminal command or agent tool for it (see [#13](https://github.com/saxman/kokua/issues/13) and [#14](https://github.com/saxman/kokua/issues/14)).
+- **Retry a turn.** Every user turn in the web UI also carries a retry control, between branch and
+  delete-from-here: it deletes that turn and everything after it, then sends the turn's opening message
+  again as a fresh turn. It is for a turn whose answer was built on a tool result that failed for a
+  reason outside the request, such as an MCP server or a local service that was down: the whole turn
+  reacted to the bad result, so it is rerun rather than patched. The server rebuilds the message from
+  what it stored (its text, attached images, the `/plan` workflow it ran through, and a reasoning
+  effort chosen for that turn), since the page keeps none of that once it has drawn a turn. Only the
+  opening message is resent; anything typed into the turn while it ran is deleted with it. Every
+  refusal lands before anything is deleted: a running turn, a turn that is no longer stored, and a
+  turn whose workflow the assistant no longer offers, which would otherwise rerun as a plain turn. To
+  make that last one possible each workflow turn now records its command word under
+  `metadata["workflow"]`; a turn stored before that reruns as a plain turn. The resent turn's bubble
+  comes from the record a switch-in replays, which now carries the turn's bubble token, so a bubble
+  seen after switching into a running turn also gains its controls once the turn is saved.
 
 ### Front ends
 

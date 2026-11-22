@@ -2480,6 +2480,49 @@ def test_the_truncate_control_survives_a_reload(page, live_server):
     assert after == before
 
 
+def test_the_retry_control_survives_a_reload(page, live_server):
+    """Stamped from the same `message_index` as its two siblings, live and on replay."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    expect(page.locator(".bubble.user .bubble-meta .bubble-retry")).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble.user[data-retry-index]")
+    before = [stamped.nth(i).get_attribute("data-retry-index") for i in range(2)]
+    assert before[0] is not None and before[1] is not None and before[0] != before[1]
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator(".bubble.user .bubble-meta .bubble-retry")).to_have_count(2, timeout=10_000)
+    after = [stamped.nth(i).get_attribute("data-retry-index") for i in range(2)]
+    assert after == before
+
+
+def test_retrying_a_turn_redraws_it_and_drops_the_turns_after_it(page, live_server):
+    """The first of two turns is retried, so a page that merely re-sent the text at the end would leave
+    two user bubbles. The resent bubble comes from the server's catch-up record, and it has to regain
+    its controls once the turn is saved, or it could not be retried again."""
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user .bubble-meta .bubble-retry")).to_have_count(2, timeout=10_000)
+
+    page.locator(".bubble.user .bubble-meta .bubble-retry").nth(0).click()
+
+    expect(page.locator(".bubble.user")).to_have_count(1, timeout=10_000)
+    expect(page.locator(".bubble.user")).to_contain_text("first")
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(1, timeout=10_000)
+    expect(page.locator(".bubble.user .bubble-meta .bubble-retry")).to_have_count(1, timeout=10_000)
+
+
 def test_declining_the_confirmation_deletes_nothing(page, live_server):
     """The confirmation is the only thing standing in front of an irreversible delete."""
     page.on("dialog", lambda dialog: dialog.dismiss())

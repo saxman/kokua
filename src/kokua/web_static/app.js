@@ -1169,11 +1169,40 @@ function addTruncateControl(el, messageIndex, conversationId) {
   });
   bubbleMetaRow(el).appendChild(btn);
 }
-// Both of a turn's controls, on the bubble that opens it. One helper rather than two calls at each
-// site so the pair cannot drift apart: they act on the same turn and read the same index, and the
+// A turn's retry control, appended to the bubble that opens the turn: delete the turn and everything
+// after it, then send its opening message again. `messageIndex` and `conversationId` are read exactly
+// as `addTruncateControl` reads them. Only the turn is named, not its words: the server rebuilds the
+// message from what it stored, because this page keeps neither a turn's images nor whether it ran
+// through /plan once it has drawn it, and has never held either for a turn replayed from history.
+//
+// The token is minted as the composer mints one, so the bubble the server's repaint draws for the
+// resent message can be claimed by its `turn_saved` and given these controls again.
+function addRetryControl(el, messageIndex, conversationId) {
+  if (!el || el.dataset.retryIndex !== undefined || !Number.isInteger(messageIndex) || messageIndex < 0) return;
+  if (!conversationId) return;
+  el.dataset.retryIndex = String(messageIndex);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "bubble-retry";
+  // U+21BB, an open circle arrow turning clockwise. Escaped for the reason the branch glyph is: the
+  // shape is font-dependent, so the codepoint is the durable statement of which glyph was asked for.
+  btn.textContent = "↻";
+  btn.title = "Retry this turn, deleting it and everything after it";
+  btn.setAttribute("aria-label", "Retry this turn, deleting it and everything after it");
+  btn.addEventListener("click", () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (!confirm("Retry this turn? It and everything after it will be deleted, and the message sent again.")) return;
+    const token = `${bubbleEpoch}-${++bubbleTokens}`;
+    ws.send(JSON.stringify({ type: "retry", id: conversationId, message_index: messageIndex, token }));
+  });
+  bubbleMetaRow(el).appendChild(btn);
+}
+// All three of a turn's controls, on the bubble that opens it. One helper rather than three calls at
+// each site so they cannot drift apart: they act on the same turn and read the same index, and the
 // order they are appended in is the order they appear, constructive before destructive.
 function stampTurnControls(bubble, messageIndex, conversationId) {
   addBranchControl(bubble, messageIndex, conversationId);
+  addRetryControl(bubble, messageIndex, conversationId);
   addTruncateControl(bubble, messageIndex, conversationId);
 }
 // Caption a foldable block on its header line, so the time shows whether collapsed or expanded.
@@ -2445,6 +2474,13 @@ function handleFrame(event) {
     // end, and a turn drawing several bubbles (a message with text and images) stamps only the first.
     let replayTurnIndex = -1;
     let replayTurnStamped = false;
+    // An in-flight turn's opening bubble, replayed from its catch-up record, carries the token the turn
+    // was sent with. Registered like a bubble this page sent, so the turn's `turn_saved` stamps its
+    // controls. For a retried turn this replayed bubble is the only one there is: the server started
+    // the turn, so the page never drew one of its own.
+    const registerReplayedBubble = (bubble, item) => {
+      if (typeof item.token === "string") pendingBubbles.set(item.token, bubble);
+    };
     const stampTurnStart = (bubble) => {
       if (replayTurnStamped) return;
       stampTurnControls(bubble, replayTurnIndex, replayConversationId);
@@ -2459,6 +2495,7 @@ function handleFrame(event) {
         const bubble = addBubble("user", item.text, item.ts);
         addTurnBadge(bubble, item.turn);
         stampTurnStart(bubble);
+        registerReplayedBubble(bubble, item);
       }
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
       else if (item.type === "partial" && !isBlank(item.text)) {
@@ -2473,6 +2510,7 @@ function handleFrame(event) {
         if (item.from !== "assistant") {
           addTurnBadge(bubble, item.turn);
           stampTurnStart(bubble);
+          registerReplayedBubble(bubble, item);
         }
       }
       else if (item.type === "artifact") renderArtifact(item, item.ts);
