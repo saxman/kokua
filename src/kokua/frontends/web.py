@@ -26,7 +26,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from kokua import images, payloads
-from kokua.core.assistant import Assistant, ModelClientError, WorkflowUnavailable
+from kokua.core.assistant import Assistant, ImagesUnavailable, ModelClientError, WorkflowUnavailable
 from kokua.core.conversations import ID_PREFIX_MIN, ConversationNotFound, TurnInFlight, TurnNotFound
 from kokua.core.messages import derive_title
 from kokua.channels.web import WebChannel
@@ -696,6 +696,18 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                                 "so nothing was retried."
                             )
                             continue
+                        except ImagesUnavailable:
+                            await channel.send("That turn's images are no longer on disk, so nothing was retried.")
+                            continue
+                        except ModelClientError:
+                            # The one refusal that arrives after the cut, so it says the turn is gone, and
+                            # falls through to the repaint so the page stops showing it.
+                            logger.warning("Could not build agent for a retried turn", exc_info=True)
+                            await channel.send(
+                                "That turn was deleted, but it could not be sent again because the model client "
+                                "could not be built. Check the model in your config.toml, then send the message "
+                                "again."
+                            )
                         # Falls through to the repaint below, which is what puts the resent message on the
                         # page: the catch-up record `retry_turn` opened carries its bubble, and the turn's
                         # own frames stream in after it.

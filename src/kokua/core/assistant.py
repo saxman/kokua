@@ -63,7 +63,14 @@ logger = logging.getLogger(__name__)
 # Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build),
 # `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU), and
 # `assistant.ModelRefusalError` (the model was reached and declined, also from AIMU).
-__all__ = ["Assistant", "ModelClientError", "ModelConnectionError", "ModelRefusalError", "WorkflowUnavailable"]
+__all__ = [
+    "Assistant",
+    "ImagesUnavailable",
+    "ModelClientError",
+    "ModelConnectionError",
+    "ModelRefusalError",
+    "WorkflowUnavailable",
+]
 
 
 class WorkflowUnavailable(Exception):
@@ -77,6 +84,17 @@ class WorkflowUnavailable(Exception):
     def __init__(self, command: str):
         super().__init__(f"The /{command} workflow is not offered by this assistant.")
         self.command = command
+
+
+class ImagesUnavailable(Exception):
+    """A retry was refused because the turn was images alone and none of their files survive.
+
+    Raised before anything is deleted: with no text and no image left there is nothing to send, and an
+    empty user message is one most providers reject, after the turn it replaced is already gone.
+    """
+
+    def __init__(self):
+        super().__init__("None of this turn's images are still on disk.")
 
 
 def _slash_command(raw: str) -> tuple[str, str]:
@@ -599,16 +617,25 @@ class Assistant:
         Everything is read before anything is cut, so every refusal lands with nothing deleted:
         ``TurnInFlight`` and ``TurnNotFound`` / ``ConversationNotFound`` as ``truncate_conversation``
         raises them, and ``WorkflowUnavailable`` for a turn whose recorded workflow this assistant no
-        longer offers, since rerunning it as a plain turn would change what was asked. A turn stored
-        before workflows were recorded has no record and reruns as a plain turn. The window between the
-        read and the cut is covered by the truncation's own re-validation inside its hold.
+        longer offers, since rerunning it as a plain turn would change what was asked, and
+        ``ImagesUnavailable`` for an image-only turn none of whose files survive, which would leave
+        nothing to send. A turn stored before workflows were recorded has no record and reruns as a plain
+        turn. The window between the read and the cut is covered by the truncation's own re-validation
+        inside its hold.
 
         What is resent is the opening message alone: messages typed into the turn while it ran steered
         a run that is being discarded. Its images are the stored ``/images/`` references resolved back to
         files, which is what a typed turn carries; one whose file is gone is dropped rather than failing
-        the retry. Its reasoning effort is reused only when the record is a level, the form a per-turn
-        request takes (``config.file.thinking_request``); a boolean was the configured effort, so the
-        configured effort is left to apply again.
+        the retry. Its reasoning effort is reused as recorded, turned back into the form a request takes
+        (``config.file.thinking_request``): a level as itself, and ``False`` as ``"off"``, which is how
+        the composer's "Think: off" is recorded. ``True`` is left out, because no request spells it: it
+        was the configured effort, which applies again on its own.
+
+        The agent is rebuilt here, after the cut dropped it, rather than left to the turn. A build that
+        fails inside the turn's task fails before the turn opens its own catch-up record or reports
+        anything, so the record opened below would outlive it, showing a bubble the store does not hold,
+        and the user would see the turn deleted and nothing sent. Built here, the failure
+        (``ModelClientError``) reaches the caller to report instead.
 
         The catch-up record is opened here, before the submit, as well as by the turn itself. The front
         end repaints from it right after this returns, possibly before the turn's task has first run,
@@ -635,12 +662,17 @@ class Assistant:
                 path = images.reference_to_path(self._config.images_path, block.get("image_url", {}).get("url", ""))
                 if path is not None:
                     image_paths.append(str(path))
+        if not text.strip() and not image_paths:
+            raise ImagesUnavailable()
         request: dict = {} if token is None else {"token": token}
         recorded_effort = metadata.get("thinking", {}).get(key)
         if workflow is None and isinstance(recorded_effort, str):
             request["thinking"] = recorded_effort
+        elif workflow is None and recorded_effort is False:
+            request["thinking"] = "off"  # the word the composer and `/think` send, which reads back as False
         msg = ChannelMessage(text=text, images=image_paths or None, metadata=request)
         await self.truncate_conversation(conversation_id, message_index)
+        self._book.agent_for(conversation_id)
         self._ui.begin_catch_up(conversation_id, text, image_paths, token=token)
         self._submit_turn(msg, conversation_id, workflow)
 
@@ -1010,7 +1042,9 @@ class Assistant:
 
         The ``bus is None`` check is load-bearing rather than defensive. A burst the channel
         delivers in one loop step adds both turns' tracker entries before either turn's body runs,
-        so a live entry whose bus has not been published yet is reachable from here.
+        so a live entry whose bus has not been published yet is reachable from here. So does a
+        message typed just after a retry, whose turn ``retry_turn`` submits from a front end's control
+        task rather than from this loop.
         """
         if msg.images or not (msg.text or "").strip():
             return False

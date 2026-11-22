@@ -1764,15 +1764,68 @@ async def test_retry_turn_reuses_a_requested_effort(tmp_path, monkeypatch):
     assert msg.metadata["thinking"] == "high"
 
 
-async def test_retry_turn_does_not_pass_a_boolean_effort(tmp_path, monkeypatch):
-    """A per-turn request off a message is always a level, so a boolean was declared, not requested."""
+async def test_retry_turn_reuses_reasoning_off(tmp_path, monkeypatch):
+    """The composer's "Think: off" is recorded as False, so a retry has to send it back as "off"."""
     assistant, parent = await _assistant_with_branchable_parent(tmp_path, thinking={"1": False})
     submitted = _capture_submits(assistant, monkeypatch)
 
     await assistant.retry_turn(parent.key, 1)
 
     [(_, msg, _, _)] = submitted
+    assert msg.metadata["thinking"] == "off"
+
+
+async def test_retry_turn_does_not_pass_reasoning_on(tmp_path, monkeypatch):
+    """True never comes from a request (no level spells it), so it was the configured effort."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, thinking={"1": True})
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    await assistant.retry_turn(parent.key, 1)
+
+    [(_, msg, _, _)] = submitted
     assert "thinking" not in msg.metadata
+
+
+async def test_retry_turn_refuses_an_image_only_turn_whose_images_are_gone(tmp_path, monkeypatch):
+    """Nothing would be left to send, and the turn would already be deleted."""
+    from kokua.core.assistant import ImagesUnavailable
+
+    assistant, parent, path = await _assistant_with_image_turn(tmp_path)
+    parent.messages[1]["content"] = [parent.messages[1]["content"][1]]  # the image block alone
+    assistant._store.save(parent)
+    path.unlink()
+    before = assistant._store.get(parent.key).messages
+    submitted = _capture_submits(assistant, monkeypatch)
+
+    with pytest.raises(ImagesUnavailable):
+        await assistant.retry_turn(parent.key, 1)
+
+    assert assistant._store.get(parent.key).messages == before
+    assert submitted == []
+
+
+async def test_retry_turn_opens_nothing_when_the_agent_cannot_be_rebuilt(tmp_path, monkeypatch):
+    """The truncation drops the agent, so the retried turn rebuilds it. A build that fails inside the
+    turn's task would leave the catch-up record open with a bubble the store does not hold, and say
+    nothing; built here, the failure reaches the caller instead."""
+    from kokua.core.build import ModelClientError
+
+    channel = _CatchUpRecordingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    parent = assistant._session
+    parent.messages = [dict(message) for message in BRANCH_MESSAGES]
+    assistant._store.save(parent)
+    _capture_submits(assistant, monkeypatch, log=channel.calls)
+
+    def fail(conversation_id):
+        raise ModelClientError("no model")
+
+    monkeypatch.setattr(assistant._book, "agent_for", fail)
+
+    with pytest.raises(ModelClientError):
+        await assistant.retry_turn(parent.key, 1, token="t-1")
+
+    assert channel.calls == []
 
 
 async def test_retry_turn_reruns_the_recorded_workflow(tmp_path, monkeypatch):

@@ -1053,12 +1053,17 @@ replayed from history. Text comes from the stored content; images from its `imag
 `/images/` reference resolved back to the file path a typed turn carries (a missing file is dropped); the
 workflow from `metadata["workflow"]`, which `record_turn_provenance` writes for every workflow turn
 because a workflow turn stores its bare task and `trace` exists only in verbose planning; and the
-reasoning effort from `metadata["thinking"]` when it is a level, the form a per-turn request takes.
+reasoning effort from `metadata["thinking"]`, turned back into the form a request takes: a level as
+itself, `False` as `"off"` (how the composer's "Think: off" is recorded), and `True` left out, since no
+request spells it.
 
 **Everything is read before anything is cut**, so every refusal leaves the conversation as it was: the
 truncation's own `TurnInFlight`, `TurnNotFound`, and `ConversationNotFound`, plus `WorkflowUnavailable`
 for a recorded workflow the entry agent no longer offers, since rerunning it as a plain turn would
-change what was asked. The resubmit goes through `Assistant._submit_turn`, the same method the serve
+change what was asked, and `ImagesUnavailable` for an image-only turn none of whose files survive. The
+one failure that can only arrive after the cut is rebuilding the conversation's agent, which the cut
+dropped; `retry_turn` does that itself, before opening anything, so a `ModelClientError` reaches the
+front end to report rather than failing silently inside the turn's task. The resubmit goes through `Assistant._submit_turn`, the same method the serve
 loop starts a typed turn with, so a retried turn is tracked, stoppable, and backgroundable the same way.
 
 The page draws a user bubble only for a message it sent itself, so a turn the server starts would stream

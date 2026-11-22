@@ -113,10 +113,15 @@ Every rule here was learned from a bug. Read them before changing anything in th
    a firing queued behind a turn already running on this conversation would otherwise overwrite that
    turn's entry, which is the one ``/stop`` reaches. A queued firing is therefore not yet stoppable. The
    converse costs the same and only on a channel with no conversation list, where a firing shares the
-   viewed conversation: the serve loop tracks a reactive turn when it is *submitted* rather than when it
-   takes the gate, so a message sent during a firing replaces the firing's entry, and the stop that
-   message queued behind is the one a stop then reaches. Both follow from one entry per conversation,
-   which is what keeps a finished turn from ever cancelling a live one.
+   viewed conversation: a reactive turn is tracked when it is *submitted* rather than when it takes the
+   gate, so a message sent during a firing replaces the firing's entry, and the stop that message queued
+   behind is the one a stop then reaches. Both follow from one entry per conversation, which is what
+   keeps a finished turn from ever cancelling a live one. Reactive turns are submitted from two places,
+   both through ``Assistant._submit_turn``: the serve loop, for a typed message, and
+   ``Assistant.retry_turn``, called from a front end's control task rather than the serve loop. A
+   message typed just after a retry is submitted can therefore find the retried turn's entry before its
+   message bus exists, which ``Assistant._offer_message``'s ``bus is None`` check already answers by
+   running the message as its own turn.
    The terminal's conversation commands add a second way to lose a firing's stop there, and it is a
    known gap rather than a covered case: ``/switch`` mid-firing points ``/stop`` at the conversation
    moved to, and since nothing is muted on that channel the firing keeps printing wherever the user
@@ -508,7 +513,7 @@ class TurnRunner:
         # Frame tasks scheduled from AIMU's synchronous sink, held until done so none is garbage collected.
         self._frame_tasks: set[asyncio.Task] = set()
         # Where a firing registers itself while it runs, so a stop can reach it. The reactive path's own
-        # entries are added by the serve loop, which owns the handle it starts.
+        # entries are added by `Assistant._submit_turn`, which owns the handle it starts.
         self._tracker = tracker
         self._ui = ui
         self._gate = gate

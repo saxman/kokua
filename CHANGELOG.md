@@ -360,8 +360,10 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
   what it stored (its text, attached images, the `/plan` workflow it ran through, and a reasoning
   effort chosen for that turn), since the page keeps none of that once it has drawn a turn. Only the
   opening message is resent; anything typed into the turn while it ran is deleted with it. Every
-  refusal lands before anything is deleted: a running turn, a turn that is no longer stored, and a
-  turn whose workflow the assistant no longer offers, which would otherwise rerun as a plain turn. To
+  refusal lands before anything is deleted: a running turn, a turn that is no longer stored, an
+  image-only turn whose images are gone from disk, and a turn whose workflow the assistant no longer
+  offers, which would otherwise rerun as a plain turn. The one failure that can follow the delete, a
+  model client that cannot be built, says that the turn was deleted and not resent. To
   make that last one possible each workflow turn now records its command word under
   `metadata["workflow"]`; a turn stored before that reruns as a plain turn. The resent turn's bubble
   comes from the record a switch-in replays, which now carries the turn's bubble token, so a bubble

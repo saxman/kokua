@@ -2080,6 +2080,38 @@ def test_ws_retry_of_a_workflow_no_longer_offered_says_so(tmp_path, monkeypatch)
     )
 
 
+@pytest.mark.parametrize(
+    ("error", "reply"),
+    [
+        ("images", "That turn's images are no longer on disk, so nothing was retried."),
+        (
+            "model",
+            "That turn was deleted, but it could not be sent again because the model client could not be "
+            "built. Check the model in your config.toml, then send the message again.",
+        ),
+    ],
+)
+def test_ws_retry_reports_the_other_refusals(tmp_path, monkeypatch, error, reply):
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.core.assistant import Assistant, ImagesUnavailable, ModelClientError
+
+    async def refuse(self, conversation_id, message_index, *, token=None):
+        raise ImagesUnavailable() if error == "images" else ModelClientError("no model")
+
+    monkeypatch.setattr(Assistant, "retry_turn", refuse)
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "retry", "id": active_id, "message_index": 1}))
+        refusal = _drain_until_limit(ws, "message")
+
+    assert refusal["text"] == reply
+
+
 def test_ws_sends_settings_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
