@@ -1627,6 +1627,29 @@ async def test_a_first_planned_turns_cards_anchor_to_its_user_message(tmp_path):
     assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1", "r-1"]
 
 
+async def test_a_planned_turn_records_the_workflow_that_ran_it(tmp_path):
+    """A retry reruns the workflow a turn ran through, and a `trace` cannot say which one: it is only
+    written when `[planning].show_reasoning` is on."""
+    client = _SeedingPlansThenSpawnsClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+    active_id = assistant._active_id
+
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, workflow=PLANNING_WORKFLOW
+    )
+
+    assert assistant._store.get(active_id).metadata["workflow"] == {"1": PLANNING_WORKFLOW.command}
+
+
+async def test_a_plain_turn_records_no_workflow(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert "workflow" not in assistant._store.get(assistant._active_id).metadata
+
+
 async def test_a_proactive_first_turns_cards_anchor_to_its_user_message(tmp_path):
     """A scheduled task firing into a conversation that has never run a turn seeds the system message
     too, so the unattended path needs the same resolution the reactive one does."""

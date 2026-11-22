@@ -790,6 +790,31 @@ async def test_switching_back_mid_turn_replays_the_turn_so_far():
     assert items[2]["text"] == "seen unseen"  # both halves: the one the user saw and the muted one
 
 
+async def test_a_catch_up_user_item_carries_the_turns_token():
+    """The page registers a replayed bubble by its token, so `turn_saved` can stamp the turn's controls
+    on it: the only bubble a retried turn has is this one."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping", token="t-1")
+
+    await channel.send_history([], {})
+
+    [item] = ws.frames[-1]["items"]
+    assert (item["type"], item["text"], item["token"]) == ("user", "ping", "t-1")
+
+
+async def test_a_catch_up_user_item_without_a_token_carries_none():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping")
+
+    await channel.send_history([], {})
+
+    assert "token" not in ws.frames[-1]["items"][0]
+
+
 async def test_a_muted_turns_catch_up_keeps_the_tool_output():
     """A background turn's tool frames are recorded verbatim, so the switch-in that replays them shows
     the same output the user would have seen live."""
@@ -1965,6 +1990,126 @@ def test_ws_truncate_in_a_conversation_that_is_gone_says_so_and_changes_nothing(
 
     assert "gone" in refusal["text"].lower()
     assert seen_types == ["message"]
+
+
+def test_ws_retry_resends_the_turn_and_drops_the_turns_after_it(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one", "reply two"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until_limit(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until_limit(ws, "done")
+        first_saved = _drain_until_limit(ws, "turn_saved")
+        ws.send_text("second message")
+        _drain_until_limit(ws, "done")
+        _drain_until_limit(ws, "turn_saved")
+
+        conversation_id = first_saved["conversation_id"]
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "retry",
+                    "id": conversation_id,
+                    "message_index": first_saved["message_index"],
+                    "token": "t-9",
+                }
+            )
+        )
+        # The repaint carries the resent message as the catch-up record's bubble, with its token.
+        repaint = _drain_until_limit(ws, "history")
+        retried_saved = _drain_until_limit(ws, "turn_saved")
+        ws.send_text(json.dumps({"type": "select", "id": conversation_id}))
+        stored = _drain_until_limit(ws, "history")
+
+    assert [(i["text"], i.get("token")) for i in repaint["items"] if i["type"] == "user"] == [("first message", "t-9")]
+    assert (retried_saved["token"], retried_saved["message_index"]) == ("t-9", first_saved["message_index"])
+    assert [i["text"] for i in stored["items"] if i["type"] == "user"] == ["first message"]
+
+
+def test_ws_retry_at_an_unknown_turn_says_so_and_changes_nothing(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        request = json.dumps({"type": "retry", "id": active_id, "message_index": 42, "token": "t-1"})
+        # Sent twice, with everything between the two replies collected, so a repaint behind the first
+        # refusal (the front end agreeing something changed) would show up.
+        ws.send_text(request)
+        refusal = _drain_until_limit(ws, "message")
+        ws.send_text(request)
+        seen_types = []
+        while True:
+            frame = ws.receive_json()
+            seen_types.append(frame["type"])
+            if frame["type"] == "message":
+                break
+
+    assert refusal["text"] == "That turn isn't in the saved conversation, so there was nothing to retry."
+    assert seen_types == ["message"]
+
+
+def test_ws_retry_of_a_workflow_no_longer_offered_says_so(tmp_path, monkeypatch):
+    """The core's refusal is what `test_retry_turn_refuses_a_workflow_no_longer_offered_and_deletes_nothing`
+    pins; this pins the sentence the page shows for it, naming the command."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.core.assistant import Assistant, WorkflowUnavailable
+
+    async def refuse(self, conversation_id, message_index, *, token=None):
+        raise WorkflowUnavailable("plan")
+
+    monkeypatch.setattr(Assistant, "retry_turn", refuse)
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "retry", "id": active_id, "message_index": 1}))
+        refusal = _drain_until_limit(ws, "message")
+
+    assert refusal["text"] == (
+        "That turn ran through /plan, which this assistant no longer offers, so nothing was retried."
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "reply"),
+    [
+        ("images", "That turn's images are no longer on disk, so nothing was retried."),
+        (
+            "model",
+            "That turn was deleted, but it could not be sent again because the model client could not be "
+            "built. Check the model in your config.toml, then send the message again.",
+        ),
+    ],
+)
+def test_ws_retry_reports_the_other_refusals(tmp_path, monkeypatch, error, reply):
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.core.assistant import Assistant, ImagesUnavailable, ModelClientError
+
+    async def refuse(self, conversation_id, message_index, *, token=None):
+        raise ImagesUnavailable() if error == "images" else ModelClientError("no model")
+
+    monkeypatch.setattr(Assistant, "retry_turn", refuse)
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "retry", "id": active_id, "message_index": 1}))
+        refusal = _drain_until_limit(ws, "message")
+
+    assert refusal["text"] == reply
 
 
 def test_ws_sends_settings_on_connect(tmp_path):
@@ -3191,6 +3336,43 @@ async def test_ws_truncate_while_a_turn_runs_says_so_and_changes_nothing(tmp_pat
 
         assert [f["type"] for f in after] == ["message", "message"], after
         assert "still running" in after[0]["text"].lower()
+    finally:
+        blocking.release.set()
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+
+
+async def test_ws_retry_while_a_turn_runs_says_so_and_changes_nothing(tmp_path):
+    """Mirrors the truncate case: a resync here would replace the transcript still streaming into it."""
+    import json
+
+    blocking = BlockingModelClient()
+    app = build_app(_config(tmp_path), client=blocking)
+    sock = _AsgiSocket([{"type": "websocket.connect"}, {"type": "websocket.receive", "text": "a long job"}])
+    serving = asyncio.create_task(app(_ws_scope(), sock.receive, sock.send))
+    try:
+        await asyncio.wait_for(blocking.started.wait(), timeout=5)
+        conversation_id = next(
+            item["id"]
+            for frame in sock.frames()
+            if frame["type"] == "conversations"
+            for item in frame["items"]
+            if item["active"]
+        )
+        mark = len(sock.frames())
+        request = json.dumps({"type": "retry", "id": conversation_id, "message_index": 1, "token": "t-1"})
+        sock.feed({"type": "websocket.receive", "text": request})
+        sock.feed({"type": "websocket.receive", "text": request})
+        for _ in range(500):
+            after = sock.frames()[mark:]
+            if len([f for f in after if f["type"] == "message"]) == 2:
+                break
+            await asyncio.sleep(0.01)
+
+        assert [f["type"] for f in after] == ["message", "message"], after
+        assert after[0]["text"] == (
+            "A turn is still running in that conversation, so nothing was retried. Stop the turn first, then try again."
+        )
     finally:
         blocking.release.set()
         serving.cancel()

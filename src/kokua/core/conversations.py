@@ -73,6 +73,7 @@ TURN_KEYED_METADATA = (
     "undelivered",
     "toolsets",
     "artifacts",
+    "workflow",
 )
 
 
@@ -462,6 +463,20 @@ class ConversationBook:
         branchable = turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is not None
         return branchable, turn_numbers(session.messages, session.metadata).get(user_index)
 
+    def opening_message(self, conversation_id: str, user_index: int) -> tuple[dict, dict]:
+        """The user message that opens the turn at ``user_index``, and its conversation's metadata.
+
+        Copies, since a retry reads them to rebuild the request and then truncates the very session
+        they came from. Validity is asked through the same ``turn_end`` a branch and a truncation use,
+        so "there is a turn here" means one thing to every turn control.
+        """
+        if not self.exists(conversation_id):
+            raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
+        session = self._store.get(conversation_id)
+        if turn_end(session.messages, user_index, mid_turn=mid_turn_indices(session.metadata)) is None:
+            raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
+        return copy.deepcopy(session.messages[user_index]), copy.deepcopy(session.metadata)
+
     def branch(self, conversation_id: str, user_index: int) -> str:
         """Fork a conversation at one of its turns into a new one, switch to it, and return its id.
 
@@ -777,6 +792,7 @@ class ConversationBook:
         user_index: int,
         conversation_id: str,
         thinking: Optional[Union[bool, str]] = None,
+        workflow: Optional[str] = None,
         failure: Optional[str] = None,
         usage: Optional[dict] = None,
         messages: Optional[list[int]] = None,
@@ -830,9 +846,23 @@ class ConversationBook:
 
         ``artifacts`` are the files the turn's tools published for the user (``core/artifacts.py``),
         each with the message index it was published after, which is what replay places it by.
+
+        ``workflow`` is the command word of the workflow that ran the turn (``"plan"``), absent for a
+        plain turn. It is what a retry reads to rerun the same workflow, and it has to be its own record:
+        a workflow turn stores the bare task as its user message, and the ``trace`` beside it is written
+        only when ``[planning].show_reasoning`` is on, so neither says the turn was a workflow turn.
         """
         if user_index < 0 or not (
-            events or model or thinking is not None or failure or usage or messages or requests or toolsets or artifacts
+            events
+            or model
+            or thinking is not None
+            or workflow
+            or failure
+            or usage
+            or messages
+            or requests
+            or toolsets
+            or artifacts
         ):
             return
         session = self._store.get(conversation_id)
@@ -842,6 +872,8 @@ class ConversationBook:
             session.metadata.setdefault("model", {})[str(user_index)] = model
         if thinking is not None:
             session.metadata.setdefault("thinking", {})[str(user_index)] = thinking
+        if workflow:
+            session.metadata.setdefault("workflow", {})[str(user_index)] = workflow
         if failure:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
         if usage:

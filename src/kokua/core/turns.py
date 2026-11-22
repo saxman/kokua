@@ -113,10 +113,15 @@ Every rule here was learned from a bug. Read them before changing anything in th
    a firing queued behind a turn already running on this conversation would otherwise overwrite that
    turn's entry, which is the one ``/stop`` reaches. A queued firing is therefore not yet stoppable. The
    converse costs the same and only on a channel with no conversation list, where a firing shares the
-   viewed conversation: the serve loop tracks a reactive turn when it is *submitted* rather than when it
-   takes the gate, so a message sent during a firing replaces the firing's entry, and the stop that
-   message queued behind is the one a stop then reaches. Both follow from one entry per conversation,
-   which is what keeps a finished turn from ever cancelling a live one.
+   viewed conversation: a reactive turn is tracked when it is *submitted* rather than when it takes the
+   gate, so a message sent during a firing replaces the firing's entry, and the stop that message queued
+   behind is the one a stop then reaches. Both follow from one entry per conversation, which is what
+   keeps a finished turn from ever cancelling a live one. Reactive turns are submitted from two places,
+   both through ``Assistant._submit_turn``: the serve loop, for a typed message, and
+   ``Assistant.retry_turn``, called from a front end's control task rather than the serve loop. A
+   message typed just after a retry is submitted can therefore find the retried turn's entry before its
+   message bus exists, which ``Assistant._offer_message``'s ``bus is None`` check already answers by
+   running the message as its own turn.
    The terminal's conversation commands add a second way to lose a firing's stop there, and it is a
    known gap rather than a covered case: ``/switch`` mid-firing points ``/stop`` at the conversation
    moved to, and since nothing is muted on that channel the firing keeps printing wherever the user
@@ -508,7 +513,7 @@ class TurnRunner:
         # Frame tasks scheduled from AIMU's synchronous sink, held until done so none is garbage collected.
         self._frame_tasks: set[asyncio.Task] = set()
         # Where a firing registers itself while it runs, so a stop can reach it. The reactive path's own
-        # entries are added by the serve loop, which owns the handle it starts.
+        # entries are added by `Assistant._submit_turn`, which owns the handle it starts.
         self._tracker = tracker
         self._ui = ui
         self._gate = gate
@@ -585,6 +590,7 @@ class TurnRunner:
         # channel arrives on, so it is where that belief gets guarded rather than assumed.
         requested = thinking_request((msg.metadata or {}).get("thinking")) if workflow is None else None
         thinking = declared if requested is None else requested
+        workflow_command = workflow.command if workflow is not None else None
         # The front end's own id for the message it drew for this turn, read from the same metadata and
         # echoed back when the turn reaches the store, which is how a front end matches the two. Named
         # apart from the contextvar reset token below, which is a different thing entirely.
@@ -639,7 +645,7 @@ class TurnRunner:
         agent.events = record_event
         # Record this turn's output for a user who switches into its conversation before it finishes;
         # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
-        self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
+        self._ui.begin_catch_up(conversation_id, msg.text, msg.images, token=bubble_token)
         succeeded = False
         # Deliberately belt-and-braces: the `CancelledError` branch below `return`s before reaching the
         # re-submit block at the end of this method, so `undelivered and not stopped` is never evaluated
@@ -732,6 +738,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -756,6 +763,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -770,6 +778,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -786,6 +795,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -799,6 +809,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -1057,6 +1068,7 @@ class TurnRunner:
         failure: Optional[str] = None,
         *,
         thinking: Optional[Union[bool, str]],
+        workflow: Optional[str],
         metrics: Optional[TurnMetrics],
         requests: Optional[TurnRequests],
         started: Optional[float],
@@ -1089,6 +1101,10 @@ class TurnRunner:
         caller that forgot it would record a turn as having made no calls and ended no loops. It is
         drained here, at the same moment as ``metrics``, so a failure path records what happened up to
         the point it stopped.
+
+        ``workflow`` is the command word of the workflow that ran this turn, or None for a plain turn.
+        Keyword-only and required like ``thinking``: a caller that forgot it would record a ``/plan``
+        turn as a plain one, and a retry of that turn would then silently run it without its workflow.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -1100,6 +1116,7 @@ class TurnRunner:
             user_index,
             conversation_id,
             thinking=thinking,
+            workflow=workflow,
             failure=failure,
             usage=usage,
             messages=message_indices,
@@ -1529,6 +1546,7 @@ class TurnRunner:
                 # An unattended run has no message from a user and so carries no request: the configured
                 # effort is both what it would run at and what it did.
                 thinking=self._config.thinking_for(self._config.entry_agent),
+                workflow=None,
                 metrics=metrics,
                 requests=requests,
                 started=started,

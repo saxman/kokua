@@ -503,16 +503,26 @@ class ChannelUI:
         if self.mutes_background_turns:
             self._channel.active_conversation_id = conversation_id
 
-    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
+    def begin_catch_up(
+        self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None, *, token: Optional[str] = None
+    ) -> None:
         """Tell a channel that can replay a conversation that a turn is starting on this one, so it can
         record the turn's output for a user who switches in mid-turn.
 
         Only the core knows a turn's boundaries and which conversation it binds to, hence the call. A
         channel that shows one conversation at a time has nothing to catch up on and offers neither this
         nor its ``end`` half, so both are no-ops there.
+
+        ``token`` (the front end's id for the turn's opening bubble) is passed only when there is one, so
+        a channel whose ``begin_catch_up`` predates the keyword still works for every turn no page is
+        waiting on.
         """
-        if self._begin_catch_up is not None:
+        if self._begin_catch_up is None:
+            return
+        if token is None:
             self._begin_catch_up(conversation_id, text, image_paths)
+        else:
+            self._begin_catch_up(conversation_id, text, image_paths, token=token)
 
     def end_catch_up(self, conversation_id: str) -> None:
         """Tell the channel the turn's output no longer needs standing in for: it is in the store (or the

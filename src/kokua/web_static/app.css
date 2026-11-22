@@ -105,10 +105,10 @@ body.booting #conv-list, body.booting #task-list { opacity: 0.55; pointer-events
 
    The transcript's pair is declared here despite living far from this rail, because "one kind of row
    control, one rule" is worth more than proximity: the alternative is the same chip written twice and
-   free to drift. `.bubble-branch` / `.bubble-truncate` are picked up again in the transcript section,
-   which is where a reader looking for them will start. */
+   free to drift. `.bubble-branch` / `.bubble-retry` / `.bubble-truncate` are picked up again in the
+   transcript section, which is where a reader looking for them will start. */
 #conv-list .conv-rename, #conv-list .conv-duplicate, #conv-list .conv-export, #conv-list .conv-delete,
-.task-actions button, .task-conv-delete, .bubble-branch, .bubble-truncate {
+.task-actions button, .task-conv-delete, .bubble-branch, .bubble-retry, .bubble-truncate {
   border: none; background: none; color: var(--fg-faint);
   cursor: pointer; font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px;
   border-radius: 4px; }
@@ -118,7 +118,7 @@ body.booting #conv-list, body.booting #task-list { opacity: 0.55; pointer-events
    buttons do the reverse and chip in --surface, since they sit on --bg rather than on a hovered row. */
 #conv-list .conv-rename:hover, #conv-list .conv-duplicate:hover, #conv-list .conv-export:hover,
 #conv-list .conv-delete:hover, .task-actions button:hover,
-.task-conv-delete:hover, .bubble-branch:hover,
+.task-conv-delete:hover, .bubble-branch:hover, .bubble-retry:hover,
 .bubble-truncate:hover { color: var(--fg); background: var(--bg); }
 /* Destructive, so the colour says so while the chip stays. This has to follow the rule above to win
    for a chat row's delete and for a turn's, whose selectors it ties on specificity; the task row's
@@ -637,11 +637,11 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
    mismatch: the caption is not focusable, and the two controls keep their relative order, so tab order
    still reaches them constructive before destructive. */
 .bubble-meta > .bubble-ts { order: 3; }
-/* The cluster reads, left to right: info (the turn's number), the round button, the branch and delete
-   controls, then the caption. Like the caption, the round button is appended after the others, so `order`
+/* The cluster reads, left to right: info (the turn's number), the round button, the branch, retry, and
+   delete controls, then the caption. Like the caption, the round button is appended after the others, so `order`
    places it. The badge is quiet until its bubble is hovered, like the caption. */
 .bubble-meta > .round-button { order: 1; }
-.bubble-meta > .bubble-branch, .bubble-meta > .bubble-truncate { order: 2; }
+.bubble-meta > .bubble-branch, .bubble-meta > .bubble-retry, .bubble-meta > .bubble-truncate { order: 2; }
 .turn-badge { order: 0; color: var(--fg-faint); font-size: 0.7em; font-family: -apple-system, system-ui, sans-serif;
   opacity: 0; transition: opacity 120ms ease; }
 .bubble:hover > .bubble-meta > .turn-badge { opacity: 1; }
@@ -649,7 +649,7 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
    gap back. */
 .notice > .bubble-meta { margin-top: 2px; }
 .bubble:hover .bubble-ts, .fold-header:hover > .fold-ts, .foldable:hover > .round-slot > .fold-ts { opacity: 1; }
-/* A turn's two controls are the sidebar row control the page already has, chip and all, declared with
+/* A turn's three controls are the sidebar row control the page already has, chip and all, declared with
    the chat rows' controls up in the conversation-list section: one kind of row control, one rule. Two
    things differ here and are all this adds.
 
@@ -659,9 +659,10 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
    And it is quiet until the bubble is hovered, like that caption, because it is an affordance you look
    for rather than one you should keep noticing. Except to a keyboard user tabbing through the
    transcript, for whom :focus-visible has to reveal it the way hover does for a pointer. */
-.bubble-branch, .bubble-truncate { font-size: 1.15em; line-height: 1.2;
+.bubble-branch, .bubble-retry, .bubble-truncate { font-size: 1.15em; line-height: 1.2;
   opacity: 0; transition: opacity 0.12s; }
 .bubble:hover .bubble-branch, .bubble-branch:focus-visible,
+.bubble:hover .bubble-retry, .bubble-retry:focus-visible,
 .bubble:hover .bubble-truncate, .bubble-truncate:focus-visible { opacity: 1; }
 .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
 .attach-previews .chip { position: relative; }

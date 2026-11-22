@@ -162,13 +162,20 @@ class _CatchUpRecord:
         # Announced tool calls whose result has not arrived, by tool-call id: the item each result completes.
         self._pending_tools: dict[str, dict] = {}
 
-    def record_user(self, text: str, image_references: list[str], ts: str) -> None:
+    def record_user(self, text: str, image_references: list[str], ts: str, token: Optional[str] = None) -> None:
         """Open the record with the turn's own user bubble, which the page renders locally on send and
-        so is the one item no frame ever carries."""
+        so is the one item no frame ever carries.
+
+        ``token`` rides the first item, the bubble the page would have drawn first itself, so a page
+        replaying this record can register that bubble the way it registers one it sent and let
+        ``turn_saved`` stamp the turn's controls on it. A retried turn depends on that: the server
+        starts it, so this replayed bubble is the only one it has."""
         if text:
             self._items.append({"type": "user", "text": text, "ts": ts})
         for reference in image_references:
             self._items.append({"type": "image", "url": reference, "from": "user", "ts": ts})
+        if token is not None and self._items:
+            self._items[0]["token"] = token
 
     def record(self, frame: dict, ts: str) -> None:
         """Fold one outgoing display frame into the items, muted or not.
@@ -250,14 +257,16 @@ class WebChannel(BaseWebChannel):
         # sends the call's tool frame only once it returns, so the card is always counted first.
         self._cards_awaiting_call: Counter[str] = Counter()
 
-    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
+    def begin_catch_up(
+        self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None, *, token: Optional[str] = None
+    ) -> None:
         """Start recording a turn's output, so switching into its conversation mid-turn shows the turn.
 
         Replaces any previous record for the conversation: one turn runs per conversation at a time, so
         an older record can only be a leftover from a turn that failed before it persisted.
         """
         record = _CatchUpRecord()
-        record.record_user(text, [ROUTE_PREFIX + Path(path).name for path in image_paths or []], _now())
+        record.record_user(text, [ROUTE_PREFIX + Path(path).name for path in image_paths or []], _now(), token)
         self._catch_up[conversation_id] = record
 
     def end_catch_up(self, conversation_id: str) -> None:
