@@ -257,7 +257,7 @@ def slow_boot_server(monkeypatch):
         async def as_tools(self) -> list:
             return []
 
-    async def _slow_connect(url, *, bearer_token=None, auth_mode=None, notify, oauth):
+    async def _slow_connect(url, *, bearer_token=None, auth_mode=None, notify, retire_alert, oauth):
         await asyncio.sleep(1.5)
         return _FakeMCPClient(), "none"
 
