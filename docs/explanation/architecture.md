@@ -959,7 +959,9 @@ normally the reason for branching there, and a mid-turn index is refused as a tu
 reason. That is the only cut a transcript survives, because anywhere else
 can fall between an assistant message holding `tool_calls` and the `tool` messages answering them, which
 a provider rejects on the branch's *next* request rather than at the fork, where it could still be
-reported. The per-turn metadata maps (`subagent`, `trace`, `model`, `thinking`, `failure`, `usage`, `messages`) are
+reported. The per-turn metadata maps (`conversations.TURN_KEYED_METADATA`: `subagent`, `trace`, `model`,
+`thinking`, `failure`, `usage`, `requests`, `messages`, `undelivered`, `toolsets`, `artifacts`, and
+`workflow`, the command word of the workflow that ran a turn, which a retry reads to rerun it) are
 **filtered, not remapped**, because a prefix copy leaves every index where it was: the branch replays its
 inherited turns exactly as the parent does, cards and costs included. And `task_id` is **not inherited**,
 because a branch of a scheduled run is the user's conversation rather than another run of that task;

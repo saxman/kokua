@@ -585,6 +585,7 @@ class TurnRunner:
         # channel arrives on, so it is where that belief gets guarded rather than assumed.
         requested = thinking_request((msg.metadata or {}).get("thinking")) if workflow is None else None
         thinking = declared if requested is None else requested
+        workflow_command = workflow.command if workflow is not None else None
         # The front end's own id for the message it drew for this turn, read from the same metadata and
         # echoed back when the turn reaches the store, which is how a front end matches the two. Named
         # apart from the contextvar reset token below, which is a different thing entirely.
@@ -732,6 +733,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -756,6 +758,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -770,6 +773,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -786,6 +790,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -799,6 +804,7 @@ class TurnRunner:
                         conversation_id,
                         user_index,
                         thinking=thinking,
+                        workflow=workflow_command,
                         metrics=metrics,
                         requests=requests,
                         started=started,
@@ -1057,6 +1063,7 @@ class TurnRunner:
         failure: Optional[str] = None,
         *,
         thinking: Optional[Union[bool, str]],
+        workflow: Optional[str],
         metrics: Optional[TurnMetrics],
         requests: Optional[TurnRequests],
         started: Optional[float],
@@ -1089,6 +1096,10 @@ class TurnRunner:
         caller that forgot it would record a turn as having made no calls and ended no loops. It is
         drained here, at the same moment as ``metrics``, so a failure path records what happened up to
         the point it stopped.
+
+        ``workflow`` is the command word of the workflow that ran this turn, or None for a plain turn.
+        Keyword-only and required like ``thinking``: a caller that forgot it would record a ``/plan``
+        turn as a plain one, and a retry of that turn would then silently run it without its workflow.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -1100,6 +1111,7 @@ class TurnRunner:
             user_index,
             conversation_id,
             thinking=thinking,
+            workflow=workflow,
             failure=failure,
             usage=usage,
             messages=message_indices,
@@ -1529,6 +1541,7 @@ class TurnRunner:
                 # An unattended run has no message from a user and so carries no request: the configured
                 # effort is both what it would run at and what it did.
                 thinking=self._config.thinking_for(self._config.entry_agent),
+                workflow=None,
                 metrics=metrics,
                 requests=requests,
                 started=started,

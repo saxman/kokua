@@ -352,6 +352,14 @@ async def test_recording_a_turn_that_produced_nothing_writes_no_metadata(tmp_pat
     assert "subagent" not in metadata and "model" not in metadata
 
 
+async def test_record_turn_provenance_records_the_workflow(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "", 1, assistant._active_id, workflow="plan")
+
+    assert assistant._store.get(assistant._active_id).metadata["workflow"] == {"1": "plan"}
+
+
 async def test_the_turn_model_is_recorded_even_when_no_subagent_ran(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -1454,6 +1462,14 @@ async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
     assert kept["model"] == {"1": "ollama:gemma"}
     assert "subagent" not in kept
     assert kept["undelivered"] == {"1": [{"sender": "researcher#1", "to": "assistant", "text": "look at the index"}]}
+
+
+async def test_truncate_keeps_only_the_workflow_records_of_the_turns_it_kept(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, workflow={"1": "plan", "5": "plan"})
+
+    await assistant.truncate_conversation(parent.key, 5)
+
+    assert assistant._store.get(parent.key).metadata["workflow"] == {"1": "plan"}
 
 
 async def test_truncate_rebuilds_the_agent_from_the_shortened_transcript(tmp_path):

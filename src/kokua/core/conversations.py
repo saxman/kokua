@@ -73,6 +73,7 @@ TURN_KEYED_METADATA = (
     "undelivered",
     "toolsets",
     "artifacts",
+    "workflow",
 )
 
 
@@ -777,6 +778,7 @@ class ConversationBook:
         user_index: int,
         conversation_id: str,
         thinking: Optional[Union[bool, str]] = None,
+        workflow: Optional[str] = None,
         failure: Optional[str] = None,
         usage: Optional[dict] = None,
         messages: Optional[list[int]] = None,
@@ -830,9 +832,23 @@ class ConversationBook:
 
         ``artifacts`` are the files the turn's tools published for the user (``core/artifacts.py``),
         each with the message index it was published after, which is what replay places it by.
+
+        ``workflow`` is the command word of the workflow that ran the turn (``"plan"``), absent for a
+        plain turn. It is what a retry reads to rerun the same workflow, and it has to be its own record:
+        a workflow turn stores the bare task as its user message, and the ``trace`` beside it is written
+        only when ``[planning].show_reasoning`` is on, so neither says the turn was a workflow turn.
         """
         if user_index < 0 or not (
-            events or model or thinking is not None or failure or usage or messages or requests or toolsets or artifacts
+            events
+            or model
+            or thinking is not None
+            or workflow
+            or failure
+            or usage
+            or messages
+            or requests
+            or toolsets
+            or artifacts
         ):
             return
         session = self._store.get(conversation_id)
@@ -842,6 +858,8 @@ class ConversationBook:
             session.metadata.setdefault("model", {})[str(user_index)] = model
         if thinking is not None:
             session.metadata.setdefault("thinking", {})[str(user_index)] = thinking
+        if workflow:
+            session.metadata.setdefault("workflow", {})[str(user_index)] = workflow
         if failure:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
         if usage:
