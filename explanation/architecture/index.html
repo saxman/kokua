@@ -1396,6 +1396,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#retrying-a-turn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrying a turn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#duplicating-a-conversation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2029,6 +2040,17 @@
     <span class="md-ellipsis">
       
         Truncating a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrying-a-turn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrying a turn
       
     </span>
   </a>
@@ -3275,7 +3297,9 @@ normally the reason for branching there, and a mid-turn index is refused as a tu
 reason. That is the only cut a transcript survives, because anywhere else
 can fall between an assistant message holding <code>tool_calls</code> and the <code>tool</code> messages answering them, which
 a provider rejects on the branch's <em>next</em> request rather than at the fork, where it could still be
-reported. The per-turn metadata maps (<code>subagent</code>, <code>trace</code>, <code>model</code>, <code>thinking</code>, <code>failure</code>, <code>usage</code>, <code>messages</code>) are
+reported. The per-turn metadata maps (<code>conversations.TURN_KEYED_METADATA</code>: <code>subagent</code>, <code>trace</code>, <code>model</code>,
+<code>thinking</code>, <code>failure</code>, <code>usage</code>, <code>requests</code>, <code>messages</code>, <code>undelivered</code>, <code>toolsets</code>, <code>artifacts</code>, and
+<code>workflow</code>, the command word of the workflow that ran a turn, which a retry reads to rerun it) are
 <strong>filtered, not remapped</strong>, because a prefix copy leaves every index where it was: the branch replays its
 inherited turns exactly as the parent does, cards and costs included. And <code>task_id</code> is <strong>not inherited</strong>,
 because a branch of a scheduled run is the user's conversation rather than another run of that task;
@@ -3342,6 +3366,38 @@ through a <code>turn_running</code> predicate that method injects, so a turn alr
 the window between the check and the gate. It is injected rather than looked up because the book holds
 the gate while the assistant owns the turn tracker, and <code>core</code>'s conversation layer must not reach upward
 for it.</p>
+<h3 id="retrying-a-turn">Retrying a turn<a class="headerlink" href="#retrying-a-turn" title="Permanent link">&para;</a></h3>
+<p><code>Assistant.retry_turn(conversation_id, message_index)</code> is a truncation followed by a resubmit: it deletes
+the named turn and everything after it, then sends the turn's opening message again as a new turn. It
+exists for a turn whose answer was built on a tool result that failed for a reason outside the request
+(an MCP server or a local service that was down). Removing just the bad call was considered and
+rejected: every per-turn map is keyed by message index, so a cut in the middle of a transcript would need
+them remapped rather than filtered, and the turn's own reasoning and answer would still refer to the
+result that was gone. The whole turn reacted to it, so the whole turn is rerun.</p>
+<p>The message is <strong>rebuilt on the server</strong>, from <code>ConversationBook.opening_message</code>, because the page keeps
+neither a turn's images nor its workflow once it has drawn it, and has never held either for a turn
+replayed from history. Text comes from the stored content; images from its <code>image_url</code> blocks, each
+<code>/images/</code> reference resolved back to the file path a typed turn carries (a missing file is dropped); the
+workflow from <code>metadata["workflow"]</code>, which <code>record_turn_provenance</code> writes for every workflow turn
+because a workflow turn stores its bare task and <code>trace</code> exists only in verbose planning; and the
+reasoning effort from <code>metadata["thinking"]</code>, turned back into the form a request takes: a level as
+itself, <code>False</code> as <code>"off"</code> (how the composer's "Think: off" is recorded), and <code>True</code> left out, since no
+request spells it.</p>
+<p><strong>Everything is read before anything is cut</strong>, so every refusal leaves the conversation as it was: the
+truncation's own <code>TurnInFlight</code>, <code>TurnNotFound</code>, and <code>ConversationNotFound</code>, plus <code>WorkflowUnavailable</code>
+for a recorded workflow the entry agent no longer offers, since rerunning it as a plain turn would
+change what was asked, and <code>ImagesUnavailable</code> for an image-only turn none of whose files survive. The
+one failure that can only arrive after the cut is rebuilding the conversation's agent, which the cut
+dropped; <code>retry_turn</code> does that itself, before opening anything, so a <code>ModelClientError</code> reaches the
+front end to report rather than failing silently inside the turn's task. The resubmit goes through <code>Assistant._submit_turn</code>, the same method the serve
+loop starts a typed turn with, so a retried turn is tracked, stoppable, and backgroundable the same way.</p>
+<p>The page draws a user bubble only for a message it sent itself, so a turn the server starts would stream
+with nothing above it. The bubble comes from the <strong>catch-up record</strong> a switch-in replays: <code>retry_turn</code>
+opens it before submitting (the front end's repaint can be computed before the turn's task first runs),
+and its user item carries the turn's bubble token. The page registers a replayed bubble that carries a
+token the way it registers one it sent, so the turn's <code>turn_saved</code> stamps its controls. The same token
+now rides the record of every tokened turn, so a bubble seen after switching into a running turn gains
+its controls on save too, where it used to stay bare until the next repaint.</p>
 <h3 id="duplicating-a-conversation">Duplicating a conversation<a class="headerlink" href="#duplicating-a-conversation" title="Permanent link">&para;</a></h3>
 <p><code>ConversationBook.duplicate(conversation_id)</code> copies a whole conversation into a new one. It is the
 third member of the branch/truncate family and the one that asks about a <em>conversation</em> rather than a
