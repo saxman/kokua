@@ -78,10 +78,9 @@ def test_every_stated_invariant_count_matches_the_module_docstring():
     expected = words[len(rules)]
 
     root = Path(__file__).resolve().parents[2]
-    # (file, how many times it states the count). The README says it twice, in the module table and
-    # again in the feature list, and both are claims about today.
+    # (file, how many times it states the count). Each is a claim about today.
     sites = (
-        ("README.md", 2),
+        ("README.md", 1),
         ("CLAUDE.md", 1),
         ("docs/explanation/architecture.md", 1),
         ("docs/explanation/design-principles.md", 1),

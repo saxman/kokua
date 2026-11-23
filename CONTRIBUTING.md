@@ -22,7 +22,7 @@ git clone https://github.com/saxman/aimu    # sibling of kokua/
 uv sync --all-extras                        # installs ../aimu editable
 ```
 
-A path source is installed without being checked against the `aimu>=0.28.0` specifier, so a sibling on
+A path source is installed without being checked against the `aimu>=0.41.0` specifier, so a sibling on
 an older branch is the failure mode to expect. Startup's preflight (`kokua.aimu_compat`) catches it and
 names the fix rather than failing on an import.
 
@@ -60,7 +60,19 @@ A new page needs an entry in `mkdocs.yml`'s `nav`, or the strict build fails. Th
 page nobody can navigate to is indistinguishable from a page that does not exist. Links out of `docs/`
 must be absolute, in the style of the [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py)
 link under Conventions below, which `tests/test_docs.py` enforces along with checking that every such
-path still exists.
+path still exists. `README.md` is held to the same rule throughout, since PyPI renders it as the
+project page, where a relative link has nothing to resolve against.
+
+## Outside the package
+
+Two top-level directories are not in the wheel. `skills/` holds the Agent Skills Kokua ships as content
+rather than Python; `kokua skills install` copies them into a user's skills folder from a checkout.
+`scripts/` holds one-off maintenance scripts, run by hand from a checkout, never as an installed
+command. `scripts/migrate_subagent_payloads.py` moves oversized sub-agent tool responses that an older
+Kokua stored inline in `sessions.json` out to payload files. Run it with `--dry-run` first, and **stop
+Kokua before a real run and pass `--confirm-kokua-stopped`**: the script cannot detect a running
+instance, and both writing the same files at once can lose data in a way its backup would not show.
+Its module docstring and `--help` give the details.
 
 ## Design principles
 
