@@ -348,6 +348,20 @@ agent and every worker reachable from it by `delegates_to`. So an agent is skipp
 rather than reported as clean, when any of its resident toolsets was built by no agent, which is the case
 for an agent nothing delegates to unless every toolset it holds resident is one another agent built.
 
+A resident tool can also collide with a tool no toolset provides: `spawn_subagent` on an agent that
+delegates, `available_tools` and `load_tools` on an agent that defers something, `activate_skill` on the
+entry agent once a skill exists, and `get_message` on a worker whose window engages compaction. An MCP
+server names its tools as it likes, so nothing stops one offering any of these. The core tool always
+wins: the resident one is dropped from that agent's tools, and the same startup check reports it:
+
+```text
+researcher: load_tools from 'files' is shadowed by a core tool of the same name, so it was dropped.
+```
+
+Without the drop there is no good outcome: AIMU refuses to construct a worker carrying a second
+`load_tools` or `get_message`, two tools of one name reach the provider as a rejected request, and a
+server's `activate_skill` would hide the skill catalogue's.
+
 ### What arrives mid-session
 
 `"all"` means every toolset registered at startup, plus every skill written since. Skills arrive at the

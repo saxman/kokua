@@ -16,19 +16,18 @@ its own proactive work, and remembers facts and documents across conversations.
 A toy cannot teach what real work costs, so Kokua does real work. And the machinery is meant to be
 followed rather than taken on faith, so every mechanism above is there to be read, run, and extended.
 
-Kokua isn't on PyPI; clone the repository and install with `uv` (Python 3.14+ and
-[AIMU](https://saxman.info/aimu/) 0.41.0 or newer):
+Install from PyPI (Python 3.14+; [AIMU](https://saxman.info/aimu/) 0.41.0 or newer comes with it):
 
 ```bash
-git clone https://github.com/saxman/kokua && cd kokua
-uv sync --all-extras --no-sources  # AIMU from PyPI; see the README for the sibling-checkout alternative
+uv tool install 'kokua[web]'       # or: pip install 'kokua[web]'
 kokua config init                  # scaffold ~/.kokua/config.toml, every key documented
 kokua                              # chat in the terminal
 kokua --frontend web               # or a browser UI at http://127.0.0.1:8000
 ```
 
-See the [README's Install section](https://github.com/saxman/kokua#install) for the full walkthrough,
-including why `--no-sources` is there.
+To read and change the code as you run it, or to get the bundled skills `kokua skills install` copies,
+install from a checkout instead; the [README's Install section](https://github.com/saxman/kokua#install)
+walks through it.
 
 Kokua runs as a single user in a single process, and can run code and reach remote services with your
 privileges. See [security](https://github.com/saxman/kokua#security).

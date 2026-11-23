@@ -1471,6 +1471,113 @@ async def test_a_real_mcp_tool_shadowed_by_fs_is_reported_at_startup(tmp_path, m
     assistant._state.close()
 
 
+def _serve_mcp_tools(monkeypatch, *names: str) -> list:
+    """Every MCP server connects offering ``names``; returns the ``agent_types`` each spawn tool is built with."""
+    import kokua.core.agents as agents_mod
+    from aimu import aio
+    from tests.fakes import _FakeMCP, _fake_mcp_tool
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool(name) for name in names])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    captured: list = []
+
+    def fake_make(model, *, agent_types, tool_approval, **kwargs):
+        captured.append(agent_types)
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__tool_is_async__ = True
+        spawn_subagent.__tool_is_streaming__ = False
+        spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
+        return spawn_subagent
+
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
+    return captured
+
+
+def _files_server():
+    from kokua.config.schema import MCPServerConfig
+
+    return [MCPServerConfig(url="https://files.example/mcp", name="files")]
+
+
+_CORE_SHADOW = "is shadowed by a core tool of the same name, so it was dropped."
+
+
+async def test_a_resident_mcp_load_tools_on_a_deferring_worker_is_dropped_and_reported(tmp_path, monkeypatch):
+    """AIMU refuses to construct an agent with a deferred group and a host tool named ``load_tools``, so
+    without the drop every spawn of this worker would fail with an error naming a tool, not a server."""
+    from kokua.config.schema import ALL_TOOLSETS
+
+    captured = _serve_mcp_tools(monkeypatch, "load_tools", "list_files")
+    agents = {
+        "assistant": AgentConfig(available=["time"], delegates_to=["explorer"]),
+        "explorer": AgentConfig(description="Explores.", available=ALL_TOOLSETS, resident=["files"]),
+    }
+    config = _config(tmp_path, agents=agents, mcp_servers=_files_server(), default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    assert [text for text, *_ in channel.alerts] == [f"explorer: load_tools from 'files' {_CORE_SHADOW}"]
+    assert [fn.__name__ for fn in captured[-1]["explorer"]["tools"]] == ["list_files"]
+    assistant._state.close()
+
+
+async def test_a_resident_mcp_spawn_subagent_on_a_delegating_worker_leaves_kokuas(tmp_path, monkeypatch):
+    captured = _serve_mcp_tools(monkeypatch, "spawn_subagent")
+    agents = {
+        "assistant": AgentConfig(available=["time"], delegates_to=["explorer"]),
+        "explorer": AgentConfig(description="Explores.", available=["files"], delegates_to=["helper"]),
+        "helper": AgentConfig(description="Helps.", available=["time"]),
+    }
+    config = _config(tmp_path, agents=agents, mcp_servers=_files_server(), default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    assert [text for text, *_ in channel.alerts] == [f"explorer: spawn_subagent from 'files' {_CORE_SHADOW}"]
+    spawns = [fn for fn in captured[-1]["explorer"]["tools"] if fn.__name__ == "spawn_subagent"]
+    assert len(spawns) == 1 and spawns[0].__module__ != "tests.fakes"
+    assistant._state.close()
+
+
+async def test_a_resident_mcp_load_tools_on_a_deferring_entry_agent_is_dropped(tmp_path, monkeypatch):
+    """The entry agent's tools are assigned after it is constructed, so AIMU's own check never sees them:
+    without the drop the request would carry two tools named ``load_tools``."""
+    _serve_mcp_tools(monkeypatch, "load_tools", "list_files")
+    agents = {"assistant": AgentConfig(available=["files", "time"], resident=["files"])}
+    config = _config(tmp_path, agents=agents, mcp_servers=_files_server(), default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    agent = assistant._registry.get(assistant._active_id)
+    assert [fn.__module__ for fn in agent.tools if fn.__name__ == "load_tools"] == []
+    assert [text for text, *_ in channel.alerts] == [f"assistant: load_tools from 'files' {_CORE_SHADOW}"]
+    assistant._state.close()
+
+
+async def test_a_resident_mcp_tool_named_like_a_core_tool_the_agent_lacks_is_kept(tmp_path, monkeypatch):
+    """An agent deferring nothing carries no ``load_tools``, so a server's tool by that name collides with
+    nothing and stays."""
+    _serve_mcp_tools(monkeypatch, "load_tools")
+    agents = {"assistant": AgentConfig(available=["files", "time"])}
+    config = _config(tmp_path, agents=agents, mcp_servers=_files_server(), default_confirm=[], default_review=[])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    agent = assistant._registry.get(assistant._active_id)
+    assert [fn.__name__ for fn in agent.tools].count("load_tools") == 1
+    assert channel.alerts == []
+    assistant._state.close()
+
+
 async def test_an_agent_whose_toolsets_were_never_built_is_skipped_not_reported(tmp_path, caplog):
     """An agent nothing delegates to is never built at startup, so its toolsets' names are unknown and
     "no shadows" would be a claim nobody checked."""
@@ -1495,7 +1602,9 @@ async def test_a_failing_shadow_alert_does_not_stop_startup(tmp_path, monkeypatc
     from kokua.core.agents import ShadowedTool
 
     monkeypatch.setattr(
-        agents, "shadowed_tools", lambda config, registry, tools: [ShadowedTool("explorer", "read_file", "fs", "files")]
+        agents,
+        "shadowed_tools",
+        lambda config, registry, tools, **kwargs: [ShadowedTool("explorer", "read_file", "fs", "files")],
     )
     assistant = await Assistant.create(_config(tmp_path), AlertCapturingChannel(), client=MockAsyncModelClient([]))
 
@@ -1516,7 +1625,7 @@ async def test_startup_notices_each_shadowed_resident_tool(tmp_path, monkeypatch
     from kokua.core.agents import ShadowedTool
 
     shadow = ShadowedTool("explorer", "read_file", "fs", "files")
-    monkeypatch.setattr(agents, "shadowed_tools", lambda config, registry, tools: [shadow])
+    monkeypatch.setattr(agents, "shadowed_tools", lambda config, registry, tools, **kwargs: [shadow])
     channel = AlertCapturingChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
     await assistant.start()

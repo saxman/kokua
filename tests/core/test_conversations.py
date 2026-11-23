@@ -1754,6 +1754,35 @@ async def test_retry_turn_drops_an_image_whose_file_is_gone(tmp_path, monkeypatc
     assert msg.text == "what is this" and not msg.images
 
 
+async def test_retry_turn_says_when_it_dropped_an_image(tmp_path, monkeypatch):
+    assistant, parent, path = await _assistant_with_image_turn(tmp_path)
+    path.unlink()
+    _capture_submits(assistant, monkeypatch)
+    alerts: list[str] = []
+
+    async def alert(text, **kwargs):
+        alerts.append(text)
+
+    monkeypatch.setattr(assistant._ui, "alert", alert)
+    await assistant.retry_turn(parent.key, 1)
+
+    assert alerts == ["1 of 1 images from that turn are no longer on disk, so the retry was sent without them."]
+
+
+async def test_retry_turn_with_every_image_present_raises_no_notice(tmp_path, monkeypatch):
+    assistant, parent, _ = await _assistant_with_image_turn(tmp_path)
+    _capture_submits(assistant, monkeypatch)
+    alerts: list[str] = []
+
+    async def alert(text, **kwargs):
+        alerts.append(text)
+
+    monkeypatch.setattr(assistant._ui, "alert", alert)
+    await assistant.retry_turn(parent.key, 1)
+
+    assert alerts == []
+
+
 async def test_retry_turn_reuses_a_requested_effort(tmp_path, monkeypatch):
     assistant, parent = await _assistant_with_branchable_parent(tmp_path, thinking={"1": "high"})
     submitted = _capture_submits(assistant, monkeypatch)

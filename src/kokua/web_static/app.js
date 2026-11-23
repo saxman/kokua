@@ -1186,7 +1186,7 @@ function addRetryControl(el, messageIndex, conversationId) {
   btn.className = "bubble-retry";
   // U+21BB, an open circle arrow turning clockwise. Escaped for the reason the branch glyph is: the
   // shape is font-dependent, so the codepoint is the durable statement of which glyph was asked for.
-  btn.textContent = "↻";
+  btn.textContent = "\u21bb";
   btn.title = "Retry this turn, deleting it and everything after it";
   btn.setAttribute("aria-label", "Retry this turn, deleting it and everything after it");
   btn.addEventListener("click", () => {
@@ -2469,7 +2469,7 @@ function handleFrame(event) {
     // updated lastConversations by the time `history` arrives (see _sync_view), so this is the
     // conversation being switched to, not the one switched from.
     const replayConversationId = (lastConversations.find((item) => item.active) || {}).id;
-    // The turn being replayed, and whether its controls have been placed. Both controls go on the
+    // The turn being replayed, and whether its controls have been placed. Its controls all go on the
     // first bubble of the turn, so they are placed as soon as one appears rather than at the turn's
     // end, and a turn drawing several bubbles (a message with text and images) stamps only the first.
     let replayTurnIndex = -1;
