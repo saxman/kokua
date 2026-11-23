@@ -1581,12 +1581,15 @@ run needs.</p>
 locally; see <a href="../../reference/configuration/#model">the configuration reference</a> for pointing Kokua at
 one instead.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
-<p>Kokua is not on PyPI. Clone the repository and install with <code>uv</code>:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/saxman/kokua<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>kokua
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras<span class="w"> </span>--no-sources
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">'kokua[web]'</span>
+</span></code></pre></div>
+<p>These pages link into the source often, so you may prefer a checkout you can read and change as you
+run it:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/saxman/kokua<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>kokua
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras<span class="w"> </span>--no-sources
 </span></code></pre></div>
 <h2 id="scaffold-the-config">Scaffold the config<a class="headerlink" href="#scaffold-the-config" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>kokua<span class="w"> </span>config<span class="w"> </span>init
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kokua<span class="w"> </span>config<span class="w"> </span>init
 </span></code></pre></div>
 <p>writes <code>~/.kokua/config.toml</code>: the shipped example, one line per key, every key at its documented
 default. <code>[assistant].model</code> is commented out there, and that is deliberate: unset, Kokua asks for
@@ -1594,17 +1597,17 @@ whichever model a running local server reports, so pulling <code>qwen3.5:9b</cod
 by itself, with nothing to edit. Open the file in an editor if you are curious; nothing below requires
 changing it.</p>
 <h2 id="say-hello">Say hello<a class="headerlink" href="#say-hello" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kokua
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>kokua
 </span></code></pre></div>
 <p>starts the assistant in the terminal. The agent that answers you there is the <strong>entry agent</strong>: the one
 agent a person talks to directly, as opposed to the short-lived workers it can spawn for a subtask, and
 the agent every tool count in this catalogue is counted for. Say hello to it, and this is what came
 back, quoted exactly as the terminal printed it (<code>qwen3.5:9b</code> on Ollama, Kokua commit <code>34831a1</code>):</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>&gt; Say hello and tell me in one sentence what you can do.
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>&gt; 
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>[thinking] The user is asking me to say hello and briefly explain what I can do in one sentence. This is a straightforward conversational request that doesn't require any tools - I should just respond directly with a friendly greeting and a concise summary of my capabilities.
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Hello! I'm your personal assistant—I can help you manage tasks, organize information, run code, schedule work, store knowledge, read/write files, search documents and conversations, delegate specialized work to sub-agents, and automate routines with skills and scheduled tasks.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>&gt; Say hello and tell me in one sentence what you can do.
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>&gt; 
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>[thinking] The user is asking me to say hello and briefly explain what I can do in one sentence. This is a straightforward conversational request that doesn't require any tools - I should just respond directly with a friendly greeting and a concise summary of my capabilities.
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>Hello! I'm your personal assistant—I can help you manage tasks, organize information, run code, schedule work, store knowledge, read/write files, search documents and conversations, delegate specialized work to sub-agents, and automate routines with skills and scheduled tasks.
 </span></code></pre></div>
 <p>The <code>[thinking]</code> line is not decoration. It is the model's own reasoning, printed before it answers,
 because watching the loop is the point: you see what it decided and why, not just the reply it settled

@@ -1429,6 +1429,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#outside-the-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outside the package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#design-principles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1466,6 +1477,17 @@
     <span class="md-ellipsis">
       
         Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
       
     </span>
   </a>
@@ -1540,6 +1562,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#outside-the-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outside the package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#design-principles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1577,6 +1610,17 @@
     <span class="md-ellipsis">
       
         Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
       
     </span>
   </a>
@@ -1624,7 +1668,7 @@ picked up live:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/saxman/aimu<span class="w">    </span><span class="c1"># sibling of kokua/</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras<span class="w">                        </span><span class="c1"># installs ../aimu editable</span>
 </span></code></pre></div>
-<p>A path source is installed without being checked against the <code>aimu&gt;=0.28.0</code> specifier, so a sibling on
+<p>A path source is installed without being checked against the <code>aimu&gt;=0.41.0</code> specifier, so a sibling on
 an older branch is the failure mode to expect. Startup's preflight (<code>kokua.aimu_compat</code>) catches it and
 names the fix rather than failing on an import.</p>
 <p>Without <code>uv</code>:</p>
@@ -1649,7 +1693,17 @@ network, or API keys.</p>
 page nobody can navigate to is indistinguishable from a page that does not exist. Links out of <code>docs/</code>
 must be absolute, in the style of the <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a>
 link under Conventions below, which <code>tests/test_docs.py</code> enforces along with checking that every such
-path still exists.</p>
+path still exists. <code>README.md</code> is held to the same rule throughout, since PyPI renders it as the
+project page, where a relative link has nothing to resolve against.</p>
+<h2 id="outside-the-package">Outside the package<a class="headerlink" href="#outside-the-package" title="Permanent link">&para;</a></h2>
+<p>Two top-level directories are not in the wheel. <code>skills/</code> holds the Agent Skills Kokua ships as content
+rather than Python; <code>kokua skills install</code> copies them into a user's skills folder from a checkout.
+<code>scripts/</code> holds one-off maintenance scripts, run by hand from a checkout, never as an installed
+command. <code>scripts/migrate_subagent_payloads.py</code> moves oversized sub-agent tool responses that an older
+Kokua stored inline in <code>sessions.json</code> out to payload files. Run it with <code>--dry-run</code> first, and <strong>stop
+Kokua before a real run and pass <code>--confirm-kokua-stopped</code></strong>: the script cannot detect a running
+instance, and both writing the same files at once can lose data in a way its backup would not show.
+Its module docstring and <code>--help</code> give the details.</p>
 <h2 id="design-principles">Design principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
 <p>Read <a href="https://saxman.info/kokua/explanation/design-principles/">docs/explanation/design-principles.md</a> first. It opens
 with why Kokua exists, then the six principles that serve it: 1 and 2 keep Kokua readable, 3 and 4 keep
@@ -1733,6 +1787,11 @@ at the package root: entry points and package-data paths point at them.</p>
 </ul>
 <h2 id="pull-requests">Pull requests<a class="headerlink" href="#pull-requests" title="Permanent link">&para;</a></h2>
 <p>One concern per PR. Make sure <code>ruff check</code>, <code>ruff format --check</code>, and <code>pytest</code> pass.</p>
+<h2 id="releases">Releases<a class="headerlink" href="#releases" title="Permanent link">&para;</a></h2>
+<p>A release is a tag. Set <code>version</code> in <code>pyproject.toml</code>, give the top <code>CHANGELOG.md</code> section its date, merge
+to <code>main</code>, then push a tag naming that version (<code>git tag v0.1.0 &amp;&amp; git push origin v0.1.0</code>).
+<code>.github/workflows/release.yml</code> refuses a tag that does not match the version, builds the sdist and
+wheel, and publishes them to PyPI by trusted publishing, so no token is stored anywhere.</p>
 
 
 

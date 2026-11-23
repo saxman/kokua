@@ -2890,7 +2890,9 @@ and step 6 its <em>approval</em> axis:</p>
    (with its holder: a group's name when the holder was loaded, <code>a tool given to this agent directly</code>
    when it is resident). A resident collision is reported: once every startup build is done,
    <code>agents.shadowed_tools</code> reads <code>LiveState.tools_by_toolset</code> and <code>Assistant.start</code> raises one alert per
-   hidden tool. Startup builds the entry agent and every worker reachable from it by <code>delegates_to</code>, so an
+   hidden tool. A resident tool named like one of the agent's core tools (<code>agents.core_tool_names</code>:
+   <code>spawn_subagent</code>, AIMU's loaders, <code>activate_skill</code>, <code>get_message</code>) is dropped at both build sites by
+   <code>agents.without_core_names</code> and reported the same way, so the core tool wins. Startup builds the entry agent and every worker reachable from it by <code>delegates_to</code>, so an
    agent is skipped (and logged at INFO) when any of its resident toolsets was built by no agent. <code>ctx</code> is a
    <code>ToolsetContext</code>: the one process-wide <code>LiveState</code>, this agent's live object (<code>None</code> for a spawned
    worker), and its <code>agent_name</code>, which unlike the object is known at every construction site and is how
@@ -3377,7 +3379,7 @@ result that was gone. The whole turn reacted to it, so the whole turn is rerun.<
 <p>The message is <strong>rebuilt on the server</strong>, from <code>ConversationBook.opening_message</code>, because the page keeps
 neither a turn's images nor its workflow once it has drawn it, and has never held either for a turn
 replayed from history. Text comes from the stored content; images from its <code>image_url</code> blocks, each
-<code>/images/</code> reference resolved back to the file path a typed turn carries (a missing file is dropped); the
+<code>/images/</code> reference resolved back to the file path a typed turn carries (a missing file is dropped, and an alert says how many); the
 workflow from <code>metadata["workflow"]</code>, which <code>record_turn_provenance</code> writes for every workflow turn
 because a workflow turn stores its bare task and <code>trace</code> exists only in verbose planning; and the
 reasoning effort from <code>metadata["thinking"]</code>, turned back into the form a request takes: a level as

@@ -1371,15 +1371,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#010-unreleased" class="md-nav__link">
+  <a href="#010-2026-11-22" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.1.0 (unreleased)
+        0.1.0 (2026-11-22)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.1.0 (unreleased)">
+    <nav class="md-nav" aria-label="0.1.0 (2026-11-22)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1636,15 +1636,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#010-unreleased" class="md-nav__link">
+  <a href="#010-2026-11-22" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.1.0 (unreleased)
+        0.1.0 (2026-11-22)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.1.0 (unreleased)">
+    <nav class="md-nav" aria-label="0.1.0 (2026-11-22)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1865,7 +1865,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 -->
 
 <h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
-<h2 id="010-unreleased">0.1.0 (unreleased)<a class="headerlink" href="#010-unreleased" title="Permanent link">&para;</a></h2>
+<h2 id="010-2026-11-22">0.1.0 (2026-11-22)<a class="headerlink" href="#010-2026-11-22" title="Permanent link">&para;</a></h2>
 <p>First release. Kokua starts from AIMU's <code>examples/personal-assistant/</code> and restructures it into an
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
@@ -1873,6 +1873,11 @@ The pre-release development history is in the git log.</p>
 <p>Requires Python 3.14+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.41.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Published to PyPI</strong> as <code>kokua</code> (<code>uv tool install 'kokua[web]'</code>). A pushed <code>vX.Y.Z</code> tag publishes
+  through <code>.github/workflows/release.yml</code> by trusted publishing, after checking the tag matches
+  <code>pyproject.toml</code>'s version. The bundled skills <code>kokua skills install</code> copies ship with the repository,
+  not the package, so a PyPI install has none until you clone or copy them. Every link in <code>README.md</code>
+  is absolute, because PyPI renders it as the project page.</li>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
   <code>cli</code>), <code>kokua-web</code> is a convenience for <code>kokua --frontend web</code>. Both route through <code>kokua.cli</code>, so
   both run the AIMU preflight described under <a href="#diagnostics-and-error-reporting">Diagnostics</a>.</li>
@@ -2227,7 +2232,8 @@ The pre-release development history is in the git log.</p>
   opening message is resent; anything typed into the turn while it ran is deleted with it. Every
   refusal lands before anything is deleted: a running turn, a turn that is no longer stored, an
   image-only turn whose images are gone from disk, and a turn whose workflow the assistant no longer
-  offers, which would otherwise rerun as a plain turn. The one failure that can follow the delete, a
+  offers, which would otherwise rerun as a plain turn. A turn with text keeps going without any of its
+  images that are gone, and an alert says how many were left out. The one failure that can follow the delete, a
   model client that cannot be built, says that the turn was deleted and not resent. To
   make that last one possible each workflow turn now records its command word under
   <code>metadata["workflow"]</code>; a turn stored before that reruns as a plain turn. The resent turn's bubble
@@ -2755,6 +2761,15 @@ The pre-release development history is in the git log.</p>
   agent. A deferred toolset loaded later keeps whichever tool arrived first, and AIMU's load result names
   the skipped tool and its holder (a group only when the holder was loaded; a resident holder reads
   <code>a tool given to this agent directly</code>).
+- <strong>A resident tool named like a core tool is dropped, and reported.</strong> An MCP server names its tools as
+  it likes, so one can offer <code>spawn_subagent</code>, <code>available_tools</code>, <code>load_tools</code>, <code>activate_skill</code>, or
+  <code>get_message</code>. Each of those belongs to an agent that delegates, defers a toolset, holds skills, or
+  compacts, respectively, and a second tool by that name either stopped a worker from spawning (AIMU
+  refuses to construct it), reached the provider as two same-named tools, or hid the skill catalogue's
+  <code>activate_skill</code>. The core tool now wins on the agent that holds it: the resident one is dropped, and
+  startup alerts <code>{agent}: {tool} from {shadowed!r} is shadowed by a core tool of the same name, so it was
+  dropped.</code> An agent that does not hold that core tool keeps the server's tool
+  (<a href="https://github.com/saxman/kokua/issues/30">#30</a>).
 - <strong>A skill written mid-session reaches workers.</strong> After each <code>author_skill</code>, <code>add_skill_script</code>, or
   <code>update_skill</code>, the registry's skill toolsets are rescanned from disk (every other entry kept as startup
   registered it) and every live agent's <code>spawn_subagent</code> is rebuilt, so the skill reaches an
@@ -3617,8 +3632,9 @@ alone. The case that does cost something is a configured MCP server, which conne
   <code>max_iterations</code> are refused by name with the reason, rather than accepted and ignored: a reviewer's
   tools are fixed in code by whatever consumes it and this table has no key to change them (the
   approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
-  <code>workflows/critics.py</code>), nothing delegates to it, and it runs no tool loop (not so for a plan critic,
-  which loops up to a fixed 6 rounds: see <a href="https://github.com/saxman/kokua/issues/4">#4</a>). The approval reviewer's
+  <code>workflows/critics.py</code>), nothing delegates to it, and its tool-loop cap is fixed in code like its tools
+  (the approval reviewer makes one tool-less call; a plan critic stops after 6 rounds, and
+  <a href="https://github.com/saxman/kokua/issues/8">#8</a> tracks making that configurable). The approval reviewer's
   own tool-less call is also why it cannot recurse into itself. <code>model</code>, <code>thinking</code>, and
   <code>generation</code> resolve against the <code>[assistant]</code> tiers exactly as an agent's do; <code>system_message</code> is
   the one field with no <code>[assistant]</code> tier, because what an undeclared standard means is the consumer's

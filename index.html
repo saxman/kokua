@@ -1583,16 +1583,15 @@ connects to remote tool services, delegates independent subtasks to isolated sub
 its own proactive work, and remembers facts and documents across conversations.</p>
 <p>A toy cannot teach what real work costs, so Kokua does real work. And the machinery is meant to be
 followed rather than taken on faith, so every mechanism above is there to be read, run, and extended.</p>
-<p>Kokua isn't on PyPI; clone the repository and install with <code>uv</code> (Python 3.14+ and
-<a href="https://saxman.info/aimu/">AIMU</a> 0.41.0 or newer):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/saxman/kokua<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>kokua
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras<span class="w"> </span>--no-sources<span class="w">  </span><span class="c1"># AIMU from PyPI; see the README for the sibling-checkout alternative</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kokua<span class="w"> </span>config<span class="w"> </span>init<span class="w">                  </span><span class="c1"># scaffold ~/.kokua/config.toml, every key documented</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kokua<span class="w">                              </span><span class="c1"># chat in the terminal</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kokua<span class="w"> </span>--frontend<span class="w"> </span>web<span class="w">               </span><span class="c1"># or a browser UI at http://127.0.0.1:8000</span>
+<p>Install from PyPI (Python 3.14+; <a href="https://saxman.info/aimu/">AIMU</a> 0.41.0 or newer comes with it):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s1">'kokua[web]'</span><span class="w">       </span><span class="c1"># or: pip install 'kokua[web]'</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kokua<span class="w"> </span>config<span class="w"> </span>init<span class="w">                  </span><span class="c1"># scaffold ~/.kokua/config.toml, every key documented</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kokua<span class="w">                              </span><span class="c1"># chat in the terminal</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>kokua<span class="w"> </span>--frontend<span class="w"> </span>web<span class="w">               </span><span class="c1"># or a browser UI at http://127.0.0.1:8000</span>
 </span></code></pre></div>
-<p>See the <a href="https://github.com/saxman/kokua#install">README's Install section</a> for the full walkthrough,
-including why <code>--no-sources</code> is there.</p>
+<p>To read and change the code as you run it, or to get the bundled skills <code>kokua skills install</code> copies,
+install from a checkout instead; the <a href="https://github.com/saxman/kokua#install">README's Install section</a>
+walks through it.</p>
 <p>Kokua runs as a single user in a single process, and can run code and reach remote services with your
 privileges. See <a href="https://github.com/saxman/kokua#security">security</a>.</p>
 <h2 id="three-ways-in">Three ways in<a class="headerlink" href="#three-ways-in" title="Permanent link">&para;</a></h2>

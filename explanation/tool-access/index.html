@@ -2275,6 +2275,16 @@ shared tool, so a second skill offering it hides nothing. It reads what each too
 agent and every worker reachable from it by <code>delegates_to</code>. So an agent is skipped, and logged at INFO
 rather than reported as clean, when any of its resident toolsets was built by no agent, which is the case
 for an agent nothing delegates to unless every toolset it holds resident is one another agent built.</p>
+<p>A resident tool can also collide with a tool no toolset provides: <code>spawn_subagent</code> on an agent that
+delegates, <code>available_tools</code> and <code>load_tools</code> on an agent that defers something, <code>activate_skill</code> on the
+entry agent once a skill exists, and <code>get_message</code> on a worker whose window engages compaction. An MCP
+server names its tools as it likes, so nothing stops one offering any of these. The core tool always
+wins: the resident one is dropped from that agent's tools, and the same startup check reports it:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>researcher: load_tools from 'files' is shadowed by a core tool of the same name, so it was dropped.
+</span></code></pre></div>
+<p>Without the drop there is no good outcome: AIMU refuses to construct a worker carrying a second
+<code>load_tools</code> or <code>get_message</code>, two tools of one name reach the provider as a rejected request, and a
+server's <code>activate_skill</code> would hide the skill catalogue's.</p>
 <h3 id="what-arrives-mid-session">What arrives mid-session<a class="headerlink" href="#what-arrives-mid-session" title="Permanent link">&para;</a></h3>
 <p><code>"all"</code> means every toolset registered at startup, plus every skill written since. Skills arrive at the
 next spawn; MCP servers arrive at the next restart:</p>
@@ -2407,9 +2417,9 @@ Managed Agents' <code>auto</code>, where the model's verdict stands.</p>
 <p><code>confirm</code> and <code>review</code> are one policy written as two lists, so they are declared or inherited together.
 An agent whose <code>[agents.&lt;name&gt;.tools]</code> table declares neither inherits <code>[assistant.tools]</code>'s pair. An agent that
 declares either one declares its whole policy, and a key it leaves out is empty:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[agents.coder.tools]</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">        </span><span class="c1"># review is now empty, not inherited</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[agents.coder.tools]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">available</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">confirm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"fs_write"</span><span class="p">]</span><span class="w">        </span><span class="c1"># review is now empty, not inherited</span>
 </span></code></pre></div>
 <p>The reason is that inheriting each key independently lets an inherited <code>review</code> entry overlap a declared
 <code>confirm</code> entry, and neither "the declared one wins" nor "merge them" is something a reader could
