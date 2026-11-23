@@ -111,8 +111,10 @@ docs = [
 
 [project.urls]
 Homepage = "https://github.com/saxman/kokua"
+Documentation = "https://saxman.info/kokua/"
 Repository = "https://github.com/saxman/kokua"
-Changelog = "https://github.com/saxman/kokua/blob/main/CHANGELOG.md"
+Issues = "https://github.com/saxman/kokua/issues"
+Changelog = "https://saxman.info/kokua/changelog/"
 
 # `kokua` runs the selected front end (default: cli). `kokua-web` is a convenience for
 # `kokua --frontend web`; both go through `cli` so they share the AIMU preflight (see

@@ -122,3 +122,10 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 ## Pull requests
 
 One concern per PR. Make sure `ruff check`, `ruff format --check`, and `pytest` pass.
+
+## Releases
+
+A release is a tag. Set `version` in `pyproject.toml`, give the top `CHANGELOG.md` section its date, merge
+to `main`, then push a tag naming that version (`git tag v0.1.0 && git push origin v0.1.0`).
+`.github/workflows/release.yml` refuses a tag that does not match the version, builds the sdist and
+wheel, and publishes them to PyPI by trusted publishing, so no token is stored anywhere.

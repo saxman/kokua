@@ -95,6 +95,20 @@ def test_no_links_escape_the_docs_directory():
     )
 
 
+RELATIVE_LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)\s]+)\)")
+
+
+def test_the_readme_links_only_absolute_urls():
+    """README.md is the package's long description, so PyPI renders it on the project page, where a
+    relative link has no repository to resolve against and 404s. The two checks above still validate
+    each absolute link, so writing one costs no checking."""
+    relative = RELATIVE_LINK.findall((REPO_ROOT / "README.md").read_text())
+    assert not relative, (
+        "README.md links must be absolute (https://saxman.info/kokua/<slug>/ for a docs page, "
+        "https://github.com/saxman/kokua/blob/main/<path> for a file):\n" + "\n".join(relative)
+    )
+
+
 def _site_slug_resolves(slug: str) -> bool:
     """Map a saxman.info/kokua/<slug>/ URL back to the page mkdocs builds it from.
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-22)
 
 First release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
@@ -11,6 +11,11 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
 
 ### Package and entry points
 
+- **Published to PyPI** as `kokua` (`uv tool install 'kokua[web]'`). A pushed `vX.Y.Z` tag publishes
+  through `.github/workflows/release.yml` by trusted publishing, after checking the tag matches
+  `pyproject.toml`'s version. The bundled skills `kokua skills install` copies ship with the repository,
+  not the package, so a PyPI install has none until you clone or copy them. Every link in `README.md`
+  is absolute, because PyPI renders it as the project page.
 - `src`-layout `kokua` package with two console scripts: `kokua` runs the selected front end (default
   `cli`), `kokua-web` is a convenience for `kokua --frontend web`. Both route through `kokua.cli`, so
   both run the AIMU preflight described under [Diagnostics](#diagnostics-and-error-reporting).

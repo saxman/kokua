@@ -21,7 +21,12 @@ one instead.
 
 ## Install
 
-Kokua is not on PyPI. Clone the repository and install with `uv`:
+```bash
+uv tool install 'kokua[web]'
+```
+
+These pages link into the source often, so you may prefer a checkout you can read and change as you
+run it:
 
 ```bash
 git clone https://github.com/saxman/kokua && cd kokua
