@@ -634,7 +634,7 @@ button.secondary { background: none; border-color: var(--border); color: var(--f
    edge and every caption on the page forms one column, the way a foldable's `.fold-ts` does. It is
    stamped before the turn's controls exist (the caption when the block is drawn, the controls once the
    turn ends), so DOM order cannot express this and `order` is what does. Nothing is lost by the
-   mismatch: the caption is not focusable, and the two controls keep their relative order, so tab order
+   mismatch: the caption is not focusable, and the turn's controls keep their relative order, so tab order
    still reaches them constructive before destructive. */
 .bubble-meta > .bubble-ts { order: 3; }
 /* The cluster reads, left to right: info (the turn's number), the round button, the branch, retry, and

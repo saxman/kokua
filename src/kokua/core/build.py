@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Collection, Sequence
 
 from aimu import aio
 from aimu.tools import ToolGroup
@@ -208,7 +208,13 @@ def wire_agent(
     """
     # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
     # runs through kokua.core.agents.
-    from kokua.core.agents import available_for, split_by_residency, without_skill_names
+    from kokua.core.agents import (
+        available_for,
+        core_tool_names,
+        split_by_residency,
+        without_core_names,
+        without_skill_names,
+    )
 
     resolvable = without_skill_names(available_for(config, state.registry, agent_name), state.registry)
     toolsets = select(resolvable, state.registry, agent=agent_name, entry_point=config.entry_agent)
@@ -228,6 +234,12 @@ def wire_agent(
         return ToolsetContext(state=state, agent=agent, agent_name=agent_name)
 
     while True:
+        reserved = core_tool_names(
+            config,
+            agent_name,
+            defers=len(loaded) < len(deferred),
+            skills=bool(state.skill_manager.skills),
+        )
         agent = aio.SkillAgent(
             resolved_client,
             tools=[],
@@ -246,8 +258,8 @@ def wire_agent(
                 context,
             ),
         )
-        agent.tools = build_tools(resident, context())
-        failed = _append_preloads(config, state, agent, loaded, context)
+        agent.tools = without_core_names(build_tools(resident, context()), reserved, agent_name)
+        failed = _append_preloads(config, state, agent, loaded, context, reserved)
         if not failed:
             break
         # A group's residency is fixed when the agent is constructed, so a failure means constructing again
@@ -274,14 +286,15 @@ def _append_preloads(
     agent: aio.SkillAgent,
     preloads: Sequence[Toolset],
     context: Callable[[], ToolsetContext],
+    reserved: Collection[str],
 ) -> list[Toolset]:
     """Build each of ``preloads`` and append its tools to ``agent.tools``; return the ones that failed.
 
     A failure is logged rather than alerted (see ``build_deferred``) and is the caller's to act on: the
     agent was constructed with these toolsets marked resident, so leaving one out means constructing it
-    again.
+    again. ``reserved`` is the agent's core tool names (``core_tool_names``), skipped like a held name.
     """
-    taken = {getattr(fn, "__name__", None) for fn in agent.tools} | set(CORE_TOOL_NAMES)
+    taken = {getattr(fn, "__name__", None) for fn in agent.tools} | set(CORE_TOOL_NAMES) | set(reserved)
     failed = []
     for toolset in preloads:
         try:

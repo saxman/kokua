@@ -130,9 +130,10 @@ class ReviewerConfig:
     and none of the three that give an agent reach. What tools a reviewer holds is fixed in code by
     whatever consumes it, and this table has no key to change them: the approval gate asks its reviewer
     with tools off, and a plan critic runs the curated verification toolset
-    ``workflows.critics.REVIEWER_TOOLS``. Nothing delegates to a reviewer, nothing spawns it, and it
-    runs no tool loop, so ``tools``, ``delegates_to``, and ``max_iterations`` are rejected by name at
-    parse time rather than accepted and ignored.
+    ``workflows.critics.REVIEWER_TOOLS``. Nothing delegates to a reviewer and nothing spawns it, and its
+    tool-loop cap is fixed in code like its tools (the approval reviewer makes one tool-less call; a plan
+    critic loops over its verification tools for at most six rounds), so ``tools``, ``delegates_to``, and
+    ``max_iterations`` are rejected by name at parse time rather than accepted and ignored.
 
     The approval reviewer's own call is tool-less (``use_tools=False``), which is the structural reason
     that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be

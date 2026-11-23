@@ -545,9 +545,10 @@ _AGENT_ONLY_REVIEWER_KEYS = {
     "tools": "A reviewer's tools are fixed in code by whatever consumes it, and this table has no key "
     "to change them: the approval reviewer is asked with tools off, and a plan critic gets the curated "
     "verification toolset in workflows/critics.py. Declare an agent instead.",
-    "delegates_to": "A reviewer delegates to nothing: it is one model call, so there is nothing for a "
-    "worker to be part of. Declare an agent instead.",
-    "max_iterations": "A reviewer runs no tool loop, so there is no cap to set. Declare an agent instead.",
+    "delegates_to": "A reviewer delegates to nothing: it answers one question for the code that asked, so "
+    "there is nothing for a worker to be part of. Declare an agent instead.",
+    "max_iterations": "A reviewer's tool-loop cap is fixed in code, like its tools: the approval reviewer "
+    "makes one tool-less call, and a plan critic stops after six rounds. Declare an agent instead.",
 }
 
 

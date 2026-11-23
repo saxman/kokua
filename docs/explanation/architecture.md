@@ -585,7 +585,9 @@ and step 6 its *approval* axis:
    (with its holder: a group's name when the holder was loaded, `a tool given to this agent directly`
    when it is resident). A resident collision is reported: once every startup build is done,
    `agents.shadowed_tools` reads `LiveState.tools_by_toolset` and `Assistant.start` raises one alert per
-   hidden tool. Startup builds the entry agent and every worker reachable from it by `delegates_to`, so an
+   hidden tool. A resident tool named like one of the agent's core tools (`agents.core_tool_names`:
+   `spawn_subagent`, AIMU's loaders, `activate_skill`, `get_message`) is dropped at both build sites by
+   `agents.without_core_names` and reported the same way, so the core tool wins. Startup builds the entry agent and every worker reachable from it by `delegates_to`, so an
    agent is skipped (and logged at INFO) when any of its resident toolsets was built by no agent. `ctx` is a
    `ToolsetContext`: the one process-wide `LiveState`, this agent's live object (`None` for a spawned
    worker), and its `agent_name`, which unlike the object is known at every construction site and is how
@@ -1050,7 +1052,7 @@ result that was gone. The whole turn reacted to it, so the whole turn is rerun.
 The message is **rebuilt on the server**, from `ConversationBook.opening_message`, because the page keeps
 neither a turn's images nor its workflow once it has drawn it, and has never held either for a turn
 replayed from history. Text comes from the stored content; images from its `image_url` blocks, each
-`/images/` reference resolved back to the file path a typed turn carries (a missing file is dropped); the
+`/images/` reference resolved back to the file path a typed turn carries (a missing file is dropped, and an alert says how many); the
 workflow from `metadata["workflow"]`, which `record_turn_provenance` writes for every workflow turn
 because a workflow turn stores its bare task and `trace` exists only in verbose planning; and the
 reasoning effort from `metadata["thinking"]`, turned back into the form a request takes: a level as

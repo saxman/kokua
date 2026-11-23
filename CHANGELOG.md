@@ -362,7 +362,8 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
   opening message is resent; anything typed into the turn while it ran is deleted with it. Every
   refusal lands before anything is deleted: a running turn, a turn that is no longer stored, an
   image-only turn whose images are gone from disk, and a turn whose workflow the assistant no longer
-  offers, which would otherwise rerun as a plain turn. The one failure that can follow the delete, a
+  offers, which would otherwise rerun as a plain turn. A turn with text keeps going without any of its
+  images that are gone, and an alert says how many were left out. The one failure that can follow the delete, a
   model client that cannot be built, says that the turn was deleted and not resent. To
   make that last one possible each workflow turn now records its command word under
   `metadata["workflow"]`; a turn stored before that reruns as a plain turn. The resent turn's bubble
@@ -874,6 +875,15 @@ Requires Python 3.14+ and [AIMU](https://github.com/saxman/aimu) 0.41.0 or newer
   agent. A deferred toolset loaded later keeps whichever tool arrived first, and AIMU's load result names
   the skipped tool and its holder (a group only when the holder was loaded; a resident holder reads
   `a tool given to this agent directly`).
+- **A resident tool named like a core tool is dropped, and reported.** An MCP server names its tools as
+  it likes, so one can offer `spawn_subagent`, `available_tools`, `load_tools`, `activate_skill`, or
+  `get_message`. Each of those belongs to an agent that delegates, defers a toolset, holds skills, or
+  compacts, respectively, and a second tool by that name either stopped a worker from spawning (AIMU
+  refuses to construct it), reached the provider as two same-named tools, or hid the skill catalogue's
+  `activate_skill`. The core tool now wins on the agent that holds it: the resident one is dropped, and
+  startup alerts `{agent}: {tool} from {shadowed!r} is shadowed by a core tool of the same name, so it was
+  dropped.` An agent that does not hold that core tool keeps the server's tool
+  ([#30](https://github.com/saxman/kokua/issues/30)).
 - **A skill written mid-session reaches workers.** After each `author_skill`, `add_skill_script`, or
   `update_skill`, the registry's skill toolsets are rescanned from disk (every other entry kept as startup
   registered it) and every live agent's `spawn_subagent` is rebuilt, so the skill reaches an
@@ -1728,8 +1738,9 @@ alone. The case that does cost something is a configured MCP server, which conne
   `max_iterations` are refused by name with the reason, rather than accepted and ignored: a reviewer's
   tools are fixed in code by whatever consumes it and this table has no key to change them (the
   approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
-  `workflows/critics.py`), nothing delegates to it, and it runs no tool loop (not so for a plan critic,
-  which loops up to a fixed 6 rounds: see [#4](https://github.com/saxman/kokua/issues/4)). The approval reviewer's
+  `workflows/critics.py`), nothing delegates to it, and its tool-loop cap is fixed in code like its tools
+  (the approval reviewer makes one tool-less call; a plan critic stops after 6 rounds, and
+  [#8](https://github.com/saxman/kokua/issues/8) tracks making that configurable). The approval reviewer's
   own tool-less call is also why it cannot recurse into itself. `model`, `thinking`, and
   `generation` resolve against the `[assistant]` tiers exactly as an agent's do; `system_message` is
   the one field with no `[assistant]` tier, because what an undeclared standard means is the consumer's

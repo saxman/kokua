@@ -991,8 +991,8 @@ reader who wrote one was reasoning by analogy from the agents table:
 | Refused | Why |
 | --- | --- |
 | `tools` | whatever consumes a reviewer fixes its tools in code, and this table has no key to change them: the approval gate asks with tools off, and a `/plan` critic gets a curated verification toolset. |
-| `delegates_to` | it is one model call, so there is nothing for a worker to be part of. |
-| `max_iterations` | it runs no tool loop, so there is no cap to set. |
+| `delegates_to` | it answers one question for the code that asked, so there is nothing for a worker to be part of. |
+| `max_iterations` | its cap is fixed in code, like its tools: the approval reviewer makes one tool-less call, and a `/plan` critic stops after six rounds of verification tools ([#8](https://github.com/saxman/kokua/issues/8) tracks making it configurable). |
 
 Declare an agent if you want any of those. The approval reviewer's own call being tool-less is also why
 that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be

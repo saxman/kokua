@@ -219,8 +219,57 @@ class ShadowedTool:
     shadowed: str
 
 
+def core_tool_names(config: AssistantConfig, agent_name: str, *, defers: bool, skills: bool) -> set[str]:
+    """The names of the tools ``agent_name`` will hold that no toolset provides.
+
+    A resident toolset can offer a tool by one of these names (an MCP server names its tools as it
+    likes), and nothing downstream settles the clash well: AIMU refuses to construct a worker carrying a
+    second ``load_tools`` or ``get_message``, a second ``spawn_subagent`` reaches the provider as two
+    tools with one name, and an entry agent's own ``activate_skill`` hides the skill catalogue's. So the
+    builds drop a resident tool by one of these names (:func:`without_core_names`) and
+    :func:`shadowed_tools` reports it, the same outcome trust order gives any other clash: Kokua's wins.
+
+    ``defers`` says whether the agent carries a deferred group, which is what earns AIMU's loaders, and
+    ``skills`` whether the entry agent's ``SkillAgent`` has any skill to offer ``activate_skill`` for. Both
+    are the caller's, because each build site knows them exactly where this function could only guess.
+    ``get_message`` belongs to a spawned worker whose window engages compaction; the entry agent never
+    compacts (see :func:`compaction_for_window`).
+    """
+    names: set[str] = set(CORE_TOOL_NAMES) if defers else set()
+    if config.agents[agent_name].delegates_to:
+        names.add(SPAWN_SUBAGENT_TOOL_NAME)
+    if agent_name == config.entry_agent:
+        if skills:
+            names.add(_ACTIVATE_SKILL)
+    elif compaction_for_window(config.generation_for(agent_name)) is not None:
+        names.add(HISTORY_TOOL_NAME)
+    return names
+
+
+def without_core_names(tools: Sequence[Callable], reserved: Collection[str], agent_name: str) -> list[Callable]:
+    """``tools`` minus any named in ``reserved`` (see :func:`core_tool_names`), each drop logged.
+
+    Logged at INFO rather than alerted: this runs on every build of the agent, and the startup alert from
+    :func:`shadowed_tools` has already told the user once.
+    """
+    kept = []
+    for fn in tools:
+        name = getattr(fn, "__name__", None)
+        if name in reserved:
+            logger.info(
+                "%s: dropped the resident tool %r, which a core tool of the same name replaces.", agent_name, name
+            )
+            continue
+        kept.append(fn)
+    return kept
+
+
 def shadowed_tools(
-    config: AssistantConfig, registry: ToolsetRegistry, tools_by_toolset: Mapping[str, Collection[str]]
+    config: AssistantConfig,
+    registry: ToolsetRegistry,
+    tools_by_toolset: Mapping[str, Collection[str]],
+    *,
+    entry_skills: bool = False,
 ) -> list[ShadowedTool]:
     """Every resident tool a same-named tool from an earlier toolset hides, per declared agent.
 
@@ -237,6 +286,10 @@ def shadowed_tools(
     ``tools_by_toolset`` has no recorded names. Such an agent is skipped and logged at INFO rather than
     reported as shadow-free, and its toolsets are not built just to look, because building has side
     effects. A toolset another agent built still counts, since the record is per toolset, not per agent.
+
+    A tool by one of :func:`core_tool_names` is reported as shadowed by :data:`RESERVED_GATE_NAMESPACE`,
+    since the builds drop it in favor of the core tool. ``entry_skills`` says whether the entry agent has
+    any skill, which is what gives it ``activate_skill``.
     """
     shadows: list[ShadowedTool] = []
     for agent_name in config.agents:
@@ -247,7 +300,9 @@ def shadowed_tools(
         if unbuilt:
             logger.info("Not checking %s for shadowed tools: %s not built at startup.", agent_name, unbuilt)
             continue
-        holder: dict[str, str] = {}
+        defers = bool(loadable_toolsets(config, registry, agent_name))
+        reserved = core_tool_names(config, agent_name, defers=defers, skills=entry_skills)
+        holder: dict[str, str] = dict.fromkeys(reserved, RESERVED_GATE_NAMESPACE)
         for toolset in resident:
             tools = set(tools_by_toolset.get(toolset, ()))
             if is_skill(toolset, registry):
@@ -925,7 +980,8 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # Only the resident toolsets are built here. A deferred one is built by its group, when the
         # worker loads it, and that build goes through `build_tools` too, so recording and approval
         # cover it exactly as they cover a toolset built now.
-        tools = build_tools(resident, make_context())
+        reserved = core_tool_names(config, name, defers=bool(deferred), skills=False)
+        tools = without_core_names(build_tools(resident, make_context()), reserved, name)
         if agent.delegates_to:
             tools = tools + [_spawn_tool(config, state, name)]
         # AIMU reads the first line of a spec's system_message as that agent_type's menu label (see

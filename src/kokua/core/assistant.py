@@ -45,8 +45,7 @@ from kokua.core.auto_approval import resolve_auto_approval
 from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
-from kokua.core.messages import TITLE_MAX, first_user_text
-from kokua.core.transcripts import message_text
+from kokua.core.messages import TITLE_MAX, first_user_text, message_text
 from kokua.core.messaging import EVERYONE, USER
 from kokua.core.subagents import SubagentReporter
 from kokua.core import titles
@@ -57,6 +56,7 @@ from kokua.core.turn_gate import TurnGate
 from kokua.core.turns import TurnRunner
 from kokua.core.turn_registry import TurnInfo, TurnTracker
 from kokua.registry.context import LiveState
+from kokua.registry.registry import RESERVED_GATE_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -414,12 +414,16 @@ class Assistant:
         # toolset offered. Once, here, because a shadow is a fact about the declaration, not about a turn.
         # Guarded per notice, because `_started` is already set: a channel that raises here must not leave
         # scheduled tasks unarmed with a retry of `start` a no-op. A notice is never worth that.
-        for shadow in shadowed_tools(config, state.registry, state.tools_by_toolset):
+        shadows = shadowed_tools(
+            config, state.registry, state.tools_by_toolset, entry_skills=bool(state.skill_manager.skills)
+        )
+        for shadow in shadows:
+            if shadow.kept == RESERVED_GATE_NAMESPACE:
+                reason = "is shadowed by a core tool of the same name, so it was dropped."
+            else:
+                reason = f"is shadowed by {shadow.kept!r} (the earlier resident toolset keeps the name)."
             try:
-                await self._ui.alert(
-                    f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} is shadowed by {shadow.kept!r} "
-                    "(the earlier resident toolset keeps the name)."
-                )
+                await self._ui.alert(f"{shadow.agent}: {shadow.tool} from {shadow.shadowed!r} {reason}")
             except Exception:
                 logger.warning("Could not raise the shadowed-tool notice for %s.", shadow, exc_info=True)
 
@@ -626,7 +630,7 @@ class Assistant:
         What is resent is the opening message alone: messages typed into the turn while it ran steered
         a run that is being discarded. Its images are the stored ``/images/`` references resolved back to
         files, which is what a typed turn carries; one whose file is gone is dropped rather than failing
-        the retry. Its reasoning effort is reused as recorded, turned back into the form a request takes
+        the retry, and an alert says how many were. Its reasoning effort is reused as recorded, turned back into the form a request takes
         (``config.file.thinking_request``): a level as itself, and ``False`` as ``"off"``, which is how
         the composer's "Think: off" is recorded. ``True`` is left out, because no request spells it: it
         was the configured effort, which applies again on its own.
@@ -657,8 +661,10 @@ class Assistant:
         # Only the attached blocks: `transcripts.image_refs_of` also finds a reference mentioned in the
         # text, which the user typed rather than attached.
         image_paths = []
+        attached = 0
         for block in content if isinstance(content, list) else []:
             if isinstance(block, dict) and block.get("type") == "image_url":
+                attached += 1
                 path = images.reference_to_path(self._config.images_path, block.get("image_url", {}).get("url", ""))
                 if path is not None:
                     image_paths.append(str(path))
@@ -675,6 +681,16 @@ class Assistant:
         self._book.agent_for(conversation_id)
         self._ui.begin_catch_up(conversation_id, text, image_paths, token=token)
         self._submit_turn(msg, conversation_id, workflow)
+        dropped = attached - len(image_paths)
+        if dropped:
+            # The retry has already been sent, so a channel that raises here must not make it look failed.
+            try:
+                await self._ui.alert(
+                    f"{dropped} of {attached} images from that turn are no longer on disk, "
+                    "so the retry was sent without them."
+                )
+            except Exception:
+                logger.warning("Could not raise the dropped-images notice for a retry.", exc_info=True)
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""
